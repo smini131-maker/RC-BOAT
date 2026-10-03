@@ -101,6 +101,9 @@ class GuiRecoveryTests(unittest.TestCase):
                 "waypoint_count": 3,
                 "distance_to_waypoint_m": 4.0,
                 "distance_to_route_m": 1.0,
+                "storage_path": "/home/jetson/rcboat/routes.json",
+                "multipath_config_path": "/home/jetson/rcboat/boat_config.json",
+                "selected_route_persisted": True,
             },
             "routes": routes,
             "events": [],
@@ -110,6 +113,41 @@ class GuiRecoveryTests(unittest.TestCase):
         self.assertEqual(self.window.route_combo.currentData(), "training_a")
         self.assertIn("선택한 항로: 훈련 경로 A", self.window.route_status.text())
         self.assertIn("활성 항로: 훈련 경로 B", self.window.route_status.text())
+        self.assertIn("/home/jetson/rcboat/routes.json", self.window.route_storage_status.text())
+        self.assertIn("/home/jetson/rcboat/boat_config.json", self.window.route_storage_status.text())
+
+    def test_multipath_save_waits_for_ack_and_reports_failure(self) -> None:
+        self.window.worker = Mock()
+        self.window.worker.isRunning.return_value = True
+        self.window.worker.send_command.return_value = "multipath-request"
+        self.window.multipath_endpoint.setValue(0.55)
+
+        self.window.apply_multipath()
+
+        self.window.worker.send_command.assert_called_once_with(
+            "SET_MULTIPATH",
+            enabled=True,
+            endpoint_tolerance_m=0.55,
+            off_route_distance_m=8.0,
+            off_route_hold_s=3.0,
+            closer_advantage_m=2.0,
+            switch_cooldown_s=5.0,
+        )
+        self.assertFalse(self.window.multipath_apply.isEnabled())
+        self.assertEqual(self.window._pending_multipath_request, "multipath-request")
+
+        self.window.on_ack(
+            {
+                "type": "ack",
+                "request_id": "multipath-request",
+                "command": "SET_MULTIPATH",
+                "ok": False,
+                "error": "routes config is read-only",
+            }
+        )
+        self.assertTrue(self.window.multipath_apply.isEnabled())
+        self.assertTrue(self.window._multipath_dirty)
+        self.assertIn("저장 실패", self.window.multipath_status.text())
 
     def test_remote_shutdown_sends_neutral_then_auto(self) -> None:
         worker = SSHWorker("example.invalid", 22, "jetson", "temporary")

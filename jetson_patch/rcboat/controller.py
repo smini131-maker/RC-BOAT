@@ -497,6 +497,14 @@ class BoatController:
         result.setdefault("active_route_name", active.name if active else "-")
         result["selected_route_id"] = selected.route_id if selected else ""
         result["selected_route_name"] = selected.name if selected else "-"
+        result["persisted_selected_route_id"] = self.routes.persisted_selected_route_id
+        result["selected_route_persisted"] = bool(
+            selected and selected.route_id == self.routes.persisted_selected_route_id
+        )
+        result["storage_path"] = str(self.routes.route_path)
+        result["multipath_config_path"] = (
+            str(self.settings.config_path) if self.settings.config_path is not None else ""
+        )
         result.setdefault("route_complete", self.routes.route_complete)
         result["load_error"] = self.routes.load_error
         result["multipath"] = self.routes.multipath_settings()

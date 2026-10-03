@@ -87,6 +87,7 @@ class MainWindow(QMainWindow):
         self._syncing_auto_speed = False
         self._multipath_dirty = False
         self._syncing_multipath = False
+        self._pending_multipath_request: str | None = None
         self._remote_keys: set[int] = set()
         self._build_ui()
         self._load_settings()
@@ -248,6 +249,8 @@ class MainWindow(QMainWindow):
         self.route_start_button.clicked.connect(self.start_selected_route)
         reload_button = QPushButton("항로 파일 다시 읽기"); reload_button.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload)); reload_button.clicked.connect(lambda: self.command("RELOAD_ROUTES"))
         self.route_status = QLabel("항로 정보 없음")
+        self.route_storage_status = QLabel("항로 저장 파일: 연결 후 확인")
+        self.route_storage_status.setStyleSheet("color:#8ea4c4; font-size:9pt;")
         controls.addWidget(QLabel("주행 항로")); controls.addWidget(self.route_combo); controls.addWidget(select); controls.addWidget(self.route_start_button); controls.addWidget(reload_button); controls.addStretch(1); controls.addWidget(self.route_status)
         self.route_plot = RoutePlot()
         multipath_box = QGroupBox("Multi-Path 기준 (R11 호환)")
@@ -309,7 +312,7 @@ class MainWindow(QMainWindow):
         record_layout.addWidget(self.route_record_cancel)
         record_layout.addStretch(1)
         record_layout.addWidget(self.route_record_status)
-        layout.addLayout(controls); layout.addWidget(multipath_box); layout.addWidget(record_box); layout.addWidget(self.route_plot, 1)
+        layout.addLayout(controls); layout.addWidget(self.route_storage_status); layout.addWidget(multipath_box); layout.addWidget(record_box); layout.addWidget(self.route_plot, 1)
         return page
 
     @staticmethod
@@ -576,8 +579,10 @@ class MainWindow(QMainWindow):
         self._release_remote_controls(send=False)
         self._pending_mode_request = None
         self._pending_mode_target = None
+        self._pending_multipath_request = None
         self._mode_dirty = False
         self.mode_button.setText("모드 적용")
+        self.multipath_apply.setText("기준 저장 *" if self._multipath_dirty else "기준 저장")
         self.log(f"연결 종료: {reason}")
         self._set_connected(False)
 
@@ -734,7 +739,7 @@ class MainWindow(QMainWindow):
             self.multipath_apply.setText("기준 저장 *")
 
     def apply_multipath(self) -> None:
-        self.command(
+        request_id = self.command(
             "SET_MULTIPATH",
             enabled=self.multipath_enabled.isChecked(),
             endpoint_tolerance_m=self.multipath_endpoint.value(),
@@ -743,6 +748,11 @@ class MainWindow(QMainWindow):
             closer_advantage_m=self.multipath_advantage.value(),
             switch_cooldown_s=self.multipath_cooldown.value(),
         )
+        if request_id is not None:
+            self._pending_multipath_request = request_id
+            self.multipath_apply.setEnabled(False)
+            self.multipath_apply.setText("저장 확인 중...")
+            self.multipath_status.setText("Jetson 설정 파일 저장 결과를 확인하는 중입니다")
 
     def stop_gps_recording(self) -> None:
         self.command("STOP_GPS_RECORDING")
@@ -797,8 +807,13 @@ class MainWindow(QMainWindow):
                 self._request_mode("NAVIGATION")
             if ack.get("command") == "SET_AUTO_CRUISE_PWM":
                 self._auto_speed_dirty = False
-            if ack.get("command") == "SET_MULTIPATH":
+            if (
+                ack.get("command") == "SET_MULTIPATH"
+                and ack.get("request_id") == self._pending_multipath_request
+            ):
+                self._pending_multipath_request = None
                 self._multipath_dirty = False
+                self.multipath_apply.setEnabled(True)
                 self.multipath_apply.setText("기준 저장")
             if ack.get("command") == "STOP_GPS_RECORDING":
                 self.command("RELOAD_ROUTES")
@@ -816,6 +831,15 @@ class MainWindow(QMainWindow):
                 self._pending_mode_request = None
                 self._pending_mode_target = None
                 self._sync_mode_editor(self.current_mode)
+            if (
+                ack.get("command") == "SET_MULTIPATH"
+                and ack.get("request_id") == self._pending_multipath_request
+            ):
+                self._pending_multipath_request = None
+                self._multipath_dirty = True
+                self.multipath_apply.setEnabled(True)
+                self.multipath_apply.setText("기준 저장 *")
+                self.multipath_status.setText(f"저장 실패: {ack.get('error', '알 수 없는 오류')}")
             self.log(f"명령 거부 {ack.get('command')}: {ack.get('error')}")
 
     @staticmethod
@@ -915,6 +939,13 @@ class MainWindow(QMainWindow):
 
         route = state.get("route") or {}
         multipath = route.get("multipath") or {}
+        route_storage_path = str(route.get("storage_path") or "-")
+        multipath_config_path = str(route.get("multipath_config_path") or "-")
+        persisted_mark = "저장됨" if route.get("selected_route_persisted") else "저장 확인 중"
+        self.route_storage_status.setText(
+            f"항로 저장: {route_storage_path} · 선택 항로 {persisted_mark} · "
+            f"Multi-Path 설정: {multipath_config_path}"
+        )
         if multipath and not self._multipath_dirty:
             self._syncing_multipath = True
             try:
@@ -945,11 +976,13 @@ class MainWindow(QMainWindow):
         active_name = route.get("active_route_name", "-")
         route_error = route.get("load_error")
         group_ids = route.get("multipath_group_route_ids") or []
-        self.multipath_status.setText(
-            f"{'ON' if multipath.get('enabled', True) else 'OFF'} · 같은 그룹 {len(group_ids)}개"
-            f" · 대체 {route.get('alternative_route_id') or '-'}"
-            f" · 이탈 지속 {float(route.get('off_route_duration_s') or 0):.1f}s"
-        )
+        if self._pending_multipath_request is None:
+            self.multipath_status.setText(
+                f"{'ON' if multipath.get('enabled', True) else 'OFF'} · 같은 그룹 {len(group_ids)}개"
+                f" · 대체 {route.get('alternative_route_id') or '-'}"
+                f" · 이탈 지속 {float(route.get('off_route_duration_s') or 0):.1f}s"
+                f" · 저장 {multipath_config_path}"
+            )
         self.route_status.setText(
             f"선택한 항로: {selected_name} · 활성 항로: {active_name} · "
             f"지점 {route.get('waypoint_index', 0) + 1}/{route.get('waypoint_count', 0)} · "

@@ -41,11 +41,14 @@ class StaticProjectTests(unittest.TestCase):
         self.assertIn('if [[ ! -f "$TARGET/routes.json" ]]', installer)
         self.assertIn('cp -a "$TARGET/rcboat" "$BACKUP_DIR/rcboat"', installer)
 
-    def test_installer_exposes_jetpack_gpio_to_virtualenv(self) -> None:
+    def test_installer_preserves_direct_i2c_hardware_driver(self) -> None:
         installer = (ROOT / "jetson_backend" / "install_jetson.sh").read_text(encoding="utf-8")
         self.assertIn("venv --system-site-packages", installer)
-        self.assertIn("import Jetson.GPIO", installer)
-        self.assertIn("from adafruit_pca9685 import PCA9685", installer)
+        self.assertIn("DirectLinuxPCA9685", installer)
+        self.assertIn('"$TARGET/rcboat/pca_direct.py"', installer)
+        self.assertNotIn('cp -a "$SOURCE_DIR/rcboat" "$TARGET/"', installer)
+        self.assertNotIn("import Jetson.GPIO", installer)
+        self.assertNotIn("from adafruit_pca9685 import PCA9685", installer)
 
     def test_windows_deployer_uses_a_fresh_remote_directory(self) -> None:
         deployer = (ROOT / "deploy_jetson.ps1").read_text(encoding="utf-8")

@@ -178,6 +178,20 @@ class ControllerTests(unittest.TestCase):
         recorded = next(item for item in saved["routes"] if item["id"] == route_id)
         self.assertEqual(recorded["name"], "실험 기록 항로")
         self.assertEqual(len(recorded["waypoints"]), 2)
+        self.assertEqual(saved["selected_route_id"], route_id)
+        restored = RouteManager(self.routes.route_path)
+        self.assertEqual(restored.selected.route_id, route_id)
+
+    def test_selected_route_is_saved_and_restored_after_daemon_restart(self) -> None:
+        self.routes.select("b")
+
+        saved = json.loads(self.routes.route_path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["selected_route_id"], "b")
+        self.assertEqual(self.routes.persisted_selected_route_id, "b")
+
+        restored = RouteManager(self.routes.route_path)
+        self.assertEqual(restored.selected.route_id, "b")
+        self.assertEqual(restored.active.route_id, "b")
 
     def test_remote_heartbeat_timeout_returns_to_auto_safe(self) -> None:
         self.controller.set_mode("REMOTE")
@@ -308,6 +322,14 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(saved["endpoint_tolerance_m"], 0.55)
         self.assertEqual(saved["off_route_hold_s"], 2.0)
         self.assertEqual(controller.state()["route"]["multipath"]["endpoint_tolerance_m"], 0.55)
+        restored_settings = load_runtime_settings(config_path)
+        restored_routes = RouteManager(self.routes.route_path)
+        restored_controller = BoatController(self.hardware, restored_routes, restored_settings)
+        restored_route_state = restored_controller.state()["route"]
+        self.assertEqual(restored_route_state["multipath"]["endpoint_tolerance_m"], 0.55)
+        self.assertEqual(restored_route_state["multipath"]["off_route_hold_s"], 2.0)
+        self.assertEqual(restored_route_state["multipath_config_path"], str(config_path))
+        self.assertEqual(restored_route_state["storage_path"], str(self.routes.route_path))
         with self.assertRaises(ValueError):
             controller.set_multipath({"endpoint_tolerance_m": 1.01})
 

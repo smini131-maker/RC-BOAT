@@ -1,6 +1,6 @@
-# RCBoat Multi-Path R11 Restore
+# RCBoat Multi-Path R12 Route Persistence Upgrade
 
-이 저장소/폴더는 Jetson RC Boat 현재 운용 버전에 Multi-Path R11 복구 패치를 적용하기 위한 정리본입니다.
+이 저장소/폴더는 Jetson RC Boat의 Multi-Path R11 기능을 유지하면서 선택 항로 저장과 설정 저장 확인을 보강한 R12 패치입니다.
 
 ## 포함된 내용
 

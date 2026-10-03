@@ -1,6 +1,12 @@
-# RCBoat Multi-Path R11 기능 복원 패치
+# RCBoat Multi-Path R12 항로 저장 수정 패치
 
 이 패치는 현재 동작 중인 기능을 유지하면서 다음 기능을 추가·복원합니다.
+
+- 선택한 주행 항로를 `/home/jetson/rcboat/routes.json`에 원자 저장
+- daemon 재시작·항로 다시 읽기 후 저장된 선택 항로 복원
+- GPS 기록 항로 저장 시 해당 항로를 선택 항로로 함께 기록
+- GUI에서 `routes.json`과 `boat_config.json` 실제 저장 경로 표시
+- Multi-Path 기준 저장의 요청 중·성공·실패 상태 확인
 
 - Multi-Path ON/OFF
 - 공통 출발·도착 허용 거리: 기본 0.75 m, 0.10~1.00 m
@@ -45,5 +51,5 @@ RC 입력은 변하지만 CH6가 6450이면 모드/중립 활성화 문제입니
 ## 검증
 
 - Python 문법 검사 통과
-- 백엔드, GUI, Mock 통신 회귀 테스트 53개 통과
+- 백엔드, GUI, Mock 통신 회귀 테스트 55개 통과
 - Direct-I2C 하드웨어 파일 비포함 확인

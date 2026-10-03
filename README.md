@@ -2,7 +2,7 @@
 
 Adventure Design RC Boat project restore package.
 
-This repository contains the RC Boat Multi-Path R11 restore package prepared on 2026-09-30.
+This repository contains the RC Boat Multi-Path R12 route-persistence upgrade prepared on 2026-10-03. It keeps the R11 feature set and fixes route/config persistence without replacing the working Direct-I2C hardware driver.
 
 ## Contents
 
@@ -11,6 +11,8 @@ This repository contains the RC Boat Multi-Path R11 restore package prepared on 
 - `tests/`: regression tests used for the restore package
 - `README_먼저읽기.md`: Korean installation notes
 - `GITHUB_UPLOAD_NOTE.md`: GitHub upload and safety notes
+- `CHANGELOG_ROUTE_PERSIST_R12.md`: R12 route selection and settings-save fixes
+- `TEST_RESULTS_R12.md`: 55-test regression result
 
 ## Important Safety Notes
 
@@ -36,4 +38,3 @@ On Windows:
 ```bat
 BUILD_WINDOWS_EXE.bat
 ```
-

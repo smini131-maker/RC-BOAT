@@ -91,6 +91,7 @@ class RouteManager:
         self.recording_minimum_distance_m = 1.0
         self.recording_minimum_interval_s = 0.5
         self.recording_arrival_radius_m = 3.0
+        self.persisted_selected_route_id = ""
         self.load()
 
     def configure_multipath(self, settings: dict[str, bool | float]) -> None:
@@ -150,6 +151,7 @@ class RouteManager:
             self.routes = []
             self.selected_index = None
             self.active_index = None
+            self.persisted_selected_route_id = ""
             self.waypoint_index = 0
             self._off_route_since = None
             self.route_complete = False
@@ -158,7 +160,17 @@ class RouteManager:
 
         self.routes = routes
         route_ids = [route.route_id for route in routes]
-        selected_id = previous_selected if previous_selected in route_ids else route_ids[0]
+        stored_selected = str(payload.get("selected_route_id", "")).strip()
+        self.persisted_selected_route_id = (
+            stored_selected if stored_selected in route_ids else ""
+        )
+        selected_id = (
+            previous_selected
+            if previous_selected in route_ids
+            else self.persisted_selected_route_id
+            if self.persisted_selected_route_id
+            else route_ids[0]
+        )
         active_id = previous_active if previous_active in route_ids else selected_id
         self.selected_index = route_ids.index(selected_id)
         self.active_index = route_ids.index(active_id)
@@ -184,6 +196,7 @@ class RouteManager:
     def select(self, route_id: str) -> None:
         for idx, route in enumerate(self.routes):
             if route.route_id == route_id:
+                self._persist_selected_route(route_id)
                 self.selected_index = idx
                 self.active_index = idx
                 self.waypoint_index = 0
@@ -192,6 +205,31 @@ class RouteManager:
                 self.route_complete = False
                 return
         raise ValueError(f"unknown route: {route_id}")
+
+    def _persist_selected_route(self, route_id: str) -> None:
+        """Persist the operator-selected route without changing recorded routes."""
+
+        try:
+            payload = json.loads(self.route_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError) as exc:
+            raise RuntimeError(f"routes.json cannot save selected route: {exc}") from exc
+        if not isinstance(payload, dict) or not isinstance(payload.get("routes"), list):
+            raise RuntimeError("routes.json does not contain a routes list")
+        payload["selected_route_id"] = route_id
+        temporary = self.route_path.with_name(f".{self.route_path.name}.tmp")
+        try:
+            temporary.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            os.replace(temporary, self.route_path)
+        except OSError as exc:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise RuntimeError(f"routes.json selected route save failed: {exc}") from exc
+        self.persisted_selected_route_id = route_id
 
     def start_recording(
         self,
@@ -279,6 +317,7 @@ class RouteManager:
                 ],
             }
         )
+        payload["selected_route_id"] = route_id
         temporary = self.route_path.with_name(f".{self.route_path.name}.tmp")
         temporary.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
