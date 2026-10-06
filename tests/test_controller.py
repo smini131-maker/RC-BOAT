@@ -273,9 +273,9 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(piecewise_map(1214, 1214, 1640, 2000, 4900, 6000, 7300), 4900)
         self.assertEqual(piecewise_map(1640, 1214, 1640, 2000, 4900, 6000, 7300), 6000)
         self.assertEqual(piecewise_map(2000, 1214, 1640, 2000, 4900, 6000, 7300), 7300)
-        self.assertEqual(piecewise_map(1106, 1106, 1500, 1786, 7000, 6450, 5800), 7000)
-        self.assertEqual(piecewise_map(1500, 1106, 1500, 1786, 7000, 6450, 5800), 6450)
-        self.assertEqual(piecewise_map(1786, 1106, 1500, 1786, 7000, 6450, 5800), 5800)
+        self.assertEqual(piecewise_map(1106, 1106, 1500, 1786, 5800, 6450, 7000), 5800)
+        self.assertEqual(piecewise_map(1500, 1106, 1500, 1786, 5800, 6450, 7000), 6450)
+        self.assertEqual(piecewise_map(1786, 1106, 1500, 1786, 5800, 6450, 7000), 7000)
 
     def test_manual_throttle_restores_measured_full_forward_output(self) -> None:
         self.hardware.set_rc(1640, 1500)
@@ -286,7 +286,7 @@ class ControllerTests(unittest.TestCase):
         self.hardware.set_rc(1640, 1786)
         self.controller.step(start + 0.32)
         self.assertEqual(self.controller.operation_state, "MANUAL_ACTIVE")
-        self.assertEqual(self.hardware.last_throttle, 5800)
+        self.assertEqual(self.hardware.last_throttle, 7000)
         self.assertEqual(self.controller.state()["manual_throttle_mapping"]["forward_input_us"], 1786)
 
     def test_multi_path_switch_requires_three_seconds_and_two_metre_advantage(self) -> None:

@@ -31,9 +31,9 @@ class ControlValues:
     steering_low_pwm: int = 4900
     steering_center_pwm: int = 6000
     steering_high_pwm: int = 7300
-    throttle_reverse_pwm: int = 7000
+    throttle_reverse_pwm: int = 5800
     throttle_stop_pwm: int = 6450
-    throttle_forward_pwm: int = 5800
+    throttle_forward_pwm: int = 7000
 
     pca_frequency_hz: int = 60
     steering_channel: int = 0
@@ -93,7 +93,9 @@ class RuntimeSettings:
         value = self.mock_nav_throttle_pwm if is_mock else self.nav_throttle_pwm
         if value is None:
             return None
-        if not VALUES.throttle_forward_pwm <= value <= VALUES.throttle_stop_pwm:
+        lower = min(VALUES.throttle_stop_pwm, VALUES.throttle_forward_pwm)
+        upper = max(VALUES.throttle_stop_pwm, VALUES.throttle_forward_pwm)
+        if not lower <= value <= upper:
             raise ValueError(
                 f"navigation throttle must be between {VALUES.throttle_forward_pwm} "
                 f"and {VALUES.throttle_stop_pwm}: {value}"

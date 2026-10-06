@@ -5,7 +5,7 @@
 ## 보존된 안전 기준
 
 - Steering CH0: LOW 4900 / CENTER **6000** / HIGH 7300
-- ESC CH6: REVERSE 7000 / STOP **6450** / FORWARD 5800
+- ESC CH6: REVERSE 5800 / STOP **6450** / FORWARD 7000
 - 모든 오류·통신 실패·비상정지: **Steering 6000 / Throttle 6450**
 - Arduino와 GPS는 `/dev/serial/by-id/` 고정 경로만 사용
 - `hardware.py`를 Blinka 또는 `Jetson.GPIO` 방식으로 바꾸지 않음

@@ -252,7 +252,9 @@ class BoatController:
             steering, VALUES.steering_low_pwm, VALUES.steering_high_pwm
         )
         self.remote_throttle_pwm = clamp(
-            throttle, VALUES.throttle_forward_pwm, VALUES.throttle_reverse_pwm
+            throttle,
+            min(VALUES.throttle_forward_pwm, VALUES.throttle_reverse_pwm),
+            max(VALUES.throttle_forward_pwm, VALUES.throttle_reverse_pwm),
         )
 
     def set_auto_cruise_pwm(self, value: int) -> None:

@@ -49,7 +49,7 @@ class GuiRecoveryTests(unittest.TestCase):
                 self.window,
                 QKeyEvent(QEvent.KeyPress, Qt.Key_A, Qt.NoModifier),
             )
-            self.assertEqual(self.window.remote_throttle.value(), 5800)
+            self.assertEqual(self.window.remote_throttle.value(), 7000)
             self.assertEqual(self.window.remote_steering.value(), 4900)
 
             self.window.eventFilter(
