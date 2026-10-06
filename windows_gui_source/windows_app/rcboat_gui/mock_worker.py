@@ -51,6 +51,16 @@ class MockWorker(QThread):
         self.recording_minimum_distance_m = 1.0
         self.recording_minimum_interval_s = 0.5
         self.recording_arrival_radius_m = 3.0
+        self.gps_data_logging = False
+        self.gps_data_samples = 0
+        self.gps_scenario = "RTK_FIXED"
+        self.rtk_required = False
+        self.gps_max_hdop = 3.0
+        self.ntrip = {
+            "enabled": False, "connected": False, "host": "", "port": 2101,
+            "mountpoint": "", "tls": False, "last_correction_age_s": None,
+            "bytes_received": 0, "reconnect_count": 0, "last_error": "",
+        }
 
     def stop(self) -> None:
         self._stop_requested = True
@@ -170,6 +180,38 @@ class MockWorker(QThread):
                 self.gps_recording = False
                 self.gps_recording_name = ""
                 self.gps_recording_points = []
+            elif command == "START_GPS_LOGGING":
+                if self.gps_data_logging:
+                    raise RuntimeError("GPS data logging is already active")
+                self.gps_data_logging = True
+                self.gps_data_samples = 0
+            elif command == "STOP_GPS_LOGGING":
+                if not self.gps_data_logging:
+                    raise RuntimeError("GPS data logging is not active")
+                self.gps_data_logging = False
+            elif command == "SET_GPS_SETTINGS":
+                self.rtk_required = bool(kwargs.get("rtk_required_for_navigation", self.rtk_required))
+                self.gps_max_hdop = float(kwargs.get("navigation_max_hdop", self.gps_max_hdop))
+            elif command == "CONFIGURE_NTRIP":
+                self.ntrip.update({
+                    "enabled": bool(kwargs.get("enabled", False)),
+                    "connected": bool(kwargs.get("enabled", False)),
+                    "host": str(kwargs.get("host", "")), "port": int(kwargs.get("port", 2101)),
+                    "mountpoint": str(kwargs.get("mountpoint", "")), "tls": bool(kwargs.get("tls", False)),
+                    "last_correction_age_s": 0.2 if kwargs.get("enabled") else None,
+                    "last_error": "",
+                })
+            elif command == "DISABLE_NTRIP":
+                self.ntrip["enabled"] = False
+                self.ntrip["connected"] = False
+                self.ntrip["last_correction_age_s"] = None
+            elif command == "REFRESH_NTRIP":
+                pass
+            elif command == "SIM_SET_GPS_SCENARIO":
+                scenario = str(kwargs.get("scenario", "RTK_FIXED")).upper()
+                if scenario not in {"NO_FIX", "GPS_FIX", "DGPS", "RTK_FLOAT", "RTK_FIXED", "HDOP_BAD", "SATELLITE_LOW", "GPS_STALE"}:
+                    raise ValueError("unknown GPS scenario")
+                self.gps_scenario = scenario
             elif command == "START_HIL":
                 route_id = str(kwargs.get("route_id") or self.selected_route_id)
                 if route_id not in {route["id"] for route in self.routes}:
@@ -252,6 +294,8 @@ class MockWorker(QThread):
             lon = 129.086 + math.cos(t / 20) * 0.00003
             if self.gps_recording and (not self.gps_recording_points or int(t * 2) > len(self.gps_recording_points)):
                 self.gps_recording_points.append({"lat": lat, "lon": lon})
+            if self.gps_data_logging:
+                self.gps_data_samples += 1
             selected = next(route for route in self.routes if route["id"] == self.selected_route_id)
             active = next(route for route in self.routes if route["id"] == self.active_route_id)
             if self.hil_active:
@@ -273,11 +317,14 @@ class MockWorker(QThread):
                     "manual_waiting_for_neutral": False,
                     "auto_cruise_pwm": self.auto_cruise_pwm,
                     "gps_recording": {"active": self.gps_recording, "name": self.gps_recording_name, "point_count": len(self.gps_recording_points), "minimum_distance_m": self.recording_minimum_distance_m, "minimum_interval_s": self.recording_minimum_interval_s, "arrival_radius_m": self.recording_arrival_radius_m},
+                    "gps_logging": {"active": self.gps_data_logging, "file_path": "/home/jetson/rcboat/logs/gps/mock_week6.csv" if self.gps_data_samples else "", "samples": self.gps_data_samples, "started_at": "simulation" if self.gps_data_logging else None},
+                    "ntrip": dict(self.ntrip),
+                    "gps_settings": {"baudrate": 115200, "health_stale_s": 2.0, "navigation_max_hdop": self.gps_max_hdop, "rtk_required_for_navigation": self.rtk_required, "rtk_correction_max_age_s": 10.0},
                     "hil": {"active": self.hil_active, "lat": self.hil_lat, "lon": self.hil_lon, "course_deg": 45.0 if self.hil_active else None},
                     "mock": True,
                     "rc": {"steering_us": 1640 + int(math.sin(t) * 60) if self.arduino_connected else None, "throttle_us": 1500 if self.arduino_connected else None, "age_s": 0.01 if self.arduino_connected else None},
                     "pca": {"frequency_hz": 60, "steering_channel": 0, "throttle_channel": 6, "steering_pwm": self.steering, "throttle_pwm": self.throttle},
-                    "gps": {"fix": self.gps_connected and self.gps_fix, "quality": 4 if self.gps_connected and self.gps_fix else 0, "lat": lat if self.gps_connected and self.gps_fix else None, "lon": lon if self.gps_connected and self.gps_fix else None, "altitude_m": 4.2 if self.gps_connected and self.gps_fix else None, "hdop": 0.8 if self.gps_connected and self.gps_fix else None, "satellites": 18 if self.gps_connected and self.gps_fix else 0, "speed_mps": 1.2 if self.gps_connected and self.gps_fix else 0.0, "course_deg": (t * 8) % 360 if self.gps_connected and self.gps_fix else None, "age_s": 0.02 if self.gps_connected else None, "last_fix_age_s": 0.02 if self.gps_connected and self.gps_fix else None},
+                    "gps": self._gps_telemetry(t, lat, lon),
                     "devices": {"arduino": self.arduino_connected, "gps": self.gps_connected, "pca9685": True},
                     "route": {"selected_route_id": self.selected_route_id, "selected_route_name": selected["name"], "active_route_id": self.active_route_id, "active_route_name": active["name"], "waypoint_index": 0, "waypoint_count": 3, "distance_to_waypoint_m": 5.4, "distance_to_route_m": 1.1, "route_complete": False, "load_error": "", "multipath": dict(self.multipath), "multipath_group_route_ids": [route["id"] for route in self.routes], "alternative_route_id": next((route["id"] for route in self.routes if route["id"] != self.active_route_id), ""), "off_route_duration_s": 0.0},
                     "routes": self.routes,
@@ -287,3 +334,27 @@ class MockWorker(QThread):
             )
             time.sleep(0.1)
         self.disconnected.emit("시뮬레이션이 종료되었습니다")
+
+    def _gps_telemetry(self, t: float, lat: float, lon: float) -> dict[str, Any]:
+        scenario = self.gps_scenario
+        fix = self.gps_connected and self.gps_fix and scenario != "NO_FIX"
+        quality = {"DGPS": 2, "RTK_FLOAT": 5, "RTK_FIXED": 4}.get(scenario, 1 if fix else 0)
+        hdop = 4.5 if scenario == "HDOP_BAD" else 0.8 if fix else None
+        satellites = 5 if scenario == "SATELLITE_LOW" else 18 if fix else 0
+        age = 6.0 if scenario == "GPS_STALE" else 0.02 if self.gps_connected else None
+        status = "STALE" if scenario == "GPS_STALE" else "NO_FIX" if not fix else "BAD" if scenario in {"HDOP_BAD", "SATELLITE_LOW"} else "GOOD"
+        return {
+            "fix": fix, "quality": quality,
+            "fix_label": {0: "NO FIX", 1: "GPS", 2: "DGPS", 4: "RTK FIXED", 5: "RTK FLOAT"}.get(quality, "UNKNOWN"),
+            "lat": lat if fix else None, "lon": lon if fix else None,
+            "altitude_m": 4.2 if fix else None, "hdop": hdop, "pdop": 1.2 if fix else None,
+            "vdop": 1.1 if fix else None, "cno_avg_dbhz": 43.0 if fix else None,
+            "hacc_m": 0.02 if quality == 4 else 0.8 if fix else None,
+            "satellites": satellites, "speed_mps": 1.2 if fix else 0.0,
+            "course_deg": (t * 8) % 360 if fix else None, "utc_time": "12:34:56.00",
+            "age_s": age, "last_fix_age_s": 0.02 if fix else None,
+            "health": {"status": status, "reasons": [f"Satellites {satellites}", f"HDOP {hdop}" if hdop is not None else "No valid GPS position"]},
+            "rtk_state": "RTK_FIXED" if quality == 4 else "RTK_FLOAT" if quality == 5 else "DGPS" if quality == 2 else "NO_RTK",
+            "utm_easting": 508000.0 if fix else None, "utm_northing": 3882000.0 if fix else None,
+            "utm_zone": "52N" if fix else None, "parser_error_count": 0,
+        }

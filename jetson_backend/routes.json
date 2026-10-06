@@ -1,0 +1,15 @@
+{
+  "selected_route_id": "training_a",
+  "routes": [
+    {
+      "id": "training_a",
+      "name": "훈련 경로 A",
+      "arrival_radius_m": 3.0,
+      "waypoints": [
+        {"lat": 35.078, "lon": 129.086},
+        {"lat": 35.07812, "lon": 129.08615},
+        {"lat": 35.07824, "lon": 129.0863}
+      ]
+    }
+  ]
+}

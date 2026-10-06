@@ -1,0 +1,20 @@
+{
+  "auto_cruise_pwm": 6650,
+  "mock_nav_throttle_pwm": 6200,
+  "reconnect_interval_s": 1.0,
+  "multipath": {
+    "enabled": true,
+    "endpoint_tolerance_m": 0.75,
+    "off_route_distance_m": 8.0,
+    "off_route_hold_s": 3.0,
+    "closer_advantage_m": 2.0,
+    "switch_cooldown_s": 5.0
+  },
+  "gps": {
+    "baudrate": 115200,
+    "health_stale_s": 2.0,
+    "navigation_max_hdop": 3.0,
+    "rtk_required_for_navigation": false,
+    "rtk_correction_max_age_s": 10.0
+  }
+}

@@ -129,6 +129,34 @@ class ControlServer:
                 self.controller.stop_gps_recording(save=False)
             elif command == "CANCEL_ROUTE_RECORDING":
                 self.controller.stop_gps_recording(save=False)
+            elif command == "START_GPS_LOGGING":
+                path = self.controller.start_gps_data_logging()
+                return {
+                    "type": "ack", "request_id": request_id, "command": command,
+                    "ok": True, "file_path": path,
+                }
+            elif command == "STOP_GPS_LOGGING":
+                path = self.controller.stop_gps_data_logging()
+                return {
+                    "type": "ack", "request_id": request_id, "command": command,
+                    "ok": True, "file_path": path,
+                }
+            elif command == "SET_GPS_SETTINGS":
+                values = {key: msg[key] for key in (
+                    "health_stale_s", "navigation_max_hdop",
+                    "rtk_required_for_navigation", "rtk_correction_max_age_s",
+                ) if key in msg}
+                self.controller.set_gps_settings(values)
+            elif command == "CONFIGURE_NTRIP":
+                values = {key: msg[key] for key in (
+                    "enabled", "host", "port", "mountpoint", "username", "password",
+                    "tls", "timeout_s", "gga_interval_s",
+                ) if key in msg}
+                self.controller.configure_ntrip(values)
+            elif command == "DISABLE_NTRIP":
+                self.controller.configure_ntrip({"enabled": False})
+            elif command == "REFRESH_NTRIP":
+                pass
             elif command == "START_HIL":
                 route_id = msg.get("route_id")
                 self.controller.start_hil(None if route_id is None else str(route_id))

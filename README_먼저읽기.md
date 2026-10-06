@@ -1,4 +1,6 @@
-# RCBoat Multi-Path R12 항로 저장 수정 패치
+# RCBoat Multi-Path R12 + Week6 GPS/RTK 패치
+
+이 버전은 R12 항로 저장 기능을 유지하면서 GPS Health, 상세 CSV 로그, NTRIP/RTCM, RTK 상태, 선택형 RTK 항법 Gate를 추가합니다. 안전 PWM은 조향 6000 / 스로틀 6450 그대로입니다.
 
 이 패치는 현재 동작 중인 기능을 유지하면서 다음 기능을 추가·복원합니다.
 
@@ -30,6 +32,10 @@ cd jetson_patch
 chmod +x install_patch.sh
 ./install_patch.sh
 ```
+
+적용 후 GUI의 `GPS · RTK` 탭에서 GPS Health와 NTRIP 상태를 확인합니다. 실제 NTRIP 발급 정보가 없다면 기본 비활성 상태로 두어도 기존 일반 GPS 항법과 나머지 모드는 정상 동작합니다.
+
+GPS 데이터 로그는 `/home/jetson/rcboat/logs/gps/`에 저장되며 기존 `routes.json` 항로 기록과 별도입니다. NTRIP 실제 비밀번호는 `/home/jetson/rcboat/.ntrip.env`에만 저장되고 GitHub에는 올라가지 않습니다.
 
 설치기는 서비스 정지, 대상 4개 파일 백업, Direct-I2C 확인, 문법 검사, 파일 교체, 서비스 재시작과 상태 확인을 수행합니다. 기존 `routes.json`, `boat_config.json`, `hardware.py`, `pca_direct.py`는 덮지 않습니다.
 

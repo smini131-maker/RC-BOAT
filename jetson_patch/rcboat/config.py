@@ -82,6 +82,11 @@ class RuntimeSettings:
     multipath_off_route_hold_s: float = 3.0
     multipath_closer_advantage_m: float = 2.0
     multipath_switch_cooldown_s: float = 5.0
+    gps_baudrate: int = 115200
+    gps_health_stale_s: float = 2.0
+    gps_navigation_max_hdop: float = 3.0
+    rtk_required_for_navigation: bool = False
+    rtk_correction_max_age_s: float = 10.0
     config_path: Path | None = field(default=None, repr=False, compare=False)
 
     def navigation_throttle(self, is_mock: bool) -> int | None:
@@ -171,11 +176,57 @@ class RuntimeSettings:
             setattr(self, f"multipath_{key}", value)
         return checked
 
+    def gps_settings(self) -> dict[str, bool | float | int]:
+        if self.gps_baudrate <= 0:
+            raise ValueError("gps_baudrate must be positive")
+        if not 0.5 <= self.gps_health_stale_s <= 30.0:
+            raise ValueError("gps_health_stale_s must be between 0.5 and 30")
+        if not 0.5 <= self.gps_navigation_max_hdop <= 20.0:
+            raise ValueError("gps_navigation_max_hdop must be between 0.5 and 20")
+        if not 1.0 <= self.rtk_correction_max_age_s <= 120.0:
+            raise ValueError("rtk_correction_max_age_s must be between 1 and 120")
+        return {
+            "baudrate": int(self.gps_baudrate),
+            "health_stale_s": float(self.gps_health_stale_s),
+            "navigation_max_hdop": float(self.gps_navigation_max_hdop),
+            "rtk_required_for_navigation": bool(self.rtk_required_for_navigation),
+            "rtk_correction_max_age_s": float(self.rtk_correction_max_age_s),
+        }
+
+    def save_gps_settings(self, values: dict[str, Any]) -> dict[str, bool | float | int]:
+        allowed = {
+            "health_stale_s", "navigation_max_hdop",
+            "rtk_required_for_navigation", "rtk_correction_max_age_s",
+        }
+        unknown = set(values) - allowed
+        if unknown:
+            raise ValueError(f"unknown GPS setting: {sorted(unknown)[0]}")
+        if "health_stale_s" in values:
+            self.gps_health_stale_s = float(values["health_stale_s"])
+        if "navigation_max_hdop" in values:
+            self.gps_navigation_max_hdop = float(values["navigation_max_hdop"])
+        if "rtk_required_for_navigation" in values:
+            self.rtk_required_for_navigation = bool(values["rtk_required_for_navigation"])
+        if "rtk_correction_max_age_s" in values:
+            self.rtk_correction_max_age_s = float(values["rtk_correction_max_age_s"])
+        checked = self.gps_settings()
+        if self.config_path is None:
+            raise RuntimeError("boat_config.json path is unavailable")
+        payload: dict[str, Any] = json.loads(self.config_path.read_text(encoding="utf-8"))
+        current = payload.get("gps") if isinstance(payload.get("gps"), dict) else {}
+        current.update(checked)
+        payload["gps"] = current
+        temporary = self.config_path.with_name(f".{self.config_path.name}.tmp")
+        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.replace(temporary, self.config_path)
+        return checked
+
 
 def load_runtime_settings(path: str | Path) -> RuntimeSettings:
     config_path = Path(path)
     payload = json.loads(config_path.read_text(encoding="utf-8"))
     multipath = payload.get("multipath") if isinstance(payload.get("multipath"), dict) else {}
+    gps = payload.get("gps") if isinstance(payload.get("gps"), dict) else {}
     settings = RuntimeSettings(
         nav_throttle_pwm=(
             None if payload.get("nav_throttle_pwm") is None else int(payload["nav_throttle_pwm"])
@@ -189,8 +240,14 @@ def load_runtime_settings(path: str | Path) -> RuntimeSettings:
         multipath_off_route_hold_s=float(multipath.get("off_route_hold_s", MULTIPATH_DEFAULTS["off_route_hold_s"])),
         multipath_closer_advantage_m=float(multipath.get("closer_advantage_m", MULTIPATH_DEFAULTS["closer_advantage_m"])),
         multipath_switch_cooldown_s=float(multipath.get("switch_cooldown_s", MULTIPATH_DEFAULTS["switch_cooldown_s"])),
+        gps_baudrate=int(gps.get("baudrate", 115200)),
+        gps_health_stale_s=float(gps.get("health_stale_s", VALUES.gps_stale_timeout_s)),
+        gps_navigation_max_hdop=float(gps.get("navigation_max_hdop", 3.0)),
+        rtk_required_for_navigation=bool(gps.get("rtk_required_for_navigation", False)),
+        rtk_correction_max_age_s=float(gps.get("rtk_correction_max_age_s", 10.0)),
         config_path=config_path,
     )
     settings.validate_auto_cruise_pwm()
     settings.multipath_settings()
+    settings.gps_settings()
     return settings

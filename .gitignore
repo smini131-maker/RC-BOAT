@@ -9,4 +9,7 @@ dist/
 *.log
 maintenance/runtime/
 maintenance/artifacts/
-
+.ntrip.env
+ntrip.env
+logs/gps/
+gps_*.csv

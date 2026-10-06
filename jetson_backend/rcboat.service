@@ -1,0 +1,15 @@
+[Unit]
+Description=RC Boat exclusive control daemon
+After=network-online.target
+
+[Service]
+Type=simple
+User=jetson
+WorkingDirectory=/home/jetson/rcboat
+EnvironmentFile=-/home/jetson/rcboat/.ntrip.env
+ExecStart=/home/jetson/rcboat/.venv/bin/python /home/jetson/rcboat/rcboat_daemon.py --config /home/jetson/rcboat/boat_config.json --routes /home/jetson/rcboat/routes.json
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

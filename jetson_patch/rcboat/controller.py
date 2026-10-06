@@ -7,8 +7,13 @@ from types import SimpleNamespace
 from typing import Any
 
 from .config import RuntimeSettings, VALUES
+from .gps_health import GpsHealthThresholds, evaluate_gps_health, navigation_gate_reason
+from .gps_logger import GpsCsvLogger
 from .hardware import BaseHardware
+from .gps_runtime import install_hardware_extension
 from .navigation import RouteManager, angle_error_deg, bearing_deg, haversine_m
+
+install_hardware_extension()
 
 LOG = logging.getLogger("rcboat.controller")
 
@@ -61,7 +66,84 @@ class BoatController:
         self._events: list[dict[str, Any]] = []
         self.started_monotonic = time.monotonic()
         self._navigation_route_prepared = False
+        self.gps_logger = GpsCsvLogger(self.routes.route_path.parent / "logs" / "gps")
+        self._last_logged_gps_update = 0.0
         self.routes.configure_multipath(self.settings.multipath_settings())
+
+    def _ntrip_state(self) -> dict[str, Any]:
+        status = getattr(self.hardware, "ntrip_status", None)
+        if callable(status):
+            return status()
+        return {
+            "enabled": False, "connected": False, "host": "", "port": 2101,
+            "mountpoint": "", "tls": False, "last_correction_age_s": None,
+            "bytes_received": 0, "reconnect_count": 0, "last_error": "",
+        }
+
+    def _gps_data(self, snap: Any, now: float | None = None) -> dict[str, Any]:
+        now = time.monotonic() if now is None else now
+        quality = int(getattr(snap, "gps_quality", 0) or 0)
+        result: dict[str, Any] = {
+            "connected": bool(getattr(snap, "gps_connected", False)),
+            "fix": bool(getattr(snap, "gps_fix", False)),
+            "fix_quality": quality,
+            "fix_label": {0: "NO FIX", 1: "GPS", 2: "DGPS", 4: "RTK FIXED", 5: "RTK FLOAT"}.get(quality, f"FIX {quality}"),
+            "latitude": getattr(snap, "gps_lat", None),
+            "longitude": getattr(snap, "gps_lon", None),
+            "altitude_m": getattr(snap, "gps_altitude_m", None),
+            "satellites": int(getattr(snap, "gps_satellites", 0) or 0),
+            "hdop": getattr(snap, "gps_hdop", None),
+            "pdop": None, "vdop": None, "cno_avg_dbhz": None, "hacc_m": None,
+            "speed_mps": float(getattr(snap, "gps_speed_mps", 0.0) or 0.0),
+            "course_deg": getattr(snap, "gps_course_deg", None),
+            "utc_time": None,
+            "last_update_monotonic": float(getattr(snap, "gps_last_update", 0.0) or 0.0),
+            "last_valid_fix_monotonic": float(getattr(snap, "gps_last_fix", 0.0) or 0.0),
+            "parser_error_count": 0,
+            "rtk_state": "RTK_FIXED" if quality == 4 else "RTK_FLOAT" if quality == 5 else "DGPS" if quality == 2 else "NO_RTK",
+            "utm_easting": None, "utm_northing": None, "utm_zone": None,
+        }
+        provider = getattr(self.hardware, "week6_gps_snapshot", None)
+        if callable(provider) and not (self.hil_enabled and isinstance(snap, SimpleNamespace)):
+            result.update(provider())
+        ntrip = self._ntrip_state()
+        thresholds = GpsHealthThresholds(stale_s=self.settings.gps_health_stale_s)
+        health = evaluate_gps_health(
+            result,
+            connected=bool(result.get("connected")),
+            now=now,
+            correction_age_s=ntrip.get("last_correction_age_s"),
+            thresholds=thresholds,
+        )
+        result["health"] = health
+        result["age_s"] = health.get("age_s")
+        last_fix = float(result.get("last_valid_fix_monotonic") or 0.0)
+        result["last_fix_age_s"] = max(0.0, now - last_fix) if last_fix > 0 else None
+        return result
+
+    def start_gps_data_logging(self) -> str:
+        path = self.gps_logger.start()
+        self._last_logged_gps_update = 0.0
+        self._event("INFO", f"GPS data logging started: {path}")
+        return path
+
+    def stop_gps_data_logging(self) -> str:
+        path = self.gps_logger.stop()
+        self._event("INFO", f"GPS data logging stopped: {path}")
+        return path
+
+    def configure_ntrip(self, values: dict[str, Any]) -> dict[str, Any]:
+        configure = getattr(self.hardware, "configure_ntrip", None)
+        if not callable(configure):
+            raise RuntimeError("NTRIP is unavailable on this hardware runtime")
+        status = configure(values)
+        self._event("INFO", "NTRIP configuration updated without exposing the password")
+        return status
+
+    def set_gps_settings(self, values: dict[str, Any]) -> dict[str, bool | float | int]:
+        checked = self.settings.save_gps_settings(values)
+        self._event("INFO", f"GPS safety settings saved: {checked}")
+        return checked
 
     def _event(self, level: str, message: str) -> None:
         item = {"timestamp": time.time(), "level": level, "message": message}
@@ -324,13 +406,20 @@ class BoatController:
                 self._gesture_since = None
 
     def _navigation_output(self, snap: Any, now: float) -> tuple[int, int]:
-        if not snap.gps_connected or not snap.gps_fix or snap.gps_lat is None or snap.gps_lon is None:
+        gps_data = self._gps_data(snap, now)
+        ntrip = self._ntrip_state()
+        gate = navigation_gate_reason(
+            gps_data,
+            gps_data["health"],
+            connected=bool(gps_data.get("connected")),
+            hdop_max=self.settings.gps_navigation_max_hdop,
+            rtk_required=self.settings.rtk_required_for_navigation,
+            correction_age_s=ntrip.get("last_correction_age_s"),
+            correction_max_s=self.settings.rtk_correction_max_age_s,
+        )
+        if gate:
             self.operation_state = "NAVIGATION_WAITING_GPS"
-            self.failsafe_reason = "GPS_NO_FIX"
-            return VALUES.steering_center_pwm, VALUES.throttle_stop_pwm
-        if now - snap.gps_last_update > VALUES.gps_stale_timeout_s:
-            self.operation_state = "NAVIGATION_WAITING_GPS"
-            self.failsafe_reason = "GPS_STALE"
+            self.failsafe_reason = gate
             return VALUES.steering_center_pwm, VALUES.throttle_stop_pwm
         active_route = self.routes.active
         if not self.routes.routes or active_route is None or not active_route.points:
@@ -400,8 +489,11 @@ class BoatController:
         values.update(
             gps_connected=True,
             gps_fix=True,
+            gps_quality=4,
             gps_lat=position[0],
             gps_lon=position[1],
+            gps_satellites=max(8, int(getattr(snap, "gps_satellites", 0) or 0)),
+            gps_hdop=getattr(snap, "gps_hdop", None) or 0.8,
             gps_course_deg=course,
             gps_last_update=now,
             gps_last_fix=now,
@@ -412,6 +504,7 @@ class BoatController:
         now = time.monotonic() if now is None else now
         try:
             snap = self.hardware.snapshot()
+            gps_data = self._gps_data(snap, now)
             if (
                 self.routes.recording
                 and snap.gps_connected
@@ -421,6 +514,27 @@ class BoatController:
                 and now - snap.gps_last_update <= VALUES.gps_stale_timeout_s
             ):
                 self.routes.record_position((snap.gps_lat, snap.gps_lon), now)
+            update_at = float(gps_data.get("last_update_monotonic") or 0.0)
+            if self.gps_logger.active and update_at > self._last_logged_gps_update:
+                ntrip = self._ntrip_state()
+                active = self.routes.active
+                self.gps_logger.write({
+                    "utc_time": gps_data.get("utc_time"),
+                    "latitude": gps_data.get("latitude"), "longitude": gps_data.get("longitude"),
+                    "altitude_m": gps_data.get("altitude_m"), "fix_quality": gps_data.get("fix_quality"),
+                    "fix_label": gps_data.get("fix_label"), "satellites": gps_data.get("satellites"),
+                    "hdop": gps_data.get("hdop"), "pdop": gps_data.get("pdop"), "vdop": gps_data.get("vdop"),
+                    "speed_mps": gps_data.get("speed_mps"), "course_deg": gps_data.get("course_deg"),
+                    "cno_avg_dbhz": gps_data.get("cno_avg_dbhz"), "hacc_m": gps_data.get("hacc_m"),
+                    "rtk_state": gps_data.get("rtk_state"),
+                    "rtk_correction_age_s": ntrip.get("last_correction_age_s"),
+                    "gps_health": gps_data.get("health", {}).get("status"),
+                    "active_route_id": active.route_id if active else "",
+                    "navigation_state": self.operation_state,
+                    "utm_easting": gps_data.get("utm_easting"), "utm_northing": gps_data.get("utm_northing"),
+                    "utm_zone": gps_data.get("utm_zone"),
+                })
+                self._last_logged_gps_update = update_at
             if self.estop:
                 self.return_to_auto("EMERGENCY_STOP", log=False)
                 self.operation_state = "EMERGENCY_STOP"
@@ -512,6 +626,8 @@ class BoatController:
 
     def state(self) -> dict[str, Any]:
         snap = self.hardware.snapshot()
+        gps_data = self._gps_data(snap)
+        ntrip = self._ntrip_state()
         navigation_active = self.operation_state == "NAVIGATION_ACTIVE"
         return {
             "type": "telemetry",
@@ -534,6 +650,9 @@ class BoatController:
                 "forward_pwm": VALUES.throttle_forward_pwm,
             },
             "gps_recording": self.routes.recording_state(),
+            "gps_logging": self.gps_logger.state(),
+            "ntrip": ntrip,
+            "gps_settings": self.settings.gps_settings(),
             "hil": {
                 "active": self.hil_enabled,
                 "lat": self._hil_position[0] if self._hil_position else None,
@@ -554,25 +673,19 @@ class BoatController:
                 "throttle_pwm": self.throttle_pwm,
             },
             "gps": {
-                "fix": snap.gps_fix,
-                "quality": snap.gps_quality,
-                "lat": snap.gps_lat,
-                "lon": snap.gps_lon,
-                "satellites": snap.gps_satellites,
-                "altitude_m": snap.gps_altitude_m,
-                "hdop": snap.gps_hdop,
-                "speed_mps": snap.gps_speed_mps,
-                "course_deg": snap.gps_course_deg,
-                "age_s": (
-                    round(max(0.0, time.monotonic() - snap.gps_last_update), 3)
-                    if snap.gps_last_update > 0
-                    else None
-                ),
-                "last_fix_age_s": (
-                    round(max(0.0, time.monotonic() - snap.gps_last_fix), 3)
-                    if snap.gps_last_fix > 0
-                    else None
-                ),
+                "fix": gps_data.get("fix"), "quality": gps_data.get("fix_quality"),
+                "fix_label": gps_data.get("fix_label"), "lat": gps_data.get("latitude"),
+                "lon": gps_data.get("longitude"), "satellites": gps_data.get("satellites"),
+                "altitude_m": gps_data.get("altitude_m"), "hdop": gps_data.get("hdop"),
+                "pdop": gps_data.get("pdop"), "vdop": gps_data.get("vdop"),
+                "cno_avg_dbhz": gps_data.get("cno_avg_dbhz"), "hacc_m": gps_data.get("hacc_m"),
+                "speed_mps": gps_data.get("speed_mps"), "course_deg": gps_data.get("course_deg"),
+                "utc_time": gps_data.get("utc_time"), "age_s": gps_data.get("age_s"),
+                "last_fix_age_s": gps_data.get("last_fix_age_s"),
+                "health": gps_data.get("health"), "rtk_state": gps_data.get("rtk_state"),
+                "parser_error_count": gps_data.get("parser_error_count"),
+                "utm_easting": gps_data.get("utm_easting"), "utm_northing": gps_data.get("utm_northing"),
+                "utm_zone": gps_data.get("utm_zone"),
             },
             "devices": {
                 "arduino": snap.arduino_connected,
@@ -593,4 +706,9 @@ class BoatController:
         except Exception as exc:
             self._event("ERROR", f"Safe PWM write during shutdown failed: {exc}")
         finally:
-            self.hardware.close()
+            try:
+                self.gps_logger.close()
+            except Exception as exc:
+                self._event("ERROR", f"GPS log close during shutdown failed: {exc}")
+            finally:
+                self.hardware.close()
