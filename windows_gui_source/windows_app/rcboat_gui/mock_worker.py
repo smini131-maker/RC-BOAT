@@ -54,7 +54,7 @@ class MockWorker(QThread):
         self.gps_data_logging = False
         self.gps_data_samples = 0
         self.gps_scenario = "RTK_FIXED"
-        self.rtk_required = False
+        self.rtk_fallback_to_gps = True
         self.gps_max_hdop = 3.0
         self.ntrip = {
             "enabled": False, "connected": False, "host": "", "port": 2101,
@@ -190,7 +190,9 @@ class MockWorker(QThread):
                     raise RuntimeError("GPS data logging is not active")
                 self.gps_data_logging = False
             elif command == "SET_GPS_SETTINGS":
-                self.rtk_required = bool(kwargs.get("rtk_required_for_navigation", self.rtk_required))
+                self.rtk_fallback_to_gps = bool(
+                    kwargs.get("rtk_fallback_to_gps", self.rtk_fallback_to_gps)
+                )
                 self.gps_max_hdop = float(kwargs.get("navigation_max_hdop", self.gps_max_hdop))
             elif command == "CONFIGURE_NTRIP":
                 self.ntrip.update({
@@ -319,7 +321,7 @@ class MockWorker(QThread):
                     "gps_recording": {"active": self.gps_recording, "name": self.gps_recording_name, "point_count": len(self.gps_recording_points), "minimum_distance_m": self.recording_minimum_distance_m, "minimum_interval_s": self.recording_minimum_interval_s, "arrival_radius_m": self.recording_arrival_radius_m},
                     "gps_logging": {"active": self.gps_data_logging, "file_path": "/home/jetson/rcboat/logs/gps/mock_week6.csv" if self.gps_data_samples else "", "samples": self.gps_data_samples, "started_at": "simulation" if self.gps_data_logging else None},
                     "ntrip": dict(self.ntrip),
-                    "gps_settings": {"baudrate": 115200, "health_stale_s": 2.0, "navigation_max_hdop": self.gps_max_hdop, "rtk_required_for_navigation": self.rtk_required, "rtk_correction_max_age_s": 10.0},
+                    "gps_settings": {"baudrate": 115200, "health_stale_s": 2.0, "navigation_max_hdop": self.gps_max_hdop, "rtk_required_for_navigation": not self.rtk_fallback_to_gps, "rtk_fallback_to_gps": self.rtk_fallback_to_gps, "rtk_correction_max_age_s": 10.0},
                     "hil": {"active": self.hil_active, "lat": self.hil_lat, "lon": self.hil_lon, "course_deg": 45.0 if self.hil_active else None},
                     "mock": True,
                     "rc": {"steering_us": 1640 + int(math.sin(t) * 60) if self.arduino_connected else None, "throttle_us": 1500 if self.arduino_connected else None, "age_s": 0.01 if self.arduino_connected else None},
@@ -343,6 +345,8 @@ class MockWorker(QThread):
         satellites = 5 if scenario == "SATELLITE_LOW" else 18 if fix else 0
         age = 6.0 if scenario == "GPS_STALE" else 0.02 if self.gps_connected else None
         status = "STALE" if scenario == "GPS_STALE" else "NO_FIX" if not fix else "BAD" if scenario in {"HDOP_BAD", "SATELLITE_LOW"} else "GOOD"
+        rtk_fixed = quality == 4 and bool(self.ntrip.get("connected"))
+        fallback_active = fix and not rtk_fixed
         return {
             "fix": fix, "quality": quality,
             "fix_label": {0: "NO FIX", 1: "GPS", 2: "DGPS", 4: "RTK FIXED", 5: "RTK FLOAT"}.get(quality, "UNKNOWN"),
@@ -353,8 +357,10 @@ class MockWorker(QThread):
             "satellites": satellites, "speed_mps": 1.2 if fix else 0.0,
             "course_deg": (t * 8) % 360 if fix else None, "utc_time": "12:34:56.00",
             "age_s": age, "last_fix_age_s": 0.02 if fix else None,
-            "health": {"status": status, "reasons": [f"Satellites {satellites}", f"HDOP {hdop}" if hdop is not None else "No valid GPS position"]},
+            "health": {"status": status, "navigation_status": status, "rtk_status": "GOOD" if rtk_fixed else "UNAVAILABLE", "reasons": [f"Satellites {satellites}", f"HDOP {hdop}" if hdop is not None else "No valid GPS position"]},
             "rtk_state": "RTK_FIXED" if quality == 4 else "RTK_FLOAT" if quality == 5 else "DGPS" if quality == 2 else "NO_RTK",
+            "rtk_fallback_active": fallback_active,
+            "navigation_fix_mode": "RTK_FIXED" if rtk_fixed else "GPS_FALLBACK" if fix else "NO_FIX",
             "utm_easting": 508000.0 if fix else None, "utm_northing": 3882000.0 if fix else None,
             "utm_zone": "52N" if fix else None, "parser_error_count": 0,
         }

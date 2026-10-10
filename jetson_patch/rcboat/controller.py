@@ -116,6 +116,18 @@ class BoatController:
             thresholds=thresholds,
         )
         result["health"] = health
+        correction_age = ntrip.get("last_correction_age_s")
+        correction_fresh = (
+            correction_age is not None
+            and float(correction_age) <= self.settings.rtk_correction_max_age_s
+        )
+        rtk_fixed = str(result.get("rtk_state")) == "RTK_FIXED"
+        rtk_usable = rtk_fixed and (not bool(ntrip.get("enabled")) or correction_fresh)
+        fallback_active = bool(result.get("fix")) and not rtk_usable
+        result["rtk_fallback_active"] = fallback_active
+        result["navigation_fix_mode"] = (
+            "RTK_FIXED" if rtk_usable else "GPS_FALLBACK" if fallback_active else "NO_FIX"
+        )
         result["age_s"] = health.get("age_s")
         last_fix = float(result.get("last_valid_fix_monotonic") or 0.0)
         result["last_fix_age_s"] = max(0.0, now - last_fix) if last_fix > 0 else None
@@ -418,6 +430,7 @@ class BoatController:
             rtk_required=self.settings.rtk_required_for_navigation,
             correction_age_s=ntrip.get("last_correction_age_s"),
             correction_max_s=self.settings.rtk_correction_max_age_s,
+            rtk_fallback_to_gps=self.settings.rtk_fallback_to_gps,
         )
         if gate:
             self.operation_state = "NAVIGATION_WAITING_GPS"
@@ -685,6 +698,8 @@ class BoatController:
                 "utc_time": gps_data.get("utc_time"), "age_s": gps_data.get("age_s"),
                 "last_fix_age_s": gps_data.get("last_fix_age_s"),
                 "health": gps_data.get("health"), "rtk_state": gps_data.get("rtk_state"),
+                "rtk_fallback_active": gps_data.get("rtk_fallback_active"),
+                "navigation_fix_mode": gps_data.get("navigation_fix_mode"),
                 "parser_error_count": gps_data.get("parser_error_count"),
                 "utm_easting": gps_data.get("utm_easting"), "utm_northing": gps_data.get("utm_northing"),
                 "utm_zone": gps_data.get("utm_zone"),

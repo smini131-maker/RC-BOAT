@@ -131,18 +131,45 @@ class HealthTests(unittest.TestCase):
     def test_stale(self) -> None:
         self.assertEqual(evaluate_gps_health(self.source(), connected=True, now=103.0)["status"], "STALE")
 
-    def test_gate_hdop_and_rtk(self) -> None:
+    def test_gate_hdop_and_rtk_falls_back_to_gps(self) -> None:
         source = self.source(hdop=4.0)
         health = evaluate_gps_health(source, connected=True, now=100.1)
         self.assertEqual(navigation_gate_reason(source, health, connected=True, hdop_max=3.0, rtk_required=False, correction_age_s=None), "GPS_HDOP_BAD")
         source = self.source(rtk_state="RTK_FLOAT")
         health = evaluate_gps_health(source, connected=True, now=100.1)
-        self.assertEqual(navigation_gate_reason(source, health, connected=True, hdop_max=3.0, rtk_required=True, correction_age_s=0.1), "RTK_REQUIRED")
+        self.assertIsNone(navigation_gate_reason(source, health, connected=True, hdop_max=3.0, rtk_required=True, correction_age_s=0.1))
+
+    def test_strict_rtk_gate_remains_available_when_fallback_disabled(self) -> None:
+        source = self.source(rtk_state="RTK_FLOAT")
+        health = evaluate_gps_health(source, connected=True, now=100.1)
+        self.assertEqual(
+            navigation_gate_reason(
+                source, health, connected=True, hdop_max=3.0,
+                rtk_required=True, correction_age_s=0.1,
+                rtk_fallback_to_gps=False,
+            ),
+            "RTK_REQUIRED",
+        )
 
     def test_correction_stale(self) -> None:
         source = self.source(rtk_state="RTK_FIXED")
         health = evaluate_gps_health(source, connected=True, now=100.1)
-        self.assertEqual(navigation_gate_reason(source, health, connected=True, hdop_max=3.0, rtk_required=True, correction_age_s=12.0), "RTK_CORRECTION_STALE")
+        self.assertEqual(
+            navigation_gate_reason(
+                source, health, connected=True, hdop_max=3.0,
+                rtk_required=True, correction_age_s=12.0,
+                rtk_fallback_to_gps=False,
+            ),
+            "RTK_CORRECTION_STALE",
+        )
+
+    def test_stale_rtk_correction_does_not_poison_gps_navigation_health(self) -> None:
+        health = evaluate_gps_health(
+            self.source(rtk_state="RTK_FLOAT"), connected=True, now=100.1,
+            correction_age_s=30.0,
+        )
+        self.assertEqual(health["status"], "BAD")
+        self.assertEqual(health["navigation_status"], "GOOD")
 
 
 class LoggerAndNtripTests(unittest.TestCase):
@@ -199,7 +226,7 @@ class LoggerAndNtripTests(unittest.TestCase):
 
 
 class ControllerWeek6Tests(unittest.TestCase):
-    def test_navigation_health_gate_and_rtk_required(self) -> None:
+    def test_navigation_health_gate_and_rtk_loss_uses_gps_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             hardware = MockHardware(); hardware.start()
             original = hardware.snapshot
@@ -210,7 +237,9 @@ class ControllerWeek6Tests(unittest.TestCase):
             hardware.snapshot = lambda: replace(original(), gps_quality=1, gps_hdop=0.8)
             controller.settings.rtk_required_for_navigation = True
             controller.step()
-            self.assertEqual(controller.failsafe_reason, "RTK_REQUIRED")
+            self.assertEqual(controller.operation_state, "NAVIGATION_ACTIVE")
+            self.assertEqual(controller.failsafe_reason, "")
+            self.assertTrue(controller.state()["gps"]["rtk_fallback_active"])
 
     def test_rtk_fixed_navigation_with_fresh_correction(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

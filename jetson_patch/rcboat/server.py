@@ -144,7 +144,8 @@ class ControlServer:
             elif command == "SET_GPS_SETTINGS":
                 values = {key: msg[key] for key in (
                     "health_stale_s", "navigation_max_hdop",
-                    "rtk_required_for_navigation", "rtk_correction_max_age_s",
+                    "rtk_required_for_navigation", "rtk_fallback_to_gps",
+                    "rtk_correction_max_age_s",
                 ) if key in msg}
                 self.controller.set_gps_settings(values)
             elif command == "CONFIGURE_NTRIP":

@@ -65,9 +65,9 @@ Windows GUI의 `GPS · RTK` 탭에서도 설정할 수 있습니다. GUI 비밀�
 2. FIX가 GPS / DGPS / RTK FLOAT / RTK FIXED 중 무엇인지 확인
 3. Satellite, HDOP, PDOP, VDOP, C/N0, hAcc와 상세 이유 확인
 4. NTRIP `연결됨`, correction age, 수신 byte 증가 확인
-5. 필요할 때만 `NAVIGATION에 RTK Fixed 필수`를 켜고 저장
+5. `RTK 끊김 시 일반 GPS로 계속 운항`이 켜져 있는지 확인
 
-기본값은 `rtk_required_for_navigation=false`라서 일반 GPS FIX도 기존처럼 사용할 수 있습니다. RTK 필수를 켜면 RTK Fixed와 신선한 보정 데이터가 모두 없을 때 6000/6450으로 대기합니다.
+기본값은 `rtk_fallback_to_gps=true`입니다. RTK Fixed 또는 NTRIP 보정이 끊겨도 GPS 연결, 유효 FIX, 좌표, HDOP 등 일반 GPS 안전조건이 정상이면 현재 항로 운항을 계속합니다. 화면에는 `RTK 손실 → GPS 대체 운항`이 표시됩니다. GPS 자체가 끊기거나 FIX가 사라지거나 데이터가 지연되면 기존과 동일하게 6000/6450으로 정지 대기합니다.
 
 ## GPS CSV 로그
 

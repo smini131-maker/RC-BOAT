@@ -37,12 +37,13 @@ class Week6GuiSmokeTests(unittest.TestCase):
                 "hdop": 0.8, "pdop": 1.2, "vdop": 1.0,
                 "cno_avg_dbhz": 43.0, "hacc_m": 0.02, "age_s": 0.1,
                 "last_fix_age_s": 0.1, "rtk_state": "RTK_FIXED",
-                "health": {"status": "GOOD", "reasons": ["Satellites 18", "HDOP 0.80"]},
+                "health": {"status": "GOOD", "navigation_status": "GOOD", "rtk_status": "GOOD", "reasons": ["Satellites 18", "HDOP 0.80"]},
+                "rtk_fallback_active": False, "navigation_fix_mode": "RTK_FIXED",
                 "utm_easting": 508000.0, "utm_northing": 3882000.0, "utm_zone": "52N",
             },
             "ntrip": {"enabled": True, "connected": True, "host": "caster.example", "port": 2101, "mountpoint": "BUS0", "tls": False, "last_correction_age_s": 0.2, "bytes_received": 4096, "last_error": ""},
             "gps_logging": {"active": True, "file_path": "/home/jetson/rcboat/logs/gps/test.csv", "samples": 12},
-            "gps_settings": {"navigation_max_hdop": 3.0, "rtk_required_for_navigation": True},
+            "gps_settings": {"navigation_max_hdop": 3.0, "rtk_required_for_navigation": False, "rtk_fallback_to_gps": True},
             "gps_recording": {}, "hil": {}, "route": {}, "routes": [],
             "events": [], "hardware_errors": [],
         }
@@ -53,6 +54,17 @@ class Week6GuiSmokeTests(unittest.TestCase):
         self.assertEqual(self.window.gps_detail_labels["rtk_state"].text(), "RTK_FIXED")
         self.assertIn("연결됨", self.window.ntrip_status.text())
         self.assertIn("12 samples", self.window.gps_log_status.text())
+
+    def test_rtk_loss_is_shown_as_gps_fallback_not_navigation_stop(self) -> None:
+        state = self.state()
+        state["gps"]["rtk_state"] = "NO_RTK"
+        state["gps"]["rtk_fallback_active"] = True
+        state["gps"]["navigation_fix_mode"] = "GPS_FALLBACK"
+        state["ntrip"]["connected"] = False
+        self.window.update_telemetry(state)
+        self.assertIn("GPS 대체 운항", self.window.gps_health_status.text())
+        self.assertIn("GPS 운항 계속", self.window.gps_detail_labels["rtk_state"].text())
+        self.assertTrue(self.window.rtk_fallback.isChecked())
 
     def test_ntrip_password_is_sent_once_then_cleared(self) -> None:
         self.window.worker = Mock()

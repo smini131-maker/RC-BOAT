@@ -15,6 +15,7 @@
     "health_stale_s": 2.0,
     "navigation_max_hdop": 3.0,
     "rtk_required_for_navigation": false,
+    "rtk_fallback_to_gps": true,
     "rtk_correction_max_age_s": 10.0
   }
 }

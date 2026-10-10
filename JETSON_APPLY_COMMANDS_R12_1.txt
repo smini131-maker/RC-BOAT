@@ -1,0 +1,31 @@
+RC Boat R12.1 RTK -> GPS 대체 운항 적용
+
+1) Windows PowerShell에서 이 ZIP을 푼 폴더로 이동
+
+cd "$HOME\Downloads\RCBoat_R12_1_RTK_GPS_Fallback_20261010"
+
+2) Jetson으로 패치 폴더 전송
+
+scp -r .\jetson_patch jetson@10.85.226.215:/home/jetson/
+
+3) Jetson에서 설치 스크립트 실행
+
+ssh jetson@10.85.226.215
+cd /home/jetson/jetson_patch
+chmod +x install_patch.sh
+./install_patch.sh
+
+4) 적용 상태 확인
+
+systemctl is-active rcboat.service
+sudo journalctl -u rcboat.service -n 50 --no-pager
+
+5) Windows GUI 다시 빌드
+
+Windows PowerShell을 종료한 뒤, 압축을 푼 폴더에서 BUILD_WINDOWS_EXE.bat을 실행합니다.
+완성 파일: windows_gui_source\windows_app\dist\RCBoatControl.exe
+
+정상 동작 기준
+
+- RTK/NTRIP만 끊김 + GPS Fix 정상: NAVIGATION 계속, 화면에 GPS 대체 운항 표시
+- GPS 연결 끊김/Fix 소실/GPS stale/HDOP 초과: 6000/6450 안전정지

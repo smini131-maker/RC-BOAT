@@ -86,6 +86,7 @@ class RuntimeSettings:
     gps_health_stale_s: float = 2.0
     gps_navigation_max_hdop: float = 3.0
     rtk_required_for_navigation: bool = False
+    rtk_fallback_to_gps: bool = True
     rtk_correction_max_age_s: float = 10.0
     config_path: Path | None = field(default=None, repr=False, compare=False)
 
@@ -192,13 +193,14 @@ class RuntimeSettings:
             "health_stale_s": float(self.gps_health_stale_s),
             "navigation_max_hdop": float(self.gps_navigation_max_hdop),
             "rtk_required_for_navigation": bool(self.rtk_required_for_navigation),
+            "rtk_fallback_to_gps": bool(self.rtk_fallback_to_gps),
             "rtk_correction_max_age_s": float(self.rtk_correction_max_age_s),
         }
 
     def save_gps_settings(self, values: dict[str, Any]) -> dict[str, bool | float | int]:
         allowed = {
             "health_stale_s", "navigation_max_hdop",
-            "rtk_required_for_navigation", "rtk_correction_max_age_s",
+            "rtk_required_for_navigation", "rtk_fallback_to_gps", "rtk_correction_max_age_s",
         }
         unknown = set(values) - allowed
         if unknown:
@@ -209,6 +211,8 @@ class RuntimeSettings:
             self.gps_navigation_max_hdop = float(values["navigation_max_hdop"])
         if "rtk_required_for_navigation" in values:
             self.rtk_required_for_navigation = bool(values["rtk_required_for_navigation"])
+        if "rtk_fallback_to_gps" in values:
+            self.rtk_fallback_to_gps = bool(values["rtk_fallback_to_gps"])
         if "rtk_correction_max_age_s" in values:
             self.rtk_correction_max_age_s = float(values["rtk_correction_max_age_s"])
         checked = self.gps_settings()
@@ -246,6 +250,7 @@ def load_runtime_settings(path: str | Path) -> RuntimeSettings:
         gps_health_stale_s=float(gps.get("health_stale_s", VALUES.gps_stale_timeout_s)),
         gps_navigation_max_hdop=float(gps.get("navigation_max_hdop", 3.0)),
         rtk_required_for_navigation=bool(gps.get("rtk_required_for_navigation", False)),
+        rtk_fallback_to_gps=bool(gps.get("rtk_fallback_to_gps", True)),
         rtk_correction_max_age_s=float(gps.get("rtk_correction_max_age_s", 10.0)),
         config_path=config_path,
     )
