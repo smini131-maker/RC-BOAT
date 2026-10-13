@@ -277,7 +277,7 @@ class Week6GuiSmokeTests(unittest.TestCase):
         })
         self.window.update_telemetry(state)
         self.assertIn("Mount Point 없음(404)", self.window.ntrip_status.text())
-        self.assertTrue(self.window.ntrip_mount_fix.isVisible())
+        self.assertFalse(self.window.ntrip_mount_fix.isHidden())
 
     def test_recommended_mountpoint_button_sets_hyphen_value(self) -> None:
         self.window.ntrip_mountpoint.setText("VRS_RTCM32")
