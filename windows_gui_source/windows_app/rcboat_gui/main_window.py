@@ -1793,10 +1793,11 @@ class MainWindow(QMainWindow):
                 self._fmt(hacc, 2, " m"), hacc_level
             )
         ubx_count = int(gps.get("ubx_message_count") or 0)
+        nav_pvt_count = int(gps.get("nav_pvt_message_count") or 0)
         nmea_count = int(gps.get("nmea_sentence_count") or 0)
         self.gps_metric_cards["hacc"].hint_label.setText(
             f"{gps.get('hacc_source') or 'UBX-NAV-PVT'} · "
-            f"UBX {ubx_count} / NMEA {nmea_count}"
+            f"NAV-PVT {nav_pvt_count} / UBX {ubx_count} / NMEA {nmea_count}"
             + (" · ≤1.5 m 좋음 · ≤3 m 주의" if hacc is not None else "")
         )
 
