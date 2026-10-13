@@ -411,7 +411,11 @@ class MainWindow(QMainWindow):
         ntrip_disable.clicked.connect(lambda: self.command("DISABLE_NTRIP"))
         refresh = QPushButton("상태 새로고침")
         refresh.clicked.connect(lambda: self.command("REFRESH_NTRIP"))
+        self.ntrip_mount_fix = QPushButton("VRS-RTCM32 적용")
+        self.ntrip_mount_fix.setVisible(False)
+        self.ntrip_mount_fix.clicked.connect(self.apply_recommended_mountpoint)
         self.ntrip_status = QLabel("NTRIP 비활성")
+        self.ntrip_status.setWordWrap(True)
         ntrip_layout.addWidget(self.ntrip_enabled, 0, 0)
         for column, (label, widget) in enumerate((("Host", self.ntrip_host), ("Port", self.ntrip_port), ("Mount Point", self.ntrip_mountpoint), ("Username", self.ntrip_username), ("Password", self.ntrip_password)), 1):
             box = QVBoxLayout(); box.addWidget(QLabel(label)); box.addWidget(widget)
@@ -420,7 +424,8 @@ class MainWindow(QMainWindow):
         ntrip_layout.addWidget(self.ntrip_apply, 1, 1)
         ntrip_layout.addWidget(ntrip_disable, 1, 2)
         ntrip_layout.addWidget(refresh, 1, 3)
-        ntrip_layout.addWidget(self.ntrip_status, 1, 4, 1, 2)
+        ntrip_layout.addWidget(self.ntrip_mount_fix, 1, 4)
+        ntrip_layout.addWidget(self.ntrip_status, 1, 5)
 
         safety_box = QGroupBox("GPS 항법 안전 Gate")
         safety_layout = QHBoxLayout(safety_box)
@@ -438,6 +443,28 @@ class MainWindow(QMainWindow):
         if not self._syncing_ntrip:
             self._ntrip_dirty = True
             self.ntrip_apply.setText("설정 저장 · 연결 *")
+
+    def apply_recommended_mountpoint(self) -> None:
+        self.ntrip_mountpoint.setText("VRS-RTCM32")
+        self._mark_ntrip_dirty()
+        self.ntrip_mount_fix.setVisible(False)
+        self.ntrip_status.setText(
+            "권장 Mount Point VRS-RTCM32를 입력했습니다. '설정 저장 · 연결'을 누르세요."
+        )
+        self.log("RTK Mount Point 권장값 적용: VRS-RTCM32 · 저장/연결 필요")
+
+    @staticmethod
+    def _ntrip_error_hint(error: str, mountpoint: str) -> str:
+        error = str(error or "")
+        if "404" in error and "mountpoint" in error.lower():
+            current = str(mountpoint or "-")
+            return (
+                f"Mount Point 없음(404): {current} · "
+                "RTS2에서는 VRS-RTCM32를 확인하세요"
+            )
+        if "401" in error or "authentication failed" in error.lower():
+            return "NTRIP 인증 실패(401): Username/Password를 확인하세요"
+        return error
 
     def apply_ntrip(self) -> None:
         enabled = self.ntrip_enabled.isChecked()
@@ -1215,11 +1242,17 @@ class MainWindow(QMainWindow):
         ntrip = state.get("ntrip") or {}
         self.gps_detail_labels["correction_age"].setText(self._fmt(ntrip.get("last_correction_age_s"), 1, " s"))
         fallback_note = " · GPS Fix로 계속 운항" if gps.get("rtk_fallback_active") else ""
+        ntrip_error = str(ntrip.get("last_error") or "")
+        ntrip_error_hint = self._ntrip_error_hint(
+            ntrip_error, str(ntrip.get("mountpoint") or "")
+        )
+        mountpoint_404 = "404" in ntrip_error and "mountpoint" in ntrip_error.lower()
+        self.ntrip_mount_fix.setVisible(mountpoint_404)
         self.ntrip_status.setText(
             ("연결됨" if ntrip.get("connected") else "연결 안 됨")
             + f" · {ntrip.get('host') or '-'}:{ntrip.get('port') or '-'} / {ntrip.get('mountpoint') or '-'}"
             + f" · {int(ntrip.get('bytes_received') or 0)} bytes"
-            + (f" · 오류: {ntrip.get('last_error')}" if ntrip.get("last_error") else "")
+            + (f" · 오류: {ntrip_error_hint}" if ntrip_error_hint else "")
             + fallback_note
         )
         ntrip_signature = (
@@ -1238,7 +1271,10 @@ class MainWindow(QMainWindow):
                 + ("사용" if ntrip.get("enabled") else "비활성")
                 + " / "
                 + ("연결됨" if ntrip.get("connected") else "연결 안 됨")
-                + (f" / 오류={ntrip.get('last_error')}" if ntrip.get("last_error") else "")
+                + (
+                    f" / 오류={self._ntrip_error_hint(str(ntrip.get('last_error') or ''), str(ntrip.get('mountpoint') or ''))}"
+                    if ntrip.get("last_error") else ""
+                )
             )
             self._last_ntrip_status_signature = ntrip_signature
         received = int(ntrip.get("bytes_received") or 0)
