@@ -164,11 +164,14 @@ class RouteManager:
         self.persisted_selected_route_id = (
             stored_selected if stored_selected in route_ids else ""
         )
+        # routes.json is the source of truth for an operator-selected route.
+        # Prefer its persisted selected_route_id over an older in-memory selection
+        # when routes are explicitly reloaded.
         selected_id = (
-            previous_selected
-            if previous_selected in route_ids
-            else self.persisted_selected_route_id
+            self.persisted_selected_route_id
             if self.persisted_selected_route_id
+            else previous_selected
+            if previous_selected in route_ids
             else route_ids[0]
         )
         active_id = previous_active if previous_active in route_ids else selected_id
