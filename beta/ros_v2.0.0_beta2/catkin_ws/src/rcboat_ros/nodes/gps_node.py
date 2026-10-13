@@ -41,6 +41,17 @@ def main():
                 result=dict(parser.state)
                 result['healthy']=gps_is_healthy(result,now,rospy.get_param('/rcboat/gps_stale_s',2.0),rospy.get_param('/rcboat/max_hdop',3.0))
                 result['cno_quality']=cno_quality(result.get('cno_dbhz'))
+                # A GNSS course-over-ground estimate is not actual hull heading.
+                # This flag is diagnostic only; do not produce stop/go chatter.
+                min_speed=float(rospy.get_param('/rcboat/course_min_speed_mps',0.35))
+                if result.get('heading_deg') is None:
+                    result['course_quality']='UNAVAILABLE'
+                elif float(result.get('speed_mps') or 0)<min_speed:
+                    result['course_quality']='LOW_SPEED'
+                elif result.get('hacc_m') is not None and float(result['hacc_m'])>2.0:
+                    result['course_quality']='LOW_POSITION_QUALITY'
+                else:
+                    result['course_quality']='MOVING_COG'
                 # stale FIX explicitly cleared; old coordinates remain for diagnostic display only.
                 if not result['healthy']:result['fix']=False
                 pub.publish(pack(**result));last_publish=now

@@ -14,3 +14,5 @@ Stable `release/1.6.0` and prior `beta/ros-v2.0.0-beta.1` remain unchanged.
 - All video MATLAB, QGIS and GPS Ground Test instructions are in VIDEO_TEST_STEPS_KO.md.
 
 Offline tests are not physical safety certification. No verified Jetson, I2C, actual GNSS walking test, MATLAB/QGIS GUI run or water-driving trial is claimed.
+
+- GNSS course quality: LOW_SPEED / MOVING_COG / LOW_POSITION_QUALITY logged for ground testing (default 0.35 m/s threshold). The quality flag is diagnostic and does not claim true hull heading.

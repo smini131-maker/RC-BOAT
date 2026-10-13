@@ -39,3 +39,6 @@ lookahead_max_m: 10.0
 speed_feedback_enabled: false
 target_speed_mps: 0.6
 experimental_nav_actuation_enabled: false
+
+# GNSS course-over-ground quality is diagnostic only (not physical heading)
+course_min_speed_mps: 0.35

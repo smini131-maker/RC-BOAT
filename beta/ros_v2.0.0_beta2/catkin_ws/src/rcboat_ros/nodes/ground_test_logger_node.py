@@ -14,7 +14,7 @@ from rcboat_ros.common import pack,unpack
 
 FIELDS=['index','timestamp','elapsed_time_s','latitude','longitude','utm_easting_m','utm_northing_m',
         'heading_deg','target_heading_deg','heading_error_deg','speed_mps',
-        'controller_mode','lookahead_m','cte_correction_deg','lookahead_target_lat','lookahead_target_lon',
+        'controller_mode','course_quality','lookahead_m','cte_correction_deg','lookahead_target_lat','lookahead_target_lon',
         'desired_steering_pwm','desired_rudder_angle_deg','desired_throttle_pwm',
         'actual_steering_pwm','actual_throttle_pwm','selected_route_id','active_route_id',
         'target_waypoint_index','distance_to_waypoint_m','cross_track_error_m',
@@ -108,7 +108,7 @@ class Logger:
         r=dict(index=self.count,timestamp=now,elapsed_time_s=round(time.monotonic()-self.start_clock,3),
                latitude=lat,longitude=lon,utm_easting_m=easting,utm_northing_m=northing,
                heading_deg=gps.get('heading_deg'),target_heading_deg=nav.get('target_heading_deg'),heading_error_deg=nav.get('heading_error_deg'),
-               speed_mps=gps.get('speed_mps'),controller_mode=nav.get('controller_mode','HEADING'),
+               speed_mps=gps.get('speed_mps'),controller_mode=nav.get('controller_mode','HEADING'),course_quality=gps.get('course_quality'),
                lookahead_m=nav.get('lookahead_m'),cte_correction_deg=nav.get('cte_correction_deg'),
                lookahead_target_lat=nav.get('lookahead_target_lat'),lookahead_target_lon=nav.get('lookahead_target_lon'),
                desired_steering_pwm=nav.get('desired_steering_pwm'),

@@ -152,7 +152,7 @@ class Window(QMainWindow):
         self.remote_timer.start(300)
         self.grid=QGridLayout();over.addLayout(self.grid)
         labels=['mode','fix','rtk_state','latitude','longitude','heading_deg','speed_mps','hdop','hacc_m',
-                'cno_dbhz','active_route_id','controller_mode','lookahead_m','cte_correction_deg','target_heading_deg','heading_error_deg','cross_track_error_m',
+                'cno_dbhz','course_quality','active_route_id','controller_mode','lookahead_m','cte_correction_deg','target_heading_deg','heading_error_deg','cross_track_error_m',
                 'desired_steering_pwm','desired_throttle_pwm','actual_steering_pwm','actual_throttle_pwm']
         self.indicators={}
         for i,key in enumerate(labels):
