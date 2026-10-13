@@ -15,6 +15,7 @@ from rcboat.controller import BoatController
 from rcboat.gps_health import evaluate_gps_health, navigation_gate_reason
 from rcboat.gps_logger import GpsCsvLogger
 from rcboat.gps_parser import MixedGpsParser, latlon_to_utm
+from rcboat.gps_runtime import UBX_NAV_PVT_POLL
 from rcboat.hardware import MockHardware
 from rcboat.navigation import RouteManager
 from rcboat.ntrip import NtripClient, NtripConfig, build_gga, load_ntrip_env, save_ntrip_env
@@ -95,6 +96,12 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(parser.data.nmea_sentence_count, 1)
         self.assertAlmostEqual(parser.data.hacc_m or 0, 0.02)
 
+    def test_nav_pvt_poll_packet(self) -> None:
+        self.assertEqual(
+            UBX_NAV_PVT_POLL,
+            bytes.fromhex("B5 62 01 07 00 00 08 19"),
+        )
+
     def test_utm_helper(self) -> None:
         try:
             easting, northing, zone = latlon_to_utm(35.078, 129.086)
@@ -141,21 +148,33 @@ class HealthTests(unittest.TestCase):
     def test_cno_good_warning_bad_thresholds(self) -> None:
         self.assertEqual(
             evaluate_gps_health(
-                self.source(cno_avg_dbhz=40.0), connected=True, now=100.1
+                self.source(cno_avg_dbhz=30.0), connected=True, now=100.1
             )["status"],
             "GOOD",
         )
         self.assertEqual(
             evaluate_gps_health(
-                self.source(cno_avg_dbhz=30.0), connected=True, now=100.1
+                self.source(cno_avg_dbhz=25.0), connected=True, now=100.1
             )["status"],
             "WARNING",
         )
         self.assertEqual(
             evaluate_gps_health(
-                self.source(cno_avg_dbhz=29.9), connected=True, now=100.1
+                self.source(cno_avg_dbhz=24.9), connected=True, now=100.1
             )["status"],
             "BAD",
+        )
+
+    def test_low_cno_is_diagnostic_not_propulsion_gate(self) -> None:
+        source = self.source(cno_avg_dbhz=20.0, hdop=1.0)
+        health = evaluate_gps_health(source, connected=True, now=100.1)
+        self.assertEqual(health["status"], "BAD")
+        self.assertEqual(health["navigation_status"], "GOOD")
+        self.assertIsNone(
+            navigation_gate_reason(
+                source, health, connected=True, hdop_max=3.0,
+                rtk_required=False, correction_age_s=None,
+            )
         )
 
 
@@ -269,6 +288,38 @@ class ControllerWeek6Tests(unittest.TestCase):
             self.assertEqual(controller.failsafe_reason, "")
             self.assertTrue(controller.state()["gps"]["rtk_fallback_active"])
 
+    def test_navigation_rudder_is_inverted_and_large_error_slows_not_stops(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "routes.json"
+            path.write_text(
+                '{"routes":[{"id":"east","name":"East","waypoints":['
+                '{"lat":35.078,"lon":129.086},'
+                '{"lat":35.078,"lon":129.087}]}]}',
+                encoding="utf-8",
+            )
+            hardware = MockHardware(); hardware.start()
+            original = hardware.snapshot
+            hardware.snapshot = lambda: replace(
+                original(),
+                gps_lat=35.078,
+                gps_lon=129.086,
+                gps_course_deg=0.0,
+                gps_hdop=0.8,
+                gps_quality=1,
+            )
+            controller = BoatController(
+                hardware, RouteManager(path), RuntimeSettings(auto_cruise_pwm=6650)
+            )
+            controller.set_mode("NAVIGATION")
+            controller.step()
+            self.assertEqual(controller.operation_state, "NAVIGATION_ACTIVE")
+            self.assertLess(controller.steering_pwm, 6000)
+            self.assertGreater(controller.throttle_pwm, 6450)
+            self.assertLess(controller.throttle_pwm, 6650)
+            route_state = controller.state()["route"]
+            self.assertTrue(route_state["navigation_steering_inverted"])
+            self.assertGreater(abs(route_state["heading_error_deg"]), 80.0)
+
     def test_rtk_fixed_navigation_with_fresh_correction(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             hardware = MockHardware(); hardware.start()
@@ -360,6 +411,47 @@ class RoutePersistenceTests(unittest.TestCase):
             manager = RouteManager(path)
             with self.assertRaises(ValueError):
                 manager.delete_recorded_route("training_a")
+
+
+class MultiPathGroupTests(unittest.TestCase):
+    def test_multipath_group_summary_lists_matching_routes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "routes.json"
+            payload = {
+                "selected_route_id": "a",
+                "routes": [
+                    {
+                        "id": "a", "name": "A",
+                        "waypoints": [
+                            {"lat": 35.0, "lon": 129.0},
+                            {"lat": 35.001, "lon": 129.001},
+                        ],
+                    },
+                    {
+                        "id": "b", "name": "B",
+                        "waypoints": [
+                            {"lat": 35.000001, "lon": 129.0},
+                            {"lat": 35.001001, "lon": 129.001},
+                        ],
+                    },
+                    {
+                        "id": "far", "name": "Far",
+                        "waypoints": [
+                            {"lat": 35.01, "lon": 129.01},
+                            {"lat": 35.02, "lon": 129.02},
+                        ],
+                    },
+                ],
+            }
+            path.write_text(__import__("json").dumps(payload), encoding="utf-8")
+            manager = RouteManager(path)
+            summary = manager.multipath_group_summary()
+            self.assertEqual(summary["reference_route_id"], "a")
+            self.assertEqual(summary["group_size"], 2)
+            self.assertEqual(
+                {item["id"] for item in summary["routes"]},
+                {"a", "b"},
+            )
 
 
 class RouteDeleteSafetyTests(unittest.TestCase):
