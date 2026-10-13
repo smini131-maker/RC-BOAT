@@ -16,6 +16,8 @@ GPS_BY_ID = (
     "usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00"
 )
 
+SOFTWARE_VERSION = "1.6.0"
+
 
 @dataclass(frozen=True)
 class ControlValues:
