@@ -1,0 +1,9 @@
+rcboat:
+  navigation:
+    steering_inverted: true
+    full_speed_error_deg: 35.0
+    slow_error_deg: 100.0
+    minimum_speed_fraction: 0.65
+    severe_turn_error_deg: 150.0
+    severe_turn_release_deg: 100.0
+    severe_turn_pause_s: 0.4

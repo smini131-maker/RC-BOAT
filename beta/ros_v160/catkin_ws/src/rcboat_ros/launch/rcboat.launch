@@ -1,0 +1,8 @@
+<launch>
+  <!-- Default entry point intentionally selects the real profile. Use
+       rcboat_hil.launch for tests that must not touch physical hardware. -->
+  <arg name="runtime_dir" default="/home/jetson/rcboat_ros_ws/runtime"/>
+  <include file="$(find rcboat_ros)/launch/rcboat_real.launch">
+    <arg name="runtime_dir" value="$(arg runtime_dir)"/>
+  </include>
+</launch>

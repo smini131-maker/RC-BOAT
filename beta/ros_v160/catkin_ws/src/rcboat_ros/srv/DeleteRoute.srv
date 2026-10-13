@@ -1,0 +1,5 @@
+string route_id
+---
+bool ok
+string message
+string deleted_name

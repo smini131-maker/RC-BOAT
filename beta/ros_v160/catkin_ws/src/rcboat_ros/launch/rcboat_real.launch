@@ -1,0 +1,23 @@
+<launch>
+  <arg name="runtime_dir" default="/home/jetson/rcboat_ros_ws/runtime"/>
+  <rosparam command="load" file="$(find rcboat_ros)/config/hardware.yaml"/>
+  <rosparam command="load" file="$(find rcboat_ros)/config/safety.yaml"/>
+  <rosparam command="load" file="$(find rcboat_ros)/config/gps.yaml"/>
+  <rosparam command="load" file="$(find rcboat_ros)/config/navigation.yaml"/>
+  <rosparam command="load" file="$(find rcboat_ros)/config/multipath.yaml"/>
+  <param name="/rcboat/profile" value="real"/>
+  <param name="/rcboat/runtime_dir" value="$(arg runtime_dir)"/>
+  <node pkg="rcboat_ros" type="rc_input_node.py" name="rc_input_node" output="screen" respawn="true"/>
+  <node pkg="rcboat_ros" type="gps_node.py" name="gps_node" output="screen" respawn="true"/>
+  <node pkg="rcboat_ros" type="ntrip_node.py" name="ntrip_node" output="screen" respawn="true"/>
+  <node pkg="rcboat_ros" type="route_manager_node.py" name="route_manager_node" output="screen" respawn="true"/>
+  <node pkg="rcboat_ros" type="navigation_node.py" name="navigation_node" output="screen" respawn="true"/>
+  <node pkg="rcboat_ros" type="safety_supervisor_node.py" name="safety_supervisor_node" output="screen" respawn="true">
+    <param name="hil" value="false"/>
+  </node>
+  <node pkg="rcboat_ros" type="actuator_node.py" name="actuator_node" output="screen" required="true"/>
+  <node pkg="rcboat_ros" type="gps_logger_node.py" name="gps_logger_node" output="screen" respawn="true"/>
+  <node pkg="rcboat_ros" type="gui_bridge_node.py" name="gui_bridge_node" output="screen" required="true">
+    <param name="port" value="8876"/>
+  </node>
+</launch>

@@ -1,0 +1,9 @@
+std_msgs/Header header
+string mode
+string operation_state
+bool estop
+string failsafe_reason
+bool manual_waiting_for_neutral
+bool auto_to_manual_gesture_armed
+int32 auto_cruise_pwm
+bool hil

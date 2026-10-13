@@ -1,0 +1,5 @@
+string fault
+bool enabled
+---
+bool ok
+string message

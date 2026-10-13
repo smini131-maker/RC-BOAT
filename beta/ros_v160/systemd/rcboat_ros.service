@@ -1,0 +1,20 @@
+[Unit]
+Description=RC Boat ROS1 Noetic beta control stack
+After=network-online.target
+Wants=network-online.target
+Conflicts=rcboat.service rcboat_ros_hil.service
+
+[Service]
+Type=simple
+User=jetson
+WorkingDirectory=/home/jetson/rcboat_ros_ws
+ExecStartPre=/home/jetson/rcboat_ros_ws/deployment/hardware_preflight.sh
+ExecStart=/home/jetson/rcboat_ros_ws/deployment/run_ros.sh real
+ExecStop=/home/jetson/rcboat_ros_ws/deployment/request_safe.sh
+KillSignal=SIGINT
+TimeoutStopSec=15
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

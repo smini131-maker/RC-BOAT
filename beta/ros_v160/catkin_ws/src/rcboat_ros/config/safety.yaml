@@ -1,0 +1,20 @@
+rcboat:
+  safety:
+    steering_low_us: 1214
+    steering_center_us: 1640
+    steering_high_us: 2000
+    throttle_reverse_us: 1106
+    throttle_center_us: 1500
+    throttle_forward_us: 1786
+    manual_to_auto_steering_us: 1950
+    manual_to_auto_neutral_tolerance_us: 30
+    manual_to_auto_hold_s: 3.0
+    auto_to_manual_throttle_us: 1850
+    auto_to_manual_hold_s: 0.5
+    manual_rearm_hold_s: 0.3
+    remote_heartbeat_timeout_s: 0.7
+    rc_stale_timeout_s: 0.7
+    navigation_command_timeout_s: 0.5
+    auto_cruise_pwm: 6650
+    auto_cruise_min_pwm: 6480
+    auto_cruise_max_pwm: 6900

@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>rcboat_ros</name>
+  <version>0.1.0</version>
+  <description>ROS1 Noetic beta control stack for RC Boat v1.6.0.</description>
+  <maintainer email="maintainer@example.invalid">RC Boat Team</maintainer>
+  <license>Proprietary</license>
+  <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>message_generation</build_depend>
+  <depend>rospy</depend>
+  <depend>rosnode</depend>
+  <depend>rosservice</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>diagnostic_msgs</depend>
+  <depend>message_runtime</depend>
+  <export/>
+</package>

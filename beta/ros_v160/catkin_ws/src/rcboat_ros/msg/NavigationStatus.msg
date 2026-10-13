@@ -1,0 +1,15 @@
+std_msgs/Header header
+bool active
+bool command_valid
+string state
+string gate_reason
+float64 target_latitude
+float64 target_longitude
+float64 target_bearing_deg
+float64 heading_error_deg
+float64 distance_to_waypoint_m
+int32 waypoint_index
+int32 waypoint_count
+bool route_complete
+float32 speed_fraction
+bool severe_turn_recovery

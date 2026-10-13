@@ -1,0 +1,19 @@
+rcboat:
+  hardware:
+    arduino_device: /dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_55639303534351D01210-if00
+    arduino_baudrate: 9600
+    gps_device: /dev/serial/by-id/usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00
+    gps_baudrate: 115200
+    reconnect_interval_s: 1.0
+    i2c_bus: 1
+    pca_address: 64
+    pca_frequency_hz: 60
+    steering_channel: 0
+    throttle_channel: 6
+    steering_low_pwm: 4900
+    steering_center_pwm: 6000
+    steering_high_pwm: 7300
+    throttle_reverse_pwm: 5800
+    throttle_stop_pwm: 6450
+    throttle_forward_pwm: 7000
+    command_timeout_s: 0.30

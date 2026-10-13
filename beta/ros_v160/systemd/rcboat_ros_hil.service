@@ -1,0 +1,19 @@
+[Unit]
+Description=RC Boat ROS1 Noetic HIL beta stack (no physical actuator)
+After=network-online.target
+Wants=network-online.target
+Conflicts=rcboat.service rcboat_ros.service
+
+[Service]
+Type=simple
+User=jetson
+WorkingDirectory=/home/jetson/rcboat_ros_ws
+ExecStart=/home/jetson/rcboat_ros_ws/deployment/run_ros.sh hil
+ExecStop=/home/jetson/rcboat_ros_ws/deployment/request_safe.sh
+KillSignal=SIGINT
+TimeoutStopSec=15
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

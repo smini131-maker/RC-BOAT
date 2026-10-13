@@ -1,0 +1,11 @@
+std_msgs/Header header
+bool enabled
+bool connected
+string host
+int32 port
+string mountpoint
+bool tls
+float32 last_correction_age_s
+uint64 bytes_received
+uint32 reconnect_count
+string last_error

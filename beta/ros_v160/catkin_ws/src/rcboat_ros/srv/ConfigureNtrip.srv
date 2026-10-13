@@ -1,0 +1,12 @@
+bool enabled
+string host
+int32 port
+string mountpoint
+string username
+string password
+bool tls
+float64 timeout_s
+float64 gga_interval_s
+---
+bool ok
+string message

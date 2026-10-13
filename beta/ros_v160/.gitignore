@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+catkin_ws/build/
+catkin_ws/devel/
+windows_gui_source/windows_app/build/
+windows_gui_source/windows_app/dist/
+windows_gui_source/windows_app/*.spec.bak
+.venv/
