@@ -44,8 +44,16 @@ jobs:
           $exe='beta/ros_v2.0.0_beta2/windows_gui/dist/RCBoatControl_ROS_v2.0.0-beta.2.exe'
           if (!(Test-Path -LiteralPath $exe)) { throw 'EXE missing' }
           $env:QT_QPA_PLATFORM='offscreen'
-          & (Resolve-Path $exe) --smoke-test
-          if ($LASTEXITCODE -ne 0) { throw "Bundled EXE smoke failed: $LASTEXITCODE" }
+          @'
+          import os, pathlib, subprocess
+          exe = pathlib.Path('beta/ros_v2.0.0_beta2/windows_gui/dist/RCBoatControl_ROS_v2.0.0-beta.2.exe').resolve()
+          env = dict(os.environ)
+          env['QT_QPA_PLATFORM'] = 'offscreen'
+          result = subprocess.run([str(exe), '--smoke-test'], env=env, timeout=120, check=False)
+          if result.returncode != 0:
+              raise RuntimeError(f'Bundled EXE smoke failed with exit code {result.returncode}')
+          print('Bundled EXE smoke test passed')
+          '@ | python -
           $hash=(Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash
           "$hash *RCBoatControl_ROS_v2.0.0-beta.2.exe" | Out-File -FilePath (Join-Path (Split-Path $exe) 'SHA256SUMS.txt') -Encoding ascii
       - uses: actions/upload-artifact@v4
