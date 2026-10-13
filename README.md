@@ -51,6 +51,7 @@ chmod +x install_patch.sh
 - GPS 기록 항로 저장 성공 시 새 route id를 GUI가 추적하고 항로 목록을 재조회해 즉시 추가·선택합니다. 저장 실패(예: 위치 지점 2개 미만)도 GUI 로그에 원인을 표시합니다.
 - SSH 터미널 준비 이벤트가 현재 탭을 강제로 SSH 터미널 탭으로 바꾸지 않습니다.
 - RTK/NTRIP 연결 요청, 설정 ACK, 연결/해제/오류 상태 변화, RTCM byte 수신 시작을 운항 기록 로그에 표시합니다.
+- NTRIP에서 HTTP 404 Mountpoint 오류가 발생하면 GUI가 이를 사람이 읽기 쉬운 메시지로 바꾸고 `VRS-RTCM32` 권장값 적용 버튼을 표시합니다.
 - AUTO_SAFE 부팅(6000/6450)과 GPS 위치 자체의 stale 판정 보정을 GitHub 기준 소스에도 반영했습니다.
 - GPS Health가 WARNING/BAD/NO_FIX/STALE이면 가장 중요한 원인을 작은 글씨로 별도 표시합니다.
 - 전체 제어 화면은 스크롤 가능하게 구성해 작은 해상도나 높은 Windows 배율에서도 하단 컨트롤이 잘리지 않습니다.
