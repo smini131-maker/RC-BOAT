@@ -1124,12 +1124,20 @@ class MainWindow(QMainWindow):
         connected = bool(self.worker and self.worker.isRunning())
         is_training = bool(route and RoutePlot.is_training_route(route))
         self.route_export_button.setEnabled(has_route)
-        self.route_delete_button.setEnabled(
-            connected and has_route and not is_training
+        can_delete = (
+            connected
+            and has_route
+            and not is_training
+            and self.current_mode != "NAVIGATION"
         )
+        self.route_delete_button.setEnabled(can_delete)
         if is_training:
             self.route_delete_button.setToolTip(
                 "훈련 항로는 보호됩니다. 기록한 항로만 삭제할 수 있습니다."
+            )
+        elif self.current_mode == "NAVIGATION":
+            self.route_delete_button.setToolTip(
+                "GPS 항법/HIL을 정지한 뒤 기록 항로를 삭제하세요."
             )
         else:
             self.route_delete_button.setToolTip("")
