@@ -28,7 +28,7 @@ function CmdPath([string]$name){
 }
 function Resolve-RCBoatPython {
  # Inspect optional executables silently. Supports 3.11-3.13 64-bit Python.
- $code = 'import sys; ok=(3,11)<=sys.version_info[:2]<=(3,13) and sys.maxsize > 2**32; print("RCBoat Python:",sys.version.split()[0],"x64" if sys.maxsize > 2**32 else "x86"); sys.exit(0 if ok else 4)'
+ $code = "import sys; ok=(3,11)<=sys.version_info[:2]<=(3,13) and sys.maxsize > 2**32; print('RCBoat Python:',sys.version.split()[0],'x64' if sys.maxsize > 2**32 else 'x86'); sys.exit(0 if ok else 4)"
  if (-not [string]::IsNullOrWhiteSpace($env:RCBOAT_PYTHON)) {
    $item = Get-Item -LiteralPath $env:RCBOAT_PYTHON -ErrorAction SilentlyContinue
    Check ($null -ne $item) "RCBOAT_PYTHON does not exist: $env:RCBOAT_PYTHON"
@@ -90,7 +90,7 @@ try {
      Run $Exe @('-m','pip','--version')
      Run $Exe @('-m','pip','install','-r',(Join-Path $AppDir 'requirements.txt'))
      # Import verifies dependencies before the potentially long packaging step.
-     Run $Exe @('-c','import PySide6,paramiko,PyInstaller;print("Python GUI dependencies OK")')
+     Run $Exe @('-c',"import PySide6,paramiko,PyInstaller;print('Python GUI dependencies OK')")
      Run $Exe @('-m','unittest','discover','-s',(Join-Path $Root 'tests'),'-v')
      Run $Exe @('app.py','--smoke-test')
      $Name = 'RCBoatControl_ROS_v2.0.0-beta.2'
@@ -99,7 +99,7 @@ try {
      Check (Test-Path -LiteralPath $Artifact) "Build command returned success but EXE is missing: $Artifact"
      Check ((Get-Item -LiteralPath $Artifact).Length -gt 100000) 'EXE size unexpectedly small'
      # --windowed EXE must be waited for, otherwise PowerShell can leave an empty LASTEXITCODE.
-     $SmokeScript='import os,subprocess,sys; env=dict(os.environ); env["QT_QPA_PLATFORM"]="offscreen"; rc=subprocess.run([sys.argv[1],"--smoke-test"],env=env,timeout=120).returncode; sys.exit(rc)'
+     $SmokeScript="import os,subprocess,sys; env=dict(os.environ); env['QT_QPA_PLATFORM']='offscreen'; rc=subprocess.run([sys.argv[1],'--smoke-test'],env=env,timeout=120).returncode; sys.exit(rc)"
      Run $Exe @('-c',$SmokeScript,$Artifact)
      Write-Host "BUILT FILE: $Artifact"
      Write-Host "SHA256: $((Get-FileHash -Algorithm SHA256 -LiteralPath $Artifact).Hash)"
