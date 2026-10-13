@@ -10,6 +10,13 @@ from .gps_parser import MixedGpsParser
 from .ntrip import NtripClient, NtripConfig, build_gga, load_ntrip_env, save_ntrip_env
 
 
+# UBX-NAV-PVT poll (class 0x01, id 0x07, zero-length payload).
+# Polling obtains hAcc/carrSoln from receivers that only stream NMEA by default
+# without writing persistent configuration to the GNSS receiver.
+UBX_NAV_PVT_POLL = bytes.fromhex("B5 62 01 07 00 00 08 19")
+UBX_NAV_PVT_POLL_INTERVAL_S = 1.0
+
+
 def install_hardware_extension() -> None:
     """Extend the installed Direct-I2C hardware class without replacing it.
 
@@ -35,6 +42,7 @@ def install_hardware_extension() -> None:
         original_init(self, settings)
         self._week6_parser = MixedGpsParser()
         self._gps_io_lock = threading.Lock()
+        self._last_nav_pvt_poll = 0.0
         config_path = getattr(settings, "config_path", None)
         base = Path(config_path).parent if config_path else Path("/home/jetson/rcboat")
         self._ntrip_env_path = base / ".ntrip.env"
@@ -73,6 +81,13 @@ def install_hardware_extension() -> None:
             try:
                 with self._gps_io_lock:
                     chunk = self._gps.read(512)
+                    poll_now = time.monotonic()
+                    if poll_now - self._last_nav_pvt_poll >= UBX_NAV_PVT_POLL_INTERVAL_S:
+                        self._gps.write(UBX_NAV_PVT_POLL)
+                        flush = getattr(self._gps, "flush", None)
+                        if flush:
+                            flush()
+                        self._last_nav_pvt_poll = poll_now
                 if not chunk:
                     if time.monotonic() - last_data > VALUES.gps_stale_timeout_s:
                         raise TimeoutError("GPS byte stream became stale")
