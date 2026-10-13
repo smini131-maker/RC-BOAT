@@ -386,6 +386,9 @@ class Week6GuiSmokeTests(unittest.TestCase):
 
     def test_delete_recorded_route_sends_daemon_command(self) -> None:
         state = self.state()
+        state["mode"] = "AUTO"
+        state["operation_state"] = "AUTO_SAFE"
+        state["navigation_active"] = False
         state["routes"] = [
             {
                 "id": "recorded_delete", "name": "삭제할 항로",
