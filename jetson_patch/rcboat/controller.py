@@ -486,18 +486,81 @@ class BoatController:
             self._last_route_status["target_lat"],
             self._last_route_status["target_lon"],
         )
-        error = angle_error_deg(bearing_deg(position, target), snap.gps_course_deg)
-        if error >= 0:
-            steering = VALUES.steering_center_pwm + min(error / 90.0, 1.0) * (
+        target_bearing = bearing_deg(position, target)
+        error = angle_error_deg(target_bearing, snap.gps_course_deg)
+
+        # The current physical rudder linkage is reversed relative to the
+        # mathematical bearing-error sign.  Invert NAVIGATION only; MANUAL and
+        # REMOTE keep their measured receiver/PWM mapping unchanged.
+        steering_error = -error if VALUES.navigation_steering_inverted else error
+        if steering_error >= 0:
+            steering = VALUES.steering_center_pwm + min(steering_error / 90.0, 1.0) * (
                 VALUES.steering_high_pwm - VALUES.steering_center_pwm
             )
         else:
-            steering = VALUES.steering_center_pwm + max(error / 90.0, -1.0) * (
+            steering = VALUES.steering_center_pwm + max(steering_error / 90.0, -1.0) * (
                 VALUES.steering_center_pwm - VALUES.steering_low_pwm
             )
+
+        # Keep propulsion continuous while correcting heading. A rudder boat
+        # needs water flow to turn, so large heading error slows the boat
+        # instead of repeatedly switching between cruise and full stop.
+        abs_error = abs(error)
+        if abs_error <= VALUES.navigation_full_speed_error_deg:
+            speed_fraction = 1.0
+        elif abs_error >= VALUES.navigation_slow_error_deg:
+            speed_fraction = VALUES.navigation_min_speed_fraction
+        else:
+            span = (
+                VALUES.navigation_slow_error_deg
+                - VALUES.navigation_full_speed_error_deg
+            )
+            progress = (
+                abs_error - VALUES.navigation_full_speed_error_deg
+            ) / max(span, 1e-6)
+            speed_fraction = 1.0 - progress * (
+                1.0 - VALUES.navigation_min_speed_fraction
+            )
+        cruise_delta = self.settings.auto_cruise_pwm - VALUES.throttle_stop_pwm
+        throttle = int(round(
+            VALUES.throttle_stop_pwm + cruise_delta * speed_fraction
+        ))
+
+        # A very large cross-track error is treated as a real route-loss
+        # condition rather than ordinary steering correction. Multi-Path gets
+        # a chance to switch first in update_position(); only the remaining
+        # active route distance is checked here.
+        cross_track = float(
+            self._last_route_status.get("distance_to_route_m") or 0.0
+        )
+        if cross_track >= VALUES.navigation_hard_off_route_m:
+            self.operation_state = "NAVIGATION_RECOVERY_STOP"
+            self.failsafe_reason = "ROUTE_DEVIATION_TOO_LARGE"
+            self._last_route_status.update({
+                "target_bearing_deg": round(target_bearing, 1),
+                "course_deg": round(float(snap.gps_course_deg), 1),
+                "heading_error_deg": round(error, 1),
+                "navigation_steering_inverted": VALUES.navigation_steering_inverted,
+                "navigation_speed_fraction": 0.0,
+                "navigation_throttle_pwm": VALUES.throttle_stop_pwm,
+                "navigation_steering_pwm": int(round(steering)),
+                "hard_off_route_stop_m": VALUES.navigation_hard_off_route_m,
+            })
+            return int(round(steering)), VALUES.throttle_stop_pwm
+
+        self._last_route_status.update({
+            "target_bearing_deg": round(target_bearing, 1),
+            "course_deg": round(float(snap.gps_course_deg), 1),
+            "heading_error_deg": round(error, 1),
+            "navigation_steering_inverted": VALUES.navigation_steering_inverted,
+            "navigation_speed_fraction": round(speed_fraction, 3),
+            "navigation_throttle_pwm": throttle,
+            "navigation_steering_pwm": int(round(steering)),
+            "hard_off_route_stop_m": VALUES.navigation_hard_off_route_m,
+        })
         self.operation_state = "NAVIGATION_ACTIVE"
         self.failsafe_reason = ""
-        return int(round(steering)), self.settings.auto_cruise_pwm
+        return int(round(steering)), throttle
 
     def _hil_snapshot(self, snap: Any, now: float) -> Any:
         active = self.routes.active
