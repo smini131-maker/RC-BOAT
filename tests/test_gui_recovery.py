@@ -177,9 +177,10 @@ class GuiRecoveryTests(unittest.TestCase):
         self.assertEqual(output, "jetson\n$ ")
 
     def test_terminal_controls_enable_only_when_shell_is_ready(self) -> None:
+        original_tab = self.window.tabs.currentIndex()
         self.window.on_terminal_state(True, "jetson@example")
         self.assertTrue(self.window.terminal_input.isEnabled())
-        self.assertEqual(self.window.tabs.currentIndex(), self.window.terminal_tab_index)
+        self.assertEqual(self.window.tabs.currentIndex(), original_tab)
         self.window.on_terminal_state(False, "연결 종료")
         self.assertFalse(self.window.terminal_input.isEnabled())
 
