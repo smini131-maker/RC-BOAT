@@ -44,6 +44,15 @@ chmod +x install_patch.sh
 
 설치기는 현재 소스를 `/home/jetson/rcboat/backups/week6_gps_날짜_시간/`에 백업하고, Direct-I2C 드라이버를 확인한 뒤 Week6 모듈만 복사합니다. 의존성 설치와 문법 검사 후 서비스를 재시작하며 실패 시 기존 파일을 복원합니다.
 
+## R12.1 항로·RTK GUI 안정화
+
+- 항로 콤보박스를 사용자가 편집 중일 때 telemetry가 이전 선택(예: 훈련 경로 A)을 덮어쓰지 않도록 수정했습니다.
+- 선택 항로는 Jetson `routes.json`의 `selected_route_id`에 저장하고, 명시적 reload에서는 디스크의 저장값을 우선합니다.
+- GPS 기록 항로 저장 성공 시 새 route id를 GUI가 추적하고 항로 목록을 재조회해 즉시 추가·선택합니다. 저장 실패(예: 위치 지점 2개 미만)도 GUI 로그에 원인을 표시합니다.
+- SSH 터미널 준비 이벤트가 현재 탭을 강제로 SSH 터미널 탭으로 바꾸지 않습니다.
+- RTK/NTRIP 연결 요청, 설정 ACK, 연결/해제/오류 상태 변화, RTCM byte 수신 시작을 운항 기록 로그에 표시합니다.
+- AUTO_SAFE 부팅(6000/6450)과 GPS 위치 자체의 stale 판정 보정을 GitHub 기준 소스에도 반영했습니다.
+
 ## R12.1 Windows RTK GUI 수정
 
 - `RTK 사용` 체크 직후 주기 telemetry의 이전 `enabled=false` 값이 편집 중인 체크박스를 다시 해제하던 문제를 수정했습니다.
