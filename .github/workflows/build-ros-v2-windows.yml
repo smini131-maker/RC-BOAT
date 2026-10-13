@@ -10,6 +10,10 @@ on:
       - '.github/workflows/build-ros-v2-windows.yml'
   workflow_dispatch:
 
+env:
+  PYTHONUTF8: '1'
+  PYTHONIOENCODING: 'utf-8'
+
 permissions:
   contents: write
 
