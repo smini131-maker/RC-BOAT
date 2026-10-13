@@ -16,3 +16,11 @@ Stable `release/1.6.0` and prior `beta/ros-v2.0.0-beta.1` remain unchanged.
 Offline tests are not physical safety certification. No verified Jetson, I2C, actual GNSS walking test, MATLAB/QGIS GUI run or water-driving trial is claimed.
 
 - GNSS course quality: LOW_SPEED / MOVING_COG / LOW_POSITION_QUALITY logged for ground testing (default 0.35 m/s threshold). The quality flag is diagnostic and does not claim true hull heading.
+
+### Windows scripts patch (2026-10-14, still v2.0.0-beta.2)
+- CHECK_WINDOWS no longer echoes localized `where git.exe` errors or UTF-8 Korean paths in legacy CMD.
+- Supports local Python 3.11/3.12/3.13 x64. Git is optional except for GitHub direct upload.
+- All nine Windows root scripts normalize the trailing backslash when passing -Root to PowerShell.
+- Native Python -c quoting on Windows PowerShell 5.1, function output merging, and Get-FileHash fallback were corrected.
+- GitHub Actions tests actual CMD in normal and Korean/space folders, Python 3.13 local PyInstaller EXE build and runtime smoke.
+- No change to legacy release/1.6.0, ROS actuator unlocks, or ROS beta2 vehicle-control semantics.

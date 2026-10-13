@@ -2,7 +2,7 @@
 
 **프로펠러를 제거하고 ESC 추진 전원을 분리한 뒤 테스트하세요.** 이 조건은 ROS 명령 잠금과 별개입니다.
 
-1. **Windows**: GitHub `beta/ros-v2.0.0-beta.1` 브랜치에서 ZIP 다운로드. `CHECK_WINDOWS.cmd`, 필요하면 `SETUP_WINDOWS.cmd`; 빌드 시 `BUILD_ROS_GUI.cmd`. Actions의 최근 성공 실행에서 Windows EXE Artifact 받기.
+1. **Windows**: GitHub `beta/ros-v2.0.0-beta.2` 브랜치에서 ZIP 다운로드. `CHECK_WINDOWS.cmd`, 필요하면 `SETUP_WINDOWS.cmd`; 빌드 시 `BUILD_ROS_GUI.cmd`. Actions의 최근 성공 실행에서 Windows EXE Artifact 받기.
 2. **SSH**: PowerShell에서 `ssh jetson@<Jetson_IP>`. `nano.local` 대신 확인된 IP와 로그인 계정 사용.
 3. **기존 서비스 확인**: `CHECK_BACKEND.cmd` → DAEMON 부팅 기본 enabled, ROS disabled. `ls -l /dev/serial/by-id/`로 Arduino/GPS 확인.
 4. **Jetson ROS**: `ls /opt/ros/noetic/setup.bash` 확인. 없으면 Noetic 설치 사전점검 문서(지원 종료된 소프트웨어)에 따라 설치 가능 여부 점검. 설치 후 `DEPLOY_ROS.cmd`, `INSTALL_ROS.cmd`.

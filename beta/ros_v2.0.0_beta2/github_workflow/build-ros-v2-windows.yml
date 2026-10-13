@@ -21,6 +21,35 @@ jobs:
         with:
           python-version: '3.11'
           architecture: x64
+      - name: Run the ACTUAL CHECK_WINDOWS.cmd - no pause
+        shell: pwsh
+        run: |
+          $env:RCBOAT_NO_PAUSE='1'
+          Push-Location 'beta/ros_v2.0.0_beta2'
+          try {
+            $output=& cmd.exe /d /c CHECK_WINDOWS.cmd 2>&1 | Out-String
+            $rc=$LASTEXITCODE
+            Write-Host $output
+            if ($rc -ne 0) { throw "CHECK_WINDOWS.cmd failed with code $rc" }
+            if ($output -notmatch 'Windows preflight completed') { throw 'Expected preflight OK marker absent' }
+            if ($output -match '제공된 패턴|鍮뚮뱶|鍮\S+|No file matches') { throw 'CHECK_WINDOWS printed localized missing-file or mojibake text' }
+          } finally {Pop-Location}
+      - name: Test CHECK_WINDOWS.cmd in Unicode+spaces folder
+        shell: pwsh
+        run: |
+          $env:RCBOAT_NO_PAUSE='1'
+          $probe=Join-Path $env:RUNNER_TEMP 'RCBoat 한글 (test path)'
+          New-Item -ItemType Directory -Force -Path (Join-Path $probe 'tools/windows') | Out-Null
+          Copy-Item 'beta/ros_v2.0.0_beta2/CHECK_WINDOWS.cmd' $probe
+          Copy-Item 'beta/ros_v2.0.0_beta2/tools/windows/runner.ps1' (Join-Path $probe 'tools/windows')
+          Push-Location $probe
+          try {
+            $output=& cmd.exe /d /c CHECK_WINDOWS.cmd 2>&1 | Out-String
+            $rc=$LASTEXITCODE
+            Write-Host $output
+            if ($rc -ne 0) { throw "Unicode-path CHECK_WINDOWS.cmd failed with code $rc" }
+            if ($output -notmatch 'Windows preflight completed') { throw 'Unicode-path OK marker missing' }
+          } finally {Pop-Location}
       - name: Install Windows requirements
         working-directory: beta/ros_v2.0.0_beta2/windows_gui
         run: |
@@ -64,3 +93,26 @@ jobs:
           path: |
             beta/ros_v2.0.0_beta2/windows_gui/dist/RCBoatControl_ROS_v2.0.0-beta.2.exe
             beta/ros_v2.0.0_beta2/windows_gui/dist/SHA256SUMS.txt
+
+  windows-python313-local-builder:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - name: Verify Python 3.13 x64 local Windows scripts
+        shell: pwsh
+        run: |
+          $env:RCBOAT_NO_PAUSE='1'
+          $env:RCBOAT_PYTHON=(Get-Command python.exe).Source
+          Push-Location 'beta/ros_v2.0.0_beta2'
+          try {
+            & cmd.exe /d /c CHECK_WINDOWS.cmd
+            if ($LASTEXITCODE -ne 0) { throw 'Python 3.13 CHECK_WINDOWS.cmd failed' }
+            $env:QT_QPA_PLATFORM='offscreen'
+            & cmd.exe /d /c BUILD_ROS_GUI.cmd
+            if ($LASTEXITCODE -ne 0) { throw 'Python 3.13 BUILD_ROS_GUI.cmd failed' }
+          } finally {Pop-Location}

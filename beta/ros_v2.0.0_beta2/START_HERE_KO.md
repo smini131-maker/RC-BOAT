@@ -27,3 +27,5 @@
 - GitHub Actions: Python 자동 테스트, Windows GUI 스모크, 실제 Windows EXE 스모크, 파일 체크섬 검증 통과
 - Jetson/Arduino/GPS/NTRIP/RTK/PCA9685 실기 검증: 미실시
 - 추진 허용 설정: `propulsion_allowed=false` 유지
+
+> **Windows script fix (2026-10-14):** Local Python 3.13 x64 is supported. Git is optional unless uploading. Run `CHECK_WINDOWS.cmd` and consult `docs/WINDOWS_빌드_업로드_문제해결.md`.

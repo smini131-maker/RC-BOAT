@@ -1,4 +1,4 @@
-# RC BOAT ROS v2.0.0-beta.1 | 영상 참고 GPS Path-Tracking 지상 검증 실습 안내서
+# RC BOAT ROS v2.0.0-beta.2 | 영상 참고 GPS Path-Tracking 지상 검증 실습 안내서
 
 > 참고 영상: https://youtu.be/C5KsczjSD5Y  
 > 확인된 영상 제목: **지상환경에서 GPS 기반 Path-Tracking 알고리즘 검증: Matlab Plot 및 QGIS 시각화 방법 설명**  
@@ -37,7 +37,7 @@
 1. ZIP 압축을 폴더째 풀고 `CHECK_WINDOWS.cmd`를 실행한다. Python 3.11/3.12 x64, Git for Windows, ssh를 확인한다.
 2. 준비가 안 됐다면 `SETUP_WINDOWS.cmd`를 실행해 winget 설치를 **명시적으로 승인**하거나 Python/Git을 수동 설치한다. 설치 후 CMD/PowerShell을 다시 연다.
 3. `BUILD_ROS_GUI.cmd`를 실행한다. 끝날 때 창이 닫히지 않으며 `logs/BUILD_GUI_날짜.log`에 성공·실패가 남는다.
-4. 성공 결과 위치는 `windows_gui/dist/RCBoatControl_ROS_v2.0.0-beta.1.exe`다. 첫 실행 전 `ssh jetson@<IP>` 명령으로 서버 호스트 키를 확인·등록한다.
+4. 성공 결과 위치는 `windows_gui/dist/RCBoatControl_ROS_v2.0.0-beta.2.exe`다. 첫 실행 전 `ssh jetson@<IP>` 명령으로 서버 호스트 키를 확인·등록한다.
 5. **Windows EXE가 생기는 것과 Jetson ROS가 실제 설치·실행되는 것은 별개다.** EXE 빌드만으로 보트의 실사용 가능성이 입증되지 않는다.
 
 ## 4. Jetson ROS 준비 및 백엔드 변경

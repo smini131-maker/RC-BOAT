@@ -75,3 +75,5 @@ GitHub 베타 작업 브랜치 `beta/ros-v2.0.0-beta.2`은 생성되어 있지�
 - `qgis/setup_qgis_layers.py`: EPSG:4326 네 레이어와 색상·Index/TimeStep 레이블 생성.
 - 안전 잠금/PWM 확인 실패 때 지상 실험 시작 거절, Multi-Path CSV switch 이벤트 보존.
 - MATLAB에 보행 0.6m/s 참고선(모터 제어값 아님), 경로 변경 타임라인을 추가했습니다.
+
+> **Windows script fix (2026-10-14):** Local Python 3.13 x64 is supported. Git is optional unless uploading. Run `CHECK_WINDOWS.cmd` and consult `docs/WINDOWS_빌드_업로드_문제해결.md`.
