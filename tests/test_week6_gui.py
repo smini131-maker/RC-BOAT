@@ -356,8 +356,14 @@ class Week6GuiSmokeTests(unittest.TestCase):
                 "id": "recorded_export", "name": "내 항로",
                 "arrival_radius_m": 3.0,
                 "waypoints": [
-                    {"lat": 35.0, "lon": 129.0},
-                    {"lat": 35.0001, "lon": 129.0001},
+                    {
+                        "timestamp": "2026-10-13T19:10:00.000+09:00",
+                        "lat": 35.0, "lon": 129.0, "heading_deg": 10.5,
+                    },
+                    {
+                        "timestamp": "2026-10-13T19:10:01.000+09:00",
+                        "lat": 35.0001, "lon": 129.0001, "heading_deg": 11.25,
+                    },
                 ],
             }
         ]
@@ -383,6 +389,55 @@ class Week6GuiSmokeTests(unittest.TestCase):
             payload = json.loads(destination.read_text(encoding="utf-8"))
             self.assertEqual(payload["id"], "recorded_export")
             self.assertEqual(len(payload["waypoints"]), 2)
+            self.assertEqual(
+                payload["waypoints"][0]["timestamp"],
+                "2026-10-13T19:10:00.000+09:00",
+            )
+            self.assertEqual(payload["waypoints"][0]["heading_deg"], 10.5)
+
+    def test_selected_route_csv_export_contains_time_and_heading(self) -> None:
+        state = self.state()
+        state["routes"] = [
+            {
+                "id": "recorded_csv", "name": "CSV 경로",
+                "arrival_radius_m": 3.0,
+                "waypoints": [
+                    {
+                        "timestamp": "2026-10-13T19:20:00.000+09:00",
+                        "lat": 35.0, "lon": 129.0, "heading_deg": 270.0,
+                    },
+                    {
+                        "timestamp": "2026-10-13T19:20:01.000+09:00",
+                        "lat": 35.0001, "lon": 129.0001, "heading_deg": None,
+                    },
+                ],
+            }
+        ]
+        state["route"] = {
+            "active_route_id": "recorded_csv",
+            "selected_route_id": "recorded_csv",
+            "selected_route_name": "CSV 경로",
+            "active_route_name": "CSV 경로",
+            "selected_route_persisted": True,
+            "persisted_selected_route_id": "recorded_csv",
+            "storage_path": "/home/jetson/rcboat/routes.json",
+            "multipath_config_path": "/home/jetson/rcboat/boat_config.json",
+            "multipath": {},
+        }
+        self.window.update_telemetry(state)
+        with tempfile.TemporaryDirectory() as temp:
+            destination = Path(temp) / "route.csv"
+            with patch(
+                "rcboat_gui.main_window.QFileDialog.getSaveFileName",
+                return_value=(str(destination), "CSV (*.csv)"),
+            ), patch("rcboat_gui.main_window.QMessageBox.information"):
+                self.window.export_selected_route()
+            content = destination.read_text(encoding="utf-8-sig")
+            self.assertIn(
+                "index,timestamp,latitude,longitude,heading_deg", content
+            )
+            self.assertIn("2026-10-13T19:20:00.000+09:00", content)
+            self.assertIn(",270.00", content)
 
     def test_delete_recorded_route_sends_daemon_command(self) -> None:
         state = self.state()
