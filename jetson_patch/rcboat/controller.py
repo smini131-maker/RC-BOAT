@@ -719,6 +719,7 @@ class BoatController:
         result.setdefault("route_complete", self.routes.route_complete)
         result["load_error"] = self.routes.load_error
         result["multipath"] = self.routes.multipath_settings()
+        result["multipath_group"] = self.routes.multipath_group_summary()
         return result
 
     def state(self) -> dict[str, Any]:
