@@ -82,5 +82,38 @@ class Week6GuiSmokeTests(unittest.TestCase):
         self.assertEqual(kwargs["password"], "temporary-secret")
 
 
+    def test_ntrip_user_edit_is_not_overwritten_by_telemetry(self) -> None:
+        state = self.state()
+        state["ntrip"]["enabled"] = False
+        self.window.ntrip_enabled.setChecked(True)
+        self.assertTrue(self.window._ntrip_dirty)
+        self.window.update_telemetry(state)
+        self.assertTrue(self.window.ntrip_enabled.isChecked())
+
+    def test_ntrip_ack_releases_editor_for_server_sync(self) -> None:
+        self.window.worker = Mock()
+        self.window.worker.isRunning.return_value = True
+        self.window.worker.send_command.return_value = "ntrip-request"
+        self.window.ntrip_enabled.setChecked(True)
+        self.window.ntrip_host.setText("caster.example")
+        self.window.ntrip_mountpoint.setText("BUS0")
+        self.window.ntrip_username.setText("student")
+        self.window.ntrip_password.setText("temporary-secret")
+        self.window.apply_ntrip()
+        self.assertEqual(self.window._pending_ntrip_request, "ntrip-request")
+        self.window.on_ack({
+            "type": "ack", "ok": True, "command": "CONFIGURE_NTRIP",
+            "request_id": "ntrip-request",
+        })
+        self.assertFalse(self.window._ntrip_dirty)
+        self.assertIsNone(self.window._pending_ntrip_request)
+        self.assertTrue(self.window.ntrip_apply.isEnabled())
+
+    def test_gps_threshold_ranges_are_visible(self) -> None:
+        self.assertIn("좋음 ≥8", self.window.gps_range_note.text())
+        self.assertIn("HDOP ≤2", self.window.gps_range_note.text())
+        self.assertIn("C/N0 ≥40", self.window.gps_range_note.text())
+        self.assertIn("RTK 보정 age ≤5", self.window.gps_range_note.text())
+
 if __name__ == "__main__":
     unittest.main()
