@@ -423,6 +423,37 @@ class RouteManager:
             and haversine_m(reference.points[-1], route.points[-1]) <= self.endpoint_tolerance_m
         ]
 
+    def multipath_group_summary(self) -> dict[str, Any]:
+        reference = self.selected
+        active = self.active
+        indices = self._group_indices()
+        items: list[dict[str, Any]] = []
+        if reference is not None:
+            for idx in indices:
+                route = self.routes[idx]
+                items.append({
+                    "id": route.route_id,
+                    "name": route.name,
+                    "start_gap_m": round(
+                        haversine_m(reference.points[0], route.points[0]), 2
+                    ),
+                    "end_gap_m": round(
+                        haversine_m(reference.points[-1], route.points[-1]), 2
+                    ),
+                    "is_selected": route.route_id == reference.route_id,
+                    "is_active": bool(active and route.route_id == active.route_id),
+                })
+        return {
+            "enabled": self.multipath_enabled,
+            "reference_route_id": reference.route_id if reference else "",
+            "reference_route_name": reference.name if reference else "-",
+            "active_route_id": active.route_id if active else "",
+            "active_route_name": active.name if active else "-",
+            "endpoint_tolerance_m": self.endpoint_tolerance_m,
+            "group_size": len(items),
+            "routes": items,
+        }
+
     def choose_nearest_group_route(self, position: tuple[float, float]) -> bool:
         if not self.multipath_enabled:
             return False
