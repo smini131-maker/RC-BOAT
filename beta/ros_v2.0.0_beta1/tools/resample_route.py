@@ -5,11 +5,23 @@ import json
 import math
 import pathlib
 from copy import deepcopy
+from datetime import datetime
 
 R=6371000.0
 
 def interp(a,b,f):
-    return {'lat': a['lat']+(b['lat']-a['lat'])*f,'lon':a['lon']+(b['lon']-a['lon'])*f}
+    point={'lat': a['lat']+(b['lat']-a['lat'])*f,'lon':a['lon']+(b['lon']-a['lon'])*f}
+    ha,hb=a.get('heading_deg'),b.get('heading_deg')
+    if ha is not None and hb is not None:
+        delta=(float(hb)-float(ha)+180)%360-180
+        point['heading_deg']=(float(ha)+f*delta)%360
+    if a.get('timestamp') and b.get('timestamp'):
+        try:
+            ta=datetime.fromisoformat(a['timestamp']); tb=datetime.fromisoformat(b['timestamp'])
+            point['timestamp']=(ta+(tb-ta)*f).isoformat(timespec='milliseconds')
+        except (ValueError,TypeError):
+            pass  # Never fabricate a date from malformed legacy data
+    return point
 
 def meters(a,b):
     p,q=math.radians(a['lat']),math.radians(b['lat'])

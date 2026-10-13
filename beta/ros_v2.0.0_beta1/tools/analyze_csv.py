@@ -17,8 +17,10 @@ def graph(t,y,label,title,output,switches=None,zero=False,ylims=None):
     else:
         ax.plot(t,y,label=label,linewidth=1.6)
     if zero:ax.axhline(0,linestyle='--',linewidth=.9)
+    if title=='Time vs Speed':ax.axhline(.6,linestyle='--',linewidth=.9,label='0.6 m/s walking reference')
     for s in switches or []:ax.axvline(s,linestyle=':',linewidth=.8)
     if ylims:ax.set_ylim(*ylims)
+    if title=='Time vs Speed':ax.legend(loc='best')
     ax.set_xlabel('Time [s]');ax.set_ylabel(label);ax.set_title(title);ax.grid(True,alpha=.3)
     fig.tight_layout();fig.savefig(output,dpi=150);plt.close(fig)
 
@@ -37,4 +39,14 @@ def main():
       ('speed_mps','Speed [m/s]','Time vs Speed','speed.png',None),
       ('cross_track_error_m','Cross Track Error [m]','Cross Track Error','cross_track_error.png',None)]:
         graph(ts,numeric(col),label,title,out/file,switch,zero=col not in ('speed_mps',),ylims=axis)
+    if 'active_route_id' in rows[0]:
+        names=list(dict.fromkeys(r.get('active_route_id','') for r in rows))
+        index={name:i+1 for i,name in enumerate(names)}
+        fig,ax=plt.subplots(figsize=(9,4.5))
+        ax.step(ts,[index[r.get('active_route_id','')] for r in rows],where='post',linewidth=1.5)
+        for t in switch:ax.axvline(t,linestyle=':',color='m',linewidth=.8)
+        ax.set_yticks(range(1,len(names)+1));ax.set_yticklabels(names)
+        ax.set_xlabel('Time [s]');ax.set_ylabel('Active Route');ax.set_title('Target Route Switch Timeline')
+        ax.grid(True,alpha=.3);fig.tight_layout()
+        fig.savefig(out/'route_switch_timeline.png',dpi=150);plt.close(fig)
 if __name__=='__main__':main()

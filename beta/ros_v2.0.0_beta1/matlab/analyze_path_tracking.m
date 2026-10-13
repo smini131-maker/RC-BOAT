@@ -19,6 +19,9 @@ for i = 1:numel(required)
     end
 end
 t = double(T.elapsed_time_s);
+walkingReference_mps = 0.6;  % walking-only reference, not ESC setpoint
+plotFont='Times New Roman';
+plotFontSize=11;
 angle = double(T.desired_rudder_angle_deg);
 err = double(T.heading_error_deg);
 speed = double(T.speed_mps); % Already SI (m/s); do not divide by 3.6.
@@ -43,18 +46,28 @@ hleft=plot(t,left,'b-','LineWidth',1.8);
 hright=plot(t,right,'r-','LineWidth',1.8);
 for k=1:numel(switchTimes), xline(switchTimes(k),'m:','Switch');end
 xlabel('Time [s]');ylabel('Rudder Angle [deg]');title('Time vs Rudder Angle');
-legend([hfull,hneutral,hleft,hright],{'Desired rudder','Neutral','Left','Right'},'Location','best');grid on;
+set(gca,'FontName',plotFont,'FontSize',plotFontSize);
+legend([hfull,hneutral,hleft,hright],{'Desired rudder','Neutral','Left','Right'},'Location','best','Box','off');grid on;
+axRudder=gca;
 exportgraphics(f1,fullfile(outDir,'steering_angle.png'),'Resolution',150);
 
 f2 = figure('Color','w','Name','Time vs Heading Error');
 plot(t,err,'b-','LineWidth',1.5);hold on;yline(0,'k--');
 for k=1:numel(switchTimes), xline(switchTimes(k),'m:','Route switch');end
 ylim([-180,180]);xlabel('Time [s]');ylabel('Heading Error [deg]');title('Time vs Heading Error');grid on;
+set(gca,'FontName',plotFont,'FontSize',plotFontSize);
+axHeading=gca;
 exportgraphics(f2,fullfile(outDir,'heading_error.png'),'Resolution',150);
 
 f3 = figure('Color','w','Name','Time vs Speed');
-plot(t,speed,'b-','LineWidth',1.5);xlabel('Time [s]');ylabel('Speed [m/s]');
+plot(t,speed,'b-','LineWidth',1.5);hold on;
+yline(walkingReference_mps,'k--','0.6 m/s walking reference');
+xlabel('Time [s]');ylabel('Speed [m/s]');
 title('Time vs Speed (GNSS)');grid on;
+set(gca,'FontName',plotFont,'FontSize',plotFontSize);
+legend({'Measured GPS speed','Walking reference'},'Location','best','Box','off');
+axSpeed=gca;
+linkaxes([axRudder,axHeading,axSpeed],'x');
 exportgraphics(f3,fullfile(outDir,'speed.png'),'Resolution',150);
 
 if ismember('cross_track_error_m',T.Properties.VariableNames)
@@ -62,6 +75,21 @@ if ismember('cross_track_error_m',T.Properties.VariableNames)
     plot(t,double(T.cross_track_error_m),'LineWidth',1.3);hold on;
     for k=1:numel(switchTimes),xline(switchTimes(k),'m:','Route switch');end
     xlabel('Time [s]');ylabel('Signed cross track [m]');title('Cross Track Error');grid on;
+    set(gca,'FontName',plotFont,'FontSize',plotFontSize);
     exportgraphics(f4,fullfile(outDir,'cross_track_error.png'),'Resolution',150);
+end
+if ismember('active_route_id',T.Properties.VariableNames)
+    routeNames=string(T.active_route_id);
+    uniqueRoutes=unique(routeNames,'stable');
+    indices=zeros(height(T),1);
+    for k=1:numel(uniqueRoutes),indices(routeNames==uniqueRoutes(k))=k;end
+    f5=figure('Color','w','Name','Target Route vs Time');
+    stairs(t,indices,'Color',[.18 .36 .7],'LineWidth',1.5);hold on;
+    for k=1:numel(switchTimes),xline(switchTimes(k),'m:','Route switch');end
+    ylim([0.5,max(1.5,numel(uniqueRoutes)+0.5)]);
+    yticks(1:numel(uniqueRoutes));yticklabels(uniqueRoutes);
+    xlabel('Time [s]');ylabel('Active Route');title('Target Route Switch Timeline');grid on;
+    set(gca,'FontName',plotFont,'FontSize',plotFontSize);
+    exportgraphics(f5,fullfile(outDir,'route_switch_timeline.png'),'Resolution',150);
 end
 fprintf('Samples: %d, switches: %d, duration: %.2f s\n',height(T),numel(switchTimes),max(t)-min(t));

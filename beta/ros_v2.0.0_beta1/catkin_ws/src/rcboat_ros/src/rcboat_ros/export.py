@@ -21,15 +21,22 @@ def export_experiment(folder, routes=None, matlab_source=None):
     with (qgis/'actual_track.csv').open('w',newline='',encoding='utf-8') as out:
         w=csv.writer(out);w.writerow(CSV_QGIS)
         for r in rows:
+            if str(r.get('gps_fix','')).lower() not in ('true','1'):continue
             if _float(r['latitude']) is None or _float(r['longitude']) is None:continue
+            if not (-90<=float(r['latitude'])<=90 and -180<=float(r['longitude'])<=180):continue
             w.writerow([r['index'],r['elapsed_time_s'],r['timestamp'],r['latitude'],r['longitude'],r['heading_deg'],r['active_route_id']])
     routes=routes or []
     for side in ('left','center','right'):
-        route=next((r for r in routes if side in r.get('id','').lower() or r.get('name','').lower()==side.upper()),None)
+        route=next((r for r in routes if side in str(r.get('id','')).lower() or side in str(r.get('name','')).lower()),None)
         with (qgis/('target_'+side+'.csv')).open('w',newline='',encoding='utf-8') as f:
             w=csv.writer(f);w.writerow(['Index','Latitude','Longitude'])
             if route:
                 for i,p in enumerate(route.get('waypoints',[]),start=1):w.writerow([i,p['lat'],p['lon']])
+    # Include the QGIS style/import helpers alongside the experiment.
+    qgis_script=pathlib.Path(__file__).resolve().parents[5]/'qgis'
+    for name in ('setup_qgis_layers.py','README_QGIS_SETUP_KO.md'):
+        source=qgis_script/name
+        if source.is_file():shutil.copy2(source,qgis/name)
     if matlab_source and pathlib.Path(matlab_source).is_file():
         mdir=folder/'matlab';mdir.mkdir(exist_ok=True)
         shutil.copy2(matlab_source,mdir/'analyze_path_tracking.m')
@@ -42,6 +49,14 @@ def export_experiment(folder, routes=None, matlab_source=None):
     duration=max(stamps)-min(stamps) if len(stamps)>1 else 0
     fixed=sum(1 for r in rows if r.get('rtk_state')=='RTK_FIXED')
     switches=sum(1 for r in rows if str(r.get('multipath_switch','')).lower() in ('true','1'))
+    event_path=folder/'raw/events.jsonl'
+    if event_path.exists():
+        try:
+            event_switches=sum(1 for line in event_path.read_text(encoding='utf-8').splitlines()
+                               if line.strip() and json.loads(line).get('type')=='ROUTE_SWITCH')
+            switches=max(switches,event_switches)
+        except (OSError,ValueError,TypeError) as exc:
+            raise ValueError('invalid route switch event log: '+str(exc)) from exc
     gps_times=sorted(set(x for r in rows if (x:=_float(r.get('gps_update_monotonic'))) is not None and x>0))
     gps_rate=(len(gps_times)-1)/(gps_times[-1]-gps_times[0]) if len(gps_times)>1 and gps_times[-1]>gps_times[0] else None
     summary={'Duration_s':duration,'Samples':len(rows),'Mean_GPS_Rate_Hz':gps_rate,

@@ -26,7 +26,8 @@ files=[
 'heading_deg','target_heading_deg','heading_error_deg','speed_mps','desired_steering_pwm','desired_rudder_angle_deg',
 'desired_throttle_pwm','actual_steering_pwm','actual_throttle_pwm','selected_route_id','active_route_id',
 'target_waypoint_index','distance_to_waypoint_m','cross_track_error_m','multipath_candidate_id','multipath_switch',
-'gps_fix','rtk_state','satellites','hdop','hacc_m','cno_dbhz','gps_update_monotonic']
+'gps_fix','rtk_state','satellites','hdop','hacc_m','cno_dbhz','gps_update_monotonic',
+'previous_route_id','new_route_id','switch_event_timestamp']
 events=[]
 with (p/'raw/path_tracking.csv').open('w',newline='',encoding='utf-8') as f:
     writer=csv.DictWriter(f,fieldnames=files);writer.writeheader()
@@ -49,7 +50,7 @@ with (p/'raw/path_tracking.csv').open('w',newline='',encoding='utf-8') as f:
         stat=rm.update((lat,lon),now=500+t)
         out=navigation_command(gps,stat,config,stopped_once=True)
         if stat['multipath_switch']:
-            events.append({'event':'ROUTE_SWITCH','TimeStep':t,'previous_route':stat['previous_route'],
+            events.append({'type':'ROUTE_SWITCH','TimeStep':t,'previous_route':stat['previous_route'],
                            'candidate_route':stat['candidate_route_id'],'new_route':stat['active_route_id']})
         row=dict(index=i+1,timestamp=(start+dt.timedelta(seconds=t)).isoformat(timespec='milliseconds'),elapsed_time_s=t,
            latitude=lat,longitude=lon,utm_easting_m='',utm_northing_m='',heading_deg=heading,
@@ -60,7 +61,10 @@ with (p/'raw/path_tracking.csv').open('w',newline='',encoding='utf-8') as f:
            target_waypoint_index=stat['target_waypoint_index'],distance_to_waypoint_m=stat['distance_to_waypoint_m'],
            cross_track_error_m=stat['cross_track_error_m'],multipath_candidate_id=stat['candidate_route_id'],
            multipath_switch=str(stat['multipath_switch']),gps_fix='True',rtk_state='RTK_FIXED' if t>=4 else 'RTK_FLOAT',
-           satellites=18,hdop=1.1,hacc_m=.05,cno_dbhz=34,gps_update_monotonic=10000+t)
+           satellites=18,hdop=1.1,hacc_m=.05,cno_dbhz=34,gps_update_monotonic=10000+t,
+           previous_route_id=stat['previous_route'] if stat['multipath_switch'] else '',
+           new_route_id=stat['active_route_id'] if stat['multipath_switch'] else '',
+           switch_event_timestamp=(start+dt.timedelta(seconds=t)).isoformat(timespec='milliseconds') if stat['multipath_switch'] else '')
         writer.writerow(row)
 (p/'raw/events.jsonl').write_text('\n'.join(json.dumps(x) for x in events)+'\n')
 info={'synthetic':True,'real_gps':False,'purpose':'CSV/QGIS/MATLAB schema verification only','version':'2.0.0-beta.1'}
