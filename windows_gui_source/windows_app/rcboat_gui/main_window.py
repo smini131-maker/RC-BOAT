@@ -1577,7 +1577,17 @@ class MainWindow(QMainWindow):
         self.cards["arduino"].set_value(ok_text if devices.get("arduino") else "연결 끊김", bool(devices.get("arduino")))
         self.cards["pca"].set_value(ok_text if devices.get("pca9685") else "연결 끊김", bool(devices.get("pca9685")))
         gps_connected = bool(devices.get("gps"))
-        gps_text = gps_ok_text if gps.get("fix") else "GPS NO FIX" if gps_connected else "연결 끊김"
+        live_solution = str(gps.get("rtk_state") or "")
+        live_fix_label = str(gps.get("fix_label") or "")
+        if gps.get("fix"):
+            if live_solution in {"RTK_FIXED", "RTK_FLOAT"}:
+                gps_text = live_solution
+            elif live_fix_label:
+                gps_text = live_fix_label
+            else:
+                gps_text = gps_ok_text
+        else:
+            gps_text = "GPS NO FIX" if gps_connected else "연결 끊김"
         self.cards["gps"].set_value(gps_text, bool(gps.get("fix")))
         self.cards["armed"].set_value(operation_ko if mode == "NAVIGATION" else "대기", bool(state.get("navigation_active")))
         self.cards["estop"].set_value("작동 중" if state.get("estop") else "정상", not bool(state.get("estop")))
