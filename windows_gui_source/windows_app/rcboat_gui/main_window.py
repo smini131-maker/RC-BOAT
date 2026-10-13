@@ -88,6 +88,9 @@ class MainWindow(QMainWindow):
         self._multipath_dirty = False
         self._syncing_multipath = False
         self._pending_multipath_request: str | None = None
+        self._ntrip_dirty = False
+        self._syncing_ntrip = False
+        self._pending_ntrip_request: str | None = None
         self._remote_keys: set[int] = set()
         self._build_ui()
         self._load_settings()
@@ -223,8 +226,8 @@ class MainWindow(QMainWindow):
             ("조종기 조향", "rc_steering"), ("조종기 스로틀", "rc_throttle"),
             ("서보 출력 CH0", "pca_steering"), ("ESC 출력 CH6", "pca_throttle"),
             ("위도", "lat"), ("경도", "lon"),
-            ("고도", "altitude"), ("HDOP", "hdop"), ("마지막 FIX 경과", "last_fix_age"),
-            ("수신 위성", "satellites"), ("속도", "speed"),
+            ("고도", "altitude"), ("HDOP (좋음 ≤2 / 항법 ≤3)", "hdop"), ("마지막 FIX 경과 (정상 ≤2 s)", "last_fix_age"),
+            ("수신 위성 (좋음 ≥8 / 주의 6~7)", "satellites"), ("속도", "speed"),
             ("진행 방향", "course"), ("안전 전환 사유", "failsafe"),
         ]
         for idx, (title, key) in enumerate(fields):
@@ -322,10 +325,10 @@ class MainWindow(QMainWindow):
         health_layout = QGridLayout(health_box)
         self.gps_detail_labels: dict[str, QLabel] = {}
         detail_fields = (
-            ("FIX", "fix_label"), ("UTC", "utc_time"), ("Satellite", "satellites"),
-            ("HDOP", "hdop"), ("PDOP", "pdop"), ("VDOP", "vdop"),
-            ("C/N0", "cno"), ("hAcc", "hacc"), ("데이터 age", "age"),
-            ("UTM", "utm"), ("RTK 상태", "rtk_state"), ("보정 age", "correction_age"),
+            ("FIX (RTK_FIXED 최상)", "fix_label"), ("UTC", "utc_time"), ("Satellite (좋음 ≥8 / 주의 6~7)", "satellites"),
+            ("HDOP (좋음 ≤2 / 항법 ≤3)", "hdop"), ("PDOP (좋음 ≤2 / 주의 ≤4)", "pdop"), ("VDOP (좋음 ≤1.5)", "vdop"),
+            ("C/N0 (좋음 ≥40 / 주의 ≥35 dB-Hz)", "cno"), ("hAcc (좋음 ≤1.5 / 주의 ≤3 m)", "hacc"), ("데이터 age (정상 ≤2 s)", "age"),
+            ("UTM", "utm"), ("RTK 상태 (RTK_FIXED 권장)", "rtk_state"), ("보정 age (좋음 ≤5 / 허용 ≤10 s)", "correction_age"),
         )
         for index, (title, key) in enumerate(detail_fields):
             health_layout.addWidget(QLabel(title), index // 4 * 2, index % 4)
@@ -336,6 +339,14 @@ class MainWindow(QMainWindow):
         self.gps_health_status = QLabel("GPS Health: UNKNOWN")
         self.gps_health_status.setWordWrap(True)
         health_layout.addWidget(self.gps_health_status, 6, 0, 1, 4)
+        self.gps_range_note = QLabel(
+            "판정 기준(R12.1): 위성 ≥8 GOOD · HDOP ≤2 GOOD / ≤3 항법 허용 · "
+            "PDOP ≤2 GOOD / ≤4 WARNING · VDOP ≤1.5 GOOD · C/N0 ≥40 GOOD / ≥35 WARNING · "
+            "hAcc ≤1.5 m GOOD / ≤3 m WARNING · GPS age ≤2 s · RTK 보정 age ≤5 s GOOD / ≤10 s WARNING"
+        )
+        self.gps_range_note.setWordWrap(True)
+        self.gps_range_note.setStyleSheet("color:#8ea4c4; font-size:9pt;")
+        health_layout.addWidget(self.gps_range_note, 7, 0, 1, 4)
 
         logging_box = QGroupBox("GPS 데이터 로그 (기존 항로 기록과 별도)")
         logging_layout = QHBoxLayout(logging_box)
@@ -358,8 +369,15 @@ class MainWindow(QMainWindow):
         self.ntrip_password = QLineEdit(); self.ntrip_password.setEchoMode(QLineEdit.Password)
         self.ntrip_password.setPlaceholderText("비밀번호 변경 시에만 입력")
         self.ntrip_tls = QCheckBox("TLS")
-        ntrip_apply = QPushButton("설정 저장 · 연결")
-        ntrip_apply.clicked.connect(self.apply_ntrip)
+        self.ntrip_apply = QPushButton("설정 저장 · 연결")
+        self.ntrip_apply.clicked.connect(self.apply_ntrip)
+        self.ntrip_enabled.toggled.connect(self._mark_ntrip_dirty)
+        self.ntrip_tls.toggled.connect(self._mark_ntrip_dirty)
+        self.ntrip_port.valueChanged.connect(self._mark_ntrip_dirty)
+        self.ntrip_host.textEdited.connect(self._mark_ntrip_dirty)
+        self.ntrip_mountpoint.textEdited.connect(self._mark_ntrip_dirty)
+        self.ntrip_username.textEdited.connect(self._mark_ntrip_dirty)
+        self.ntrip_password.textEdited.connect(self._mark_ntrip_dirty)
         ntrip_disable = QPushButton("RTK 연결 해제")
         ntrip_disable.clicked.connect(lambda: self.command("DISABLE_NTRIP"))
         refresh = QPushButton("상태 새로고침")
@@ -370,7 +388,7 @@ class MainWindow(QMainWindow):
             box = QVBoxLayout(); box.addWidget(QLabel(label)); box.addWidget(widget)
             ntrip_layout.addLayout(box, 0, column)
         ntrip_layout.addWidget(self.ntrip_tls, 1, 0)
-        ntrip_layout.addWidget(ntrip_apply, 1, 1)
+        ntrip_layout.addWidget(self.ntrip_apply, 1, 1)
         ntrip_layout.addWidget(ntrip_disable, 1, 2)
         ntrip_layout.addWidget(refresh, 1, 3)
         ntrip_layout.addWidget(self.ntrip_status, 1, 4, 1, 2)
@@ -387,13 +405,23 @@ class MainWindow(QMainWindow):
         layout.addWidget(health_box); layout.addWidget(logging_box); layout.addWidget(ntrip_box); layout.addWidget(safety_box); layout.addStretch(1)
         return page
 
+    def _mark_ntrip_dirty(self, *_args) -> None:
+        if not self._syncing_ntrip:
+            self._ntrip_dirty = True
+            self.ntrip_apply.setText("설정 저장 · 연결 *")
+
     def apply_ntrip(self) -> None:
-        self.command(
+        request_id = self.command(
             "CONFIGURE_NTRIP", enabled=self.ntrip_enabled.isChecked(),
             host=self.ntrip_host.text().strip(), port=self.ntrip_port.value(),
             mountpoint=self.ntrip_mountpoint.text().strip(), username=self.ntrip_username.text().strip(),
             password=self.ntrip_password.text(), tls=self.ntrip_tls.isChecked(),
         )
+        if request_id is not None:
+            self._pending_ntrip_request = request_id
+            self.ntrip_apply.setEnabled(False)
+            self.ntrip_apply.setText("저장 · 연결 확인 중...")
+            self.ntrip_status.setText("Jetson에 RTK/NTRIP 설정을 저장하고 연결 상태를 확인하는 중입니다")
         self.ntrip_password.clear()
 
     def apply_gps_safety(self) -> None:
@@ -904,6 +932,20 @@ class MainWindow(QMainWindow):
                 self._multipath_dirty = False
                 self.multipath_apply.setEnabled(True)
                 self.multipath_apply.setText("기준 저장")
+            if (
+                ack.get("command") == "CONFIGURE_NTRIP"
+                and ack.get("request_id") == self._pending_ntrip_request
+            ):
+                self._pending_ntrip_request = None
+                self._ntrip_dirty = False
+                self.ntrip_apply.setEnabled(True)
+                self.ntrip_apply.setText("설정 저장 · 연결")
+                self.ntrip_status.setText("RTK/NTRIP 설정 저장 완료 · 연결 상태 수신 대기")
+            if ack.get("command") == "DISABLE_NTRIP":
+                self._pending_ntrip_request = None
+                self._ntrip_dirty = False
+                self.ntrip_apply.setEnabled(True)
+                self.ntrip_apply.setText("설정 저장 · 연결")
             if ack.get("command") == "STOP_GPS_RECORDING":
                 self.command("RELOAD_ROUTES")
             if ack.get("command") == "START_HIL":
@@ -929,6 +971,15 @@ class MainWindow(QMainWindow):
                 self.multipath_apply.setEnabled(True)
                 self.multipath_apply.setText("기준 저장 *")
                 self.multipath_status.setText(f"저장 실패: {ack.get('error', '알 수 없는 오류')}")
+            if (
+                ack.get("command") == "CONFIGURE_NTRIP"
+                and ack.get("request_id") == self._pending_ntrip_request
+            ):
+                self._pending_ntrip_request = None
+                self._ntrip_dirty = True
+                self.ntrip_apply.setEnabled(True)
+                self.ntrip_apply.setText("설정 저장 · 연결 *")
+                self.ntrip_status.setText(f"RTK 설정 실패: {ack.get('error', '알 수 없는 오류')}")
             self.log(f"명령 거부 {ack.get('command')}: {ack.get('error')}")
 
     @staticmethod
@@ -1042,11 +1093,16 @@ class MainWindow(QMainWindow):
             + (f" · 오류: {ntrip.get('last_error')}" if ntrip.get("last_error") else "")
             + fallback_note
         )
-        if not self.ntrip_host.hasFocus(): self.ntrip_host.setText(str(ntrip.get("host") or ""))
-        if not self.ntrip_mountpoint.hasFocus(): self.ntrip_mountpoint.setText(str(ntrip.get("mountpoint") or ""))
-        self.ntrip_port.setValue(int(ntrip.get("port") or 2101))
-        self.ntrip_tls.setChecked(bool(ntrip.get("tls")))
-        self.ntrip_enabled.setChecked(bool(ntrip.get("enabled")))
+        if not self._ntrip_dirty and self._pending_ntrip_request is None:
+            self._syncing_ntrip = True
+            try:
+                self.ntrip_host.setText(str(ntrip.get("host") or ""))
+                self.ntrip_mountpoint.setText(str(ntrip.get("mountpoint") or ""))
+                self.ntrip_port.setValue(int(ntrip.get("port") or 2101))
+                self.ntrip_tls.setChecked(bool(ntrip.get("tls")))
+                self.ntrip_enabled.setChecked(bool(ntrip.get("enabled")))
+            finally:
+                self._syncing_ntrip = False
         gps_settings = state.get("gps_settings") or {}
         self.rtk_fallback.setChecked(bool(gps_settings.get("rtk_fallback_to_gps", True)))
         self.gps_max_hdop.setValue(float(gps_settings.get("navigation_max_hdop", 3.0)))
