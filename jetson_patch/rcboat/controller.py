@@ -304,7 +304,11 @@ class BoatController:
             name, minimum_distance_m=minimum_distance_m,
             minimum_interval_s=minimum_interval_s, arrival_radius_m=arrival_radius_m,
         )
-        self.routes.record_position((snap.gps_lat, snap.gps_lon), now)
+        self.routes.record_position(
+            (snap.gps_lat, snap.gps_lon),
+            now,
+            heading_deg=snap.gps_course_deg,
+        )
         self._event("INFO", f"GPS route recording started: {self.routes.recording_name}")
 
     def stop_gps_recording(self, *, save: bool) -> str | None:
@@ -622,7 +626,11 @@ class BoatController:
                 and snap.gps_lon is not None
                 and now - snap.gps_last_update <= VALUES.gps_stale_timeout_s
             ):
-                self.routes.record_position((snap.gps_lat, snap.gps_lon), now)
+                self.routes.record_position(
+                    (snap.gps_lat, snap.gps_lon),
+                    now,
+                    heading_deg=snap.gps_course_deg,
+                )
             update_at = float(gps_data.get("last_update_monotonic") or 0.0)
             if self.gps_logger.active and update_at > self._last_logged_gps_update:
                 ntrip = self._ntrip_state()
