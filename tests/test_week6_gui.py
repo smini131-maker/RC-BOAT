@@ -110,10 +110,12 @@ class Week6GuiSmokeTests(unittest.TestCase):
         self.assertTrue(self.window.ntrip_apply.isEnabled())
 
     def test_gps_threshold_ranges_are_visible(self) -> None:
-        self.assertIn("좋음 ≥8", self.window.gps_range_note.text())
-        self.assertIn("HDOP ≤2", self.window.gps_range_note.text())
-        self.assertIn("C/N0 ≥40", self.window.gps_range_note.text())
-        self.assertIn("RTK 보정 age ≤5", self.window.gps_range_note.text())
+        text = self.window.gps_range_note.text()
+        self.assertIn("위성 좋음 ≥8", text)
+        self.assertIn("HDOP 좋음 ≤2", text)
+        self.assertIn("VDOP ≤5", text)
+        self.assertIn("C/N0 ≥40", text)
+        self.assertIn("RTK 보정 age ≤5", text)
 
 
     def test_route_editor_is_not_overwritten_before_apply(self) -> None:
