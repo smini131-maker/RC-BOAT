@@ -1611,89 +1611,275 @@ class MainWindow(QMainWindow):
         self.value_labels["failsafe"].set_value(failsafe_ko)
         health = gps.get("health") or {}
         health_status = str(health.get("status") or "UNKNOWN")
-        navigation_health = str(health.get("navigation_status") or health_status)
-        colors = {"GOOD": "#4ee0b0", "WARNING": "#f8bd58", "BAD": "#ff6474", "NO_FIX": "#ff6474", "STALE": "#ff6474"}
-        reasons = " · ".join(str(item) for item in health.get("reasons") or [])
-        health_title = f"GPS 항법: {navigation_health} · 전체 수신: {health_status}"
+        navigation_health = str(
+            health.get("navigation_status") or health_status
+        )
+        colors = {
+            "GOOD": "#4ee0b0",
+            "WARNING": "#f8bd58",
+            "BAD": "#ff6474",
+            "NO_FIX": "#ff6474",
+            "STALE": "#ff6474",
+        }
+        status_ko = {
+            "GOOD": "좋음",
+            "WARNING": "주의",
+            "BAD": "나쁨",
+            "NO_FIX": "FIX 없음",
+            "STALE": "데이터 지연",
+            "UNKNOWN": "확인 중",
+        }
+        reasons = " · ".join(
+            str(item) for item in health.get("reasons") or []
+        )
+        health_title = (
+            f"항법 상태 {status_ko.get(navigation_health, navigation_health)}"
+            f" · 전체 수신 {status_ko.get(health_status, health_status)}"
+        )
         if gps.get("rtk_fallback_active"):
-            health_title += " · RTK 손실 → GPS 대체 운항"
+            health_title += " · RTK 미고정 → GPS 기반 항법"
         self.gps_health_status.setText(health_title)
         self.gps_health_status.setToolTip(reasons)
-        self.gps_health_status.setStyleSheet(f"color:{colors.get(navigation_health, '#8ea4c4')}; font-weight:700")
+        self.gps_health_status.setStyleSheet(
+            f"color:{colors.get(navigation_health, '#8ea4c4')}; "
+            "font-size:12pt; font-weight:800; padding:4px 0;"
+        )
+
         primary_reason = self._primary_gps_health_reason(health)
         self.gps_health_primary_reason.setText(
-            f"주요 원인: {primary_reason}" if primary_reason else ""
+            f"가장 큰 영향: {primary_reason}" if primary_reason else ""
         )
         self.gps_health_primary_reason.setVisible(bool(primary_reason))
-        self.gps_detail_labels["fix_label"].setText(str(gps.get("fix_label") or "-"))
-        self.gps_detail_labels["utc_time"].setText(str(gps.get("utc_time") or "-"))
-        self.gps_detail_labels["satellites"].setText(self._fmt(gps.get("satellites"), 0))
-        self.gps_detail_labels["hdop"].setText(self._fmt(gps.get("hdop"), 2))
-        self.gps_detail_labels["pdop"].setText(self._fmt(gps.get("pdop"), 2))
-        self.gps_detail_labels["vdop"].setText(self._fmt(gps.get("vdop"), 2))
-        self.gps_detail_labels["cno"].setText(self._fmt(gps.get("cno_avg_dbhz"), 1, " dB-Hz"))
-        self.gps_detail_labels["hacc"].setText(self._fmt(gps.get("hacc_m"), 2, " m"))
-        self.gps_detail_labels["age"].setText(self._fmt(gps.get("age_s"), 2, " s"))
+
+        fix_label = str(gps.get("fix_label") or "-")
+        rtk_state_raw = str(gps.get("rtk_state") or "UNKNOWN")
+        if rtk_state_raw in {"RTK_FIXED", "RTK_FLOAT"}:
+            solution = rtk_state_raw
+        elif fix_label not in {"", "-", "UNKNOWN"}:
+            solution = fix_label
+        else:
+            solution = rtk_state_raw
+
+        solution_level = (
+            "GOOD" if solution == "RTK_FIXED"
+            else "WARNING" if solution == "RTK_FLOAT"
+            else "INFO" if solution in {"DGPS", "GPS", "3D_FIX", "2D_FIX"}
+            else "BAD" if solution in {"NO_FIX", "INVALID"}
+            else "INFO"
+        )
+        self.gps_metric_cards["fix_label"].set_value(fix_label, solution_level)
+        self.gps_metric_cards["utc_time"].set_value(
+            str(gps.get("utc_time") or "-"), "INFO"
+        )
+
+        satellites = int(gps.get("satellites") or 0)
+        satellite_level = (
+            "GOOD" if satellites >= 8
+            else "WARNING" if satellites >= 6
+            else "BAD"
+        )
+        self.gps_metric_cards["satellites"].set_value(
+            self._fmt(gps.get("satellites"), 0), satellite_level
+        )
+
+        hdop = gps.get("hdop")
+        hdop_level = (
+            "INFO" if hdop is None
+            else "GOOD" if float(hdop) <= 2.0
+            else "WARNING" if float(hdop) <= 3.0
+            else "BAD"
+        )
+        self.gps_metric_cards["hdop"].set_value(
+            self._fmt(hdop, 2), hdop_level
+        )
+
+        pdop = gps.get("pdop")
+        pdop_level = (
+            "INFO" if pdop is None
+            else "GOOD" if float(pdop) <= 2.0
+            else "WARNING" if float(pdop) <= 4.0
+            else "BAD"
+        )
+        self.gps_metric_cards["pdop"].set_value(
+            self._fmt(pdop, 2), pdop_level
+        )
+
+        vdop = gps.get("vdop")
+        vdop_level = (
+            "INFO" if vdop is None
+            else "GOOD" if float(vdop) <= 5.0
+            else "WARNING"
+        )
+        self.gps_metric_cards["vdop"].set_value(
+            self._fmt(vdop, 2), vdop_level
+        )
+
+        cno = gps.get("cno_avg_dbhz")
+        cno_level = (
+            "INFO" if cno is None
+            else "GOOD" if float(cno) >= 40.0
+            else "WARNING" if float(cno) >= 30.0
+            else "BAD"
+        )
+        self.gps_metric_cards["cno"].set_value(
+            self._fmt(cno, 1, " dB-Hz"), cno_level
+        )
+
+        hacc = gps.get("hacc_m")
+        hacc_level = (
+            "INFO" if hacc is None
+            else "GOOD" if float(hacc) <= 1.5
+            else "WARNING" if float(hacc) <= 3.0
+            else "BAD"
+        )
+        self.gps_metric_cards["hacc"].set_value(
+            self._fmt(hacc, 2, " m"), hacc_level
+        )
+
+        gps_age = gps.get("age_s")
+        age_level = (
+            "INFO" if gps_age is None
+            else "GOOD" if float(gps_age) <= 2.0
+            else "BAD"
+        )
+        self.gps_metric_cards["age"].set_value(
+            self._fmt(gps_age, 2, " s"), age_level
+        )
+
         utm_text = "-"
-        if gps.get("utm_easting") is not None and gps.get("utm_northing") is not None:
-            utm_text = f"{gps.get('utm_zone') or ''} {float(gps['utm_easting']):.2f}, {float(gps['utm_northing']):.2f}"
-        self.gps_detail_labels["utm"].setText(utm_text)
-        rtk_text = str(gps.get("rtk_state") or "UNKNOWN")
-        if gps.get("rtk_fallback_active"):
-            rtk_text += " → GPS 운항 계속"
-        self.gps_detail_labels["rtk_state"].setText(rtk_text)
+        if (
+            gps.get("utm_easting") is not None
+            and gps.get("utm_northing") is not None
+        ):
+            utm_text = (
+                f"{gps.get('utm_zone') or ''} "
+                f"{float(gps['utm_easting']):.2f}, "
+                f"{float(gps['utm_northing']):.2f}"
+            )
+        self.gps_metric_cards["utm"].set_value(utm_text, "INFO")
+
+        solution_display = solution
+        if gps.get("rtk_fallback_active") and solution != "RTK_FIXED":
+            solution_display += " · GPS 기반 운항"
+        self.gps_metric_cards["rtk_state"].set_value(
+            solution_display, solution_level
+        )
+
         ntrip = state.get("ntrip") or {}
-        self.gps_detail_labels["correction_age"].setText(self._fmt(ntrip.get("last_correction_age_s"), 1, " s"))
-        fallback_note = " · GPS Fix로 계속 운항" if gps.get("rtk_fallback_active") else ""
+        correction_age = ntrip.get("last_correction_age_s")
+        correction_level = (
+            "INFO" if correction_age is None
+            else "GOOD" if float(correction_age) <= 5.0
+            else "WARNING" if float(correction_age) <= 10.0
+            else "BAD"
+        )
+        self.gps_metric_cards["correction_age"].set_value(
+            self._fmt(correction_age, 1, " s"), correction_level
+        )
+
         ntrip_error = str(ntrip.get("last_error") or "")
         ntrip_error_hint = self._ntrip_error_hint(
             ntrip_error, str(ntrip.get("mountpoint") or "")
         )
-        mountpoint_404 = "404" in ntrip_error and "mountpoint" in ntrip_error.lower()
+        mountpoint_404 = (
+            "404" in ntrip_error
+            and "mountpoint" in ntrip_error.lower()
+        )
         self.ntrip_mount_fix.setVisible(mountpoint_404)
+
+        ntrip_enabled = bool(ntrip.get("enabled"))
+        ntrip_connected = bool(ntrip.get("connected"))
+        if not ntrip_enabled:
+            link_state = "비활성"
+        elif ntrip_connected:
+            link_state = "연결됨"
+        elif ntrip_error:
+            link_state = "연결 실패"
+        else:
+            link_state = "연결 대기"
+
+        solution_note = {
+            "RTK_FIXED": "RTK 고정해",
+            "RTK_FLOAT": "RTK Float · FIXED 대기",
+            "DGPS": "DGPS · RTK 미고정",
+            "GPS": "일반 GPS · RTK 미고정",
+            "NO_FIX": "위치 FIX 없음",
+        }.get(solution, solution)
+
+        fallback_note = (
+            " · GPS 기반 운항 허용"
+            if gps.get("rtk_fallback_active")
+            else ""
+        )
         self.ntrip_status.setText(
-            ("연결됨" if ntrip.get("connected") else "연결 안 됨")
-            + f" · {ntrip.get('host') or '-'}:{ntrip.get('port') or '-'} / {ntrip.get('mountpoint') or '-'}"
-            + f" · {int(ntrip.get('bytes_received') or 0)} bytes"
-            + (f" · 오류: {ntrip_error_hint}" if ntrip_error_hint else "")
+            f"NTRIP 보정링크: {link_state}"
+            f" · 위치 해: {solution_note}"
+            f" · {ntrip.get('host') or '-'}:{ntrip.get('port') or '-'}"
+            f" / {ntrip.get('mountpoint') or '-'}"
+            f" · {int(ntrip.get('bytes_received') or 0)} bytes"
+            + (
+                f" · 오류: {ntrip_error_hint}"
+                if ntrip_error_hint else ""
+            )
             + fallback_note
         )
+        if ntrip_error:
+            ntrip_color = "#ff6474"
+        elif ntrip_connected and solution == "RTK_FIXED":
+            ntrip_color = "#4ee0b0"
+        elif ntrip_connected:
+            ntrip_color = "#f8bd58"
+        else:
+            ntrip_color = "#8ea4c4"
+        self.ntrip_status.setStyleSheet(
+            "background:#0f1a2c; border:1px solid #243652; "
+            "border-radius:8px; padding:9px 12px; font-weight:700; "
+            f"color:{ntrip_color};"
+        )
+
         ntrip_signature = (
-            bool(ntrip.get("enabled")),
-            bool(ntrip.get("connected")),
-            str(ntrip.get("last_error") or ""),
+            ntrip_enabled,
+            ntrip_connected,
+            ntrip_error,
             str(ntrip.get("host") or ""),
             int(ntrip.get("port") or 0),
             str(ntrip.get("mountpoint") or ""),
+            solution,
         )
         if self._last_ntrip_status_signature is None:
             self._last_ntrip_status_signature = ntrip_signature
         elif ntrip_signature != self._last_ntrip_status_signature:
             self.log(
-                "RTK/NTRIP 상태 변경: "
-                + ("사용" if ntrip.get("enabled") else "비활성")
-                + " / "
-                + ("연결됨" if ntrip.get("connected") else "연결 안 됨")
+                "RTK 상태 변경: "
+                f"NTRIP={link_state} · 위치해={solution_note}"
                 + (
-                    f" / 오류={self._ntrip_error_hint(str(ntrip.get('last_error') or ''), str(ntrip.get('mountpoint') or ''))}"
-                    if ntrip.get("last_error") else ""
+                    f" · 오류={ntrip_error_hint}"
+                    if ntrip_error_hint else ""
                 )
             )
             self._last_ntrip_status_signature = ntrip_signature
+
         received = int(ntrip.get("bytes_received") or 0)
         if received > 0 and not self._ntrip_received_corrections:
             self._ntrip_received_corrections = True
-            self.log(f"RTK 보정 데이터 수신 시작: {received} bytes")
-        elif received <= 0 and not ntrip.get("connected"):
+            self.log(
+                f"RTK 보정 데이터 수신 시작: {received} bytes · 위치해={solution}"
+            )
+        elif received <= 0 and not ntrip_connected:
             self._ntrip_received_corrections = False
+
         if not self._ntrip_dirty and self._pending_ntrip_request is None:
             self._syncing_ntrip = True
             try:
                 self.ntrip_host.setText(str(ntrip.get("host") or ""))
-                self.ntrip_mountpoint.setText(str(ntrip.get("mountpoint") or ""))
-                self.ntrip_port.setValue(int(ntrip.get("port") or 2101))
+                self.ntrip_mountpoint.setText(
+                    str(ntrip.get("mountpoint") or "")
+                )
+                self.ntrip_port.setValue(
+                    int(ntrip.get("port") or 2101)
+                )
                 self.ntrip_tls.setChecked(bool(ntrip.get("tls")))
-                self.ntrip_enabled.setChecked(bool(ntrip.get("enabled")))
+                self.ntrip_enabled.setChecked(ntrip_enabled)
             finally:
                 self._syncing_ntrip = False
         gps_settings = state.get("gps_settings") or {}
