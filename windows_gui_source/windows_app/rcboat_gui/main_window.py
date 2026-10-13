@@ -1106,6 +1106,224 @@ class MainWindow(QMainWindow):
                 )
                 self.log(f"항로 선택 요청: {self.route_combo.currentText()} ({route_id})")
 
+    def _selected_route_payload(self) -> dict | None:
+        route_id = self.route_combo.currentData()
+        if route_id is None:
+            return None
+        for route in self._latest_routes:
+            if str(route.get("id") or "") == str(route_id):
+                return route
+        return None
+
+    def _update_route_action_state(self) -> None:
+        route = self._selected_route_payload()
+        has_route = route is not None
+        connected = bool(self.worker and self.worker.isRunning())
+        is_training = bool(route and RoutePlot.is_training_route(route))
+        self.route_export_button.setEnabled(has_route)
+        self.route_delete_button.setEnabled(
+            connected and has_route and not is_training
+        )
+        if is_training:
+            self.route_delete_button.setToolTip(
+                "훈련 항로는 보호됩니다. 기록한 항로만 삭제할 수 있습니다."
+            )
+        else:
+            self.route_delete_button.setToolTip("")
+
+    def _sync_route_layer_controls(self, routes: list[dict]) -> None:
+        recorded = [
+            route for route in routes
+            if not RoutePlot.is_training_route(route)
+        ]
+        signature = tuple(
+            (str(route.get("id") or ""), str(route.get("name") or ""))
+            for route in recorded
+        )
+        if signature == self._route_layer_signature:
+            return
+        self._route_layer_signature = signature
+
+        while self.route_layer_checks_layout.count():
+            item = self.route_layer_checks_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self.route_layer_checks = {}
+
+        if not recorded:
+            empty = QLabel("표시할 기록 항로가 없습니다")
+            empty.setObjectName("sectionHint")
+            self.route_layer_checks_layout.addWidget(empty)
+        else:
+            for route in recorded:
+                route_id = str(route.get("id") or "")
+                name = str(route.get("name") or route_id)
+                checkbox = QCheckBox(name)
+                stored = self.settings.value(
+                    f"route_map_visible/{route_id}", True
+                )
+                visible = (
+                    stored
+                    if isinstance(stored, bool)
+                    else str(stored).strip().lower() not in {"0", "false", "no", "off"}
+                )
+                checkbox.setChecked(visible)
+                checkbox.toggled.connect(
+                    lambda checked, rid=route_id: self._set_route_layer_visible(
+                        rid, checked
+                    )
+                )
+                self.route_layer_checks[route_id] = checkbox
+                self.route_layer_checks_layout.addWidget(checkbox)
+                self.route_plot.set_route_visible(route_id, visible)
+        self.route_layer_checks_layout.addStretch(1)
+
+    def _set_route_layer_visible(self, route_id: str, visible: bool) -> None:
+        self.settings.setValue(f"route_map_visible/{route_id}", bool(visible))
+        self.route_plot.set_route_visible(route_id, bool(visible))
+
+    def _set_all_route_layers(self, visible: bool) -> None:
+        for route_id, checkbox in self.route_layer_checks.items():
+            checkbox.setChecked(bool(visible))
+            self.settings.setValue(
+                f"route_map_visible/{route_id}", bool(visible)
+            )
+        self.route_plot.set_visible_routes(
+            self.route_layer_checks.keys() if visible else []
+        )
+
+    def route_plot_fit(self) -> None:
+        self.route_plot.fit_to_data()
+
+    def export_selected_route(self) -> None:
+        route = self._selected_route_payload()
+        if route is None:
+            QMessageBox.warning(
+                self, "항로 없음", "PC에 저장할 항로를 먼저 선택하세요."
+            )
+            return
+
+        route_id = str(route.get("id") or "route")
+        name = str(route.get("name") or route_id)
+        safe_name = "".join(
+            ch if ch.isalnum() or ch in " _-" else "_"
+            for ch in name
+        ).strip() or route_id
+        default_name = f"{safe_name}.json"
+        file_path, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "선택 항로를 PC에 저장",
+            str(Path.home() / "Downloads" / default_name),
+            "JSON (*.json);;CSV (*.csv);;GPX (*.gpx)",
+        )
+        if not file_path:
+            return
+
+        path = Path(file_path)
+        if path.suffix.lower() not in {".json", ".csv", ".gpx"}:
+            if "CSV" in selected_filter:
+                path = path.with_suffix(".csv")
+            elif "GPX" in selected_filter:
+                path = path.with_suffix(".gpx")
+            else:
+                path = path.with_suffix(".json")
+
+        waypoints = [
+            {
+                "lat": float(point["lat"]),
+                "lon": float(point["lon"]),
+            }
+            for point in route.get("waypoints", [])
+            if point.get("lat") is not None and point.get("lon") is not None
+        ]
+
+        try:
+            if path.suffix.lower() == ".csv":
+                lines = ["index,latitude,longitude"]
+                lines.extend(
+                    f"{index},{point['lat']:.8f},{point['lon']:.8f}"
+                    for index, point in enumerate(waypoints, 1)
+                )
+                path.write_text("\n".join(lines) + "\n", encoding="utf-8-sig")
+            elif path.suffix.lower() == ".gpx":
+                route_name = html.escape(name)
+                track_points = "\n".join(
+                    f'      <trkpt lat="{point["lat"]:.8f}" lon="{point["lon"]:.8f}" />'
+                    for point in waypoints
+                )
+                gpx = (
+                    '<?xml version="1.0" encoding="UTF-8"?>\n'
+                    '<gpx version="1.1" creator="RCBoatControl" '
+                    'xmlns="http://www.topografix.com/GPX/1/1">\n'
+                    f"  <trk><name>{route_name}</name><trkseg>\n"
+                    f"{track_points}\n"
+                    "  </trkseg></trk>\n"
+                    "</gpx>\n"
+                )
+                path.write_text(gpx, encoding="utf-8")
+            else:
+                payload = {
+                    "id": route_id,
+                    "name": name,
+                    "arrival_radius_m": route.get("arrival_radius_m"),
+                    "waypoints": waypoints,
+                    "exported_at": dt.datetime.now().isoformat(timespec="seconds"),
+                }
+                path.write_text(
+                    json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+        except OSError as exc:
+            QMessageBox.critical(
+                self, "항로 저장 실패", f"PC 파일 저장에 실패했습니다:\n{exc}"
+            )
+            self.log(f"선택 항로 PC 저장 실패: {exc}")
+            return
+
+        self.log(
+            f"선택 항로 PC 저장 완료: {name} · {len(waypoints)}개 지점 · {path}"
+        )
+        QMessageBox.information(
+            self,
+            "항로 저장 완료",
+            f"{name}\n{len(waypoints)}개 좌표를 PC에 저장했습니다.\n\n{path}",
+        )
+
+    def delete_selected_route(self) -> None:
+        route = self._selected_route_payload()
+        if route is None:
+            QMessageBox.warning(
+                self, "항로 없음", "삭제할 기록 항로를 먼저 선택하세요."
+            )
+            return
+        if RoutePlot.is_training_route(route):
+            QMessageBox.information(
+                self,
+                "훈련 항로 보호",
+                "훈련 항로는 삭제하지 않습니다. GPS로 기록한 항로만 삭제할 수 있습니다.",
+            )
+            return
+        route_id = str(route.get("id") or "")
+        route_name = str(route.get("name") or route_id)
+        answer = QMessageBox.warning(
+            self,
+            "기록 항로 삭제",
+            f"'{route_name}' 항로를 Jetson에서 삭제할까요?\n"
+            "이 작업은 routes.json에 즉시 저장됩니다.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        request_id = self.command("DELETE_ROUTE", route_id=route_id)
+        if request_id is not None:
+            self.route_delete_button.setEnabled(False)
+            self.route_storage_status.setText(
+                f"'{route_name}' 삭제 후 routes.json 저장 결과를 확인하는 중입니다"
+            )
+            self.log(f"기록 항로 삭제 요청: {route_name} ({route_id})")
+
     def start_gps_recording(self) -> None:
         name = " ".join(self.route_record_name.text().strip().split())
         if not name:
