@@ -6,7 +6,7 @@ from dataclasses import asdict
 from types import SimpleNamespace
 from typing import Any
 
-from .config import RuntimeSettings, VALUES
+from .config import RuntimeSettings, SOFTWARE_VERSION, VALUES
 from .gps_health import GpsHealthThresholds, evaluate_gps_health, navigation_gate_reason
 from .gps_logger import GpsCsvLogger
 from .hardware import BaseHardware
@@ -749,6 +749,7 @@ class BoatController:
         navigation_active = self.operation_state == "NAVIGATION_ACTIVE"
         return {
             "type": "telemetry",
+            "software_version": SOFTWARE_VERSION,
             "timestamp": time.time(),
             "uptime_s": round(time.monotonic() - self.started_monotonic, 1),
             "mode": self.mode,
