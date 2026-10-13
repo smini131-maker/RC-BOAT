@@ -1943,7 +1943,6 @@ class MainWindow(QMainWindow):
         selected_id = route.get("selected_route_id", active_id)
         routes = state.get("routes", [])
         self._latest_routes = [dict(item) for item in routes]
-        self._sync_route_layer_controls(self._latest_routes)
         existing_ids = [self.route_combo.itemData(i) for i in range(self.route_combo.count())]
         incoming_ids = [r.get("id") for r in routes]
         desired_id = self.pending_route_id or (
@@ -2011,6 +2010,7 @@ class MainWindow(QMainWindow):
                 }
             )
         self.route_plot.update_data(display_routes, display_gps, active_id)
+        self._sync_route_layer_controls(self._latest_routes)
         self._update_route_action_state()
         for event in state.get("events", []):
             stamp = float(event.get("timestamp", 0))
