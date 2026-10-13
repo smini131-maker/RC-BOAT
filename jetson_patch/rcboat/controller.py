@@ -341,6 +341,8 @@ class BoatController:
         self._event("INFO", "HIL stopped; safe output applied")
 
     def delete_route(self, route_id: str) -> str:
+        if self.mode == "NAVIGATION" or self.hil_enabled:
+            raise RuntimeError("stop navigation/HIL before deleting a route")
         deleted_name = self.routes.delete_recorded_route(route_id)
         selected = self.routes.selected
         self._navigation_route_prepared = False
