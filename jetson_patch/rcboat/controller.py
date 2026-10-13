@@ -344,6 +344,11 @@ class BoatController:
         """Select a route while immediately returning navigation output to safe."""
 
         self.routes.select(route_id)
+        selected = self.routes.selected
+        self._event(
+            "INFO",
+            f"Route selected and persisted: {selected.name if selected else route_id} ({route_id})",
+        )
         self._last_route_status = {}
         self._navigation_route_prepared = False
         self._safe_outputs()
