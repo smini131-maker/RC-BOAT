@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from rcboat_gui.main_window import MainWindow
 
@@ -50,20 +53,21 @@ class Week6GuiSmokeTests(unittest.TestCase):
 
     def test_gps_health_and_rtk_status_render(self) -> None:
         self.window.update_telemetry(self.state())
-        self.assertIn("GOOD", self.window.gps_health_status.text())
+        self.assertIn("좋음", self.window.gps_health_status.text())
         self.assertEqual(self.window.gps_detail_labels["rtk_state"].text(), "RTK_FIXED")
-        self.assertIn("연결됨", self.window.ntrip_status.text())
+        self.assertIn("NTRIP 보정링크: 연결됨", self.window.ntrip_status.text())
         self.assertIn("12 samples", self.window.gps_log_status.text())
 
     def test_rtk_loss_is_shown_as_gps_fallback_not_navigation_stop(self) -> None:
         state = self.state()
         state["gps"]["rtk_state"] = "NO_RTK"
+        state["gps"]["fix_label"] = "DGPS"
         state["gps"]["rtk_fallback_active"] = True
         state["gps"]["navigation_fix_mode"] = "GPS_FALLBACK"
         state["ntrip"]["connected"] = False
         self.window.update_telemetry(state)
-        self.assertIn("GPS 대체 운항", self.window.gps_health_status.text())
-        self.assertIn("GPS 운항 계속", self.window.gps_detail_labels["rtk_state"].text())
+        self.assertIn("GPS 기반 항법", self.window.gps_health_status.text())
+        self.assertIn("DGPS · GPS 기반 운항", self.window.gps_detail_labels["rtk_state"].text())
         self.assertTrue(self.window.rtk_fallback.isChecked())
 
     def test_ntrip_password_is_sent_once_then_cleared(self) -> None:
@@ -110,12 +114,11 @@ class Week6GuiSmokeTests(unittest.TestCase):
         self.assertTrue(self.window.ntrip_apply.isEnabled())
 
     def test_gps_threshold_ranges_are_visible(self) -> None:
-        text = self.window.gps_range_note.text()
-        self.assertIn("위성 좋음 ≥8", text)
-        self.assertIn("HDOP 좋음 ≤2", text)
-        self.assertIn("VDOP ≤5", text)
-        self.assertIn("C/N0 ≥40", text)
-        self.assertIn("RTK 보정 age ≤5", text)
+        self.assertIn("≥8 좋음", self.window.gps_metric_cards["satellites"].hint_label.text())
+        self.assertIn("≤2 좋음", self.window.gps_metric_cards["hdop"].hint_label.text())
+        self.assertIn("≤5 양호", self.window.gps_metric_cards["vdop"].hint_label.text())
+        self.assertIn("30~39 주의", self.window.gps_metric_cards["cno"].hint_label.text())
+        self.assertIn("≤5 s 좋음", self.window.gps_metric_cards["correction_age"].hint_label.text())
 
 
     def test_route_editor_is_not_overwritten_before_apply(self) -> None:
@@ -245,7 +248,7 @@ class Week6GuiSmokeTests(unittest.TestCase):
         state["ntrip"]["bytes_received"] = 1024
         self.window.update_telemetry(state)
         log_text = self.window.logs.toPlainText()
-        self.assertIn("RTK/NTRIP 상태 변경", log_text)
+        self.assertIn("RTK 상태 변경", log_text)
         self.assertIn("RTK 보정 데이터 수신 시작", log_text)
 
 
@@ -258,7 +261,7 @@ class Week6GuiSmokeTests(unittest.TestCase):
             "reasons": ["Satellites 12", "HDOP 2.20 (warning)", "C/N0 17.6 dB-Hz (low)"],
         }
         self.window.update_telemetry(state)
-        self.assertIn("주요 원인", self.window.gps_health_primary_reason.text())
+        self.assertIn("가장 큰 영향", self.window.gps_health_primary_reason.text())
         self.assertIn("C/N0 17.6", self.window.gps_health_primary_reason.text())
 
     def test_main_control_surface_is_scrollable(self) -> None:
@@ -284,6 +287,134 @@ class Week6GuiSmokeTests(unittest.TestCase):
         self.window.apply_recommended_mountpoint()
         self.assertEqual(self.window.ntrip_mountpoint.text(), "VRS-RTCM32")
         self.assertTrue(self.window._ntrip_dirty)
+
+
+    def test_route_map_excludes_training_routes_and_has_layer_switches(self) -> None:
+        state = self.state()
+        state["routes"] = [
+            {
+                "id": "training_a", "name": "훈련 경로 A",
+                "waypoints": [{"lat": 35.0, "lon": 129.0}, {"lat": 35.0001, "lon": 129.0001}],
+            },
+            {
+                "id": "recorded_test", "name": "실제 기록",
+                "waypoints": [{"lat": 35.0, "lon": 129.0}, {"lat": 35.0001, "lon": 129.0001}],
+            },
+        ]
+        state["route"] = {
+            "active_route_id": "recorded_test",
+            "selected_route_id": "recorded_test",
+            "selected_route_name": "실제 기록",
+            "active_route_name": "실제 기록",
+            "selected_route_persisted": True,
+            "persisted_selected_route_id": "recorded_test",
+            "storage_path": "/home/jetson/rcboat/routes.json",
+            "multipath_config_path": "/home/jetson/rcboat/boat_config.json",
+            "multipath": {},
+        }
+        self.window.update_telemetry(state)
+        self.assertNotIn("training_a", self.window.route_layer_checks)
+        self.assertIn("recorded_test", self.window.route_layer_checks)
+        self.assertNotIn("training_a", self.window.route_plot.visible_route_ids())
+        self.assertIn("recorded_test", self.window.route_plot.visible_route_ids())
+
+    def test_live_recording_points_are_sent_to_route_plot(self) -> None:
+        state = self.state()
+        state["gps_recording"] = {
+            "active": True,
+            "name": "테스트 기록",
+            "point_count": 2,
+            "arrival_radius_m": 3.0,
+            "waypoints": [
+                {"lat": 35.0, "lon": 129.0},
+                {"lat": 35.0001, "lon": 129.0001},
+            ],
+        }
+        self.window.update_telemetry(state)
+        route_ids = {str(route.get("id")) for route in self.window.route_plot.routes}
+        self.assertIn("__recording__", route_ids)
+
+    def test_ntrip_link_and_solution_update_independently(self) -> None:
+        state = self.state()
+        state["gps"]["rtk_state"] = "RTK_FLOAT"
+        state["gps"]["fix_label"] = "RTK FLOAT"
+        state["ntrip"]["connected"] = True
+        self.window.update_telemetry(state)
+        self.assertIn("NTRIP 보정링크: 연결됨", self.window.ntrip_status.text())
+        self.assertIn("RTK Float", self.window.ntrip_status.text())
+
+        state["gps"]["rtk_state"] = "NO_RTK"
+        state["gps"]["fix_label"] = "DGPS"
+        self.window.update_telemetry(state)
+        self.assertIn("NTRIP 보정링크: 연결됨", self.window.ntrip_status.text())
+        self.assertIn("DGPS · RTK 미고정", self.window.ntrip_status.text())
+
+    def test_selected_route_can_export_to_json(self) -> None:
+        state = self.state()
+        state["routes"] = [
+            {
+                "id": "recorded_export", "name": "내 항로",
+                "arrival_radius_m": 3.0,
+                "waypoints": [
+                    {"lat": 35.0, "lon": 129.0},
+                    {"lat": 35.0001, "lon": 129.0001},
+                ],
+            }
+        ]
+        state["route"] = {
+            "active_route_id": "recorded_export",
+            "selected_route_id": "recorded_export",
+            "selected_route_name": "내 항로",
+            "active_route_name": "내 항로",
+            "selected_route_persisted": True,
+            "persisted_selected_route_id": "recorded_export",
+            "storage_path": "/home/jetson/rcboat/routes.json",
+            "multipath_config_path": "/home/jetson/rcboat/boat_config.json",
+            "multipath": {},
+        }
+        self.window.update_telemetry(state)
+        with tempfile.TemporaryDirectory() as temp:
+            destination = Path(temp) / "route.json"
+            with patch(
+                "rcboat_gui.main_window.QFileDialog.getSaveFileName",
+                return_value=(str(destination), "JSON (*.json)"),
+            ), patch("rcboat_gui.main_window.QMessageBox.information"):
+                self.window.export_selected_route()
+            payload = json.loads(destination.read_text(encoding="utf-8"))
+            self.assertEqual(payload["id"], "recorded_export")
+            self.assertEqual(len(payload["waypoints"]), 2)
+
+    def test_delete_recorded_route_sends_daemon_command(self) -> None:
+        state = self.state()
+        state["routes"] = [
+            {
+                "id": "recorded_delete", "name": "삭제할 항로",
+                "waypoints": [{"lat": 35.0, "lon": 129.0}],
+            }
+        ]
+        state["route"] = {
+            "active_route_id": "recorded_delete",
+            "selected_route_id": "recorded_delete",
+            "selected_route_name": "삭제할 항로",
+            "active_route_name": "삭제할 항로",
+            "selected_route_persisted": True,
+            "persisted_selected_route_id": "recorded_delete",
+            "storage_path": "/home/jetson/rcboat/routes.json",
+            "multipath_config_path": "/home/jetson/rcboat/boat_config.json",
+            "multipath": {},
+        }
+        self.window.worker = Mock()
+        self.window.worker.isRunning.return_value = True
+        self.window.worker.send_command.return_value = "delete-request"
+        self.window.update_telemetry(state)
+        with patch(
+            "rcboat_gui.main_window.QMessageBox.warning",
+            return_value=QMessageBox.Yes,
+        ):
+            self.window.delete_selected_route()
+        self.window.worker.send_command.assert_called_with(
+            "DELETE_ROUTE", route_id="recorded_delete"
+        )
 
 if __name__ == "__main__":
     unittest.main()
