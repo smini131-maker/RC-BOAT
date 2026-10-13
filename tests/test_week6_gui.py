@@ -55,7 +55,7 @@ class Week6GuiSmokeTests(unittest.TestCase):
         self.window.update_telemetry(self.state())
         self.assertIn("좋음", self.window.gps_health_status.text())
         self.assertEqual(self.window.gps_detail_labels["rtk_state"].text(), "RTK_FIXED")
-        self.assertIn("NTRIP 보정링크: 연결됨", self.window.ntrip_status.text())
+        self.assertEqual(self.window.ntrip_link_card.value_label.text(), "연결됨")
         self.assertIn("12 samples", self.window.gps_log_status.text())
 
     def test_rtk_loss_is_shown_as_gps_fallback_not_navigation_stop(self) -> None:
@@ -117,7 +117,7 @@ class Week6GuiSmokeTests(unittest.TestCase):
         self.assertIn("≥8 좋음", self.window.gps_metric_cards["satellites"].hint_label.text())
         self.assertIn("≤2 좋음", self.window.gps_metric_cards["hdop"].hint_label.text())
         self.assertIn("≤5 양호", self.window.gps_metric_cards["vdop"].hint_label.text())
-        self.assertIn("30~39 주의", self.window.gps_metric_cards["cno"].hint_label.text())
+        self.assertIn("25~29 주의", self.window.gps_metric_cards["cno"].hint_label.text())
         self.assertIn("≤5 s 좋음", self.window.gps_metric_cards["correction_age"].hint_label.text())
 
 
@@ -340,14 +340,14 @@ class Week6GuiSmokeTests(unittest.TestCase):
         state["gps"]["fix_label"] = "RTK FLOAT"
         state["ntrip"]["connected"] = True
         self.window.update_telemetry(state)
-        self.assertIn("NTRIP 보정링크: 연결됨", self.window.ntrip_status.text())
-        self.assertIn("RTK Float", self.window.ntrip_status.text())
+        self.assertEqual(self.window.ntrip_link_card.value_label.text(), "연결됨")
+        self.assertIn("RTK Float", self.window.ntrip_solution_card.value_label.text())
 
         state["gps"]["rtk_state"] = "NO_RTK"
         state["gps"]["fix_label"] = "DGPS"
         self.window.update_telemetry(state)
-        self.assertIn("NTRIP 보정링크: 연결됨", self.window.ntrip_status.text())
-        self.assertIn("DGPS · RTK 미고정", self.window.ntrip_status.text())
+        self.assertEqual(self.window.ntrip_link_card.value_label.text(), "연결됨")
+        self.assertIn("DGPS · RTK 미고정", self.window.ntrip_solution_card.value_label.text())
 
     def test_selected_route_can_export_to_json(self) -> None:
         state = self.state()
@@ -418,6 +418,69 @@ class Week6GuiSmokeTests(unittest.TestCase):
         self.window.worker.send_command.assert_called_with(
             "DELETE_ROUTE", route_id="recorded_delete"
         )
+
+
+    def test_hacc_waiting_shows_ubx_counter_hint(self) -> None:
+        state = self.state()
+        state["gps"]["hacc_m"] = None
+        state["gps"]["ubx_message_count"] = 0
+        state["gps"]["nmea_sentence_count"] = 123
+        state["gps"]["hacc_source"] = "UBX-NAV-PVT 대기"
+        self.window.update_telemetry(state)
+        self.assertEqual(
+            self.window.gps_metric_cards["hacc"].value_label.text(),
+            "NAV-PVT 대기",
+        )
+        hint = self.window.gps_metric_cards["hacc"].hint_label.text()
+        self.assertIn("UBX 0", hint)
+        self.assertIn("NMEA 123", hint)
+
+    def test_multipath_group_names_are_readable(self) -> None:
+        state = self.state()
+        state["route"] = {
+            "active_route_id": "recorded_a",
+            "active_route_name": "A 경로",
+            "selected_route_id": "recorded_a",
+            "selected_route_name": "A 경로",
+            "selected_route_persisted": True,
+            "persisted_selected_route_id": "recorded_a",
+            "storage_path": "/home/jetson/rcboat/routes.json",
+            "multipath_config_path": "/home/jetson/rcboat/boat_config.json",
+            "multipath": {
+                "enabled": True,
+                "endpoint_tolerance_m": 0.75,
+                "off_route_distance_m": 8.0,
+                "off_route_hold_s": 3.0,
+                "closer_advantage_m": 2.0,
+                "switch_cooldown_s": 5.0,
+            },
+            "multipath_group": {
+                "reference_route_id": "recorded_a",
+                "reference_route_name": "A 경로",
+                "active_route_id": "recorded_b",
+                "active_route_name": "B 경로",
+                "group_size": 2,
+                "routes": [
+                    {
+                        "id": "recorded_a", "name": "A 경로",
+                        "start_gap_m": 0.0, "end_gap_m": 0.0,
+                    },
+                    {
+                        "id": "recorded_b", "name": "B 경로",
+                        "start_gap_m": 0.3, "end_gap_m": 0.4,
+                    },
+                ],
+            },
+        }
+        state["routes"] = [
+            {"id": "recorded_a", "name": "A 경로", "waypoints": []},
+            {"id": "recorded_b", "name": "B 경로", "waypoints": []},
+        ]
+        self.window.update_telemetry(state)
+        text = self.window.multipath_group_status.text()
+        self.assertIn("A 경로", text)
+        self.assertIn("B 경로", text)
+        self.assertIn("같은 그룹 2개", text)
 
 if __name__ == "__main__":
     unittest.main()
