@@ -177,6 +177,8 @@ class BoatController:
         self._manual_rearm_since = None
         self._gesture_since = None
         self._auto_to_manual_armed = False
+        self._navigation_severe_turn_active = False
+        self._navigation_pause_until = 0.0
         self.hil_enabled = False
         self._hil_position = None
         self._hil_course_deg = None
@@ -369,6 +371,8 @@ class BoatController:
         )
         self._last_route_status = {}
         self._navigation_route_prepared = False
+        self._navigation_severe_turn_active = False
+        self._navigation_pause_until = 0.0
         self._safe_outputs()
         if self.mode == "NAVIGATION":
             self.operation_state = "NAVIGATION_WAITING_GPS"
