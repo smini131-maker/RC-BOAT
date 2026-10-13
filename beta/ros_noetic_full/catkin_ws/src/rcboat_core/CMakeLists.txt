@@ -17,6 +17,7 @@ catkin_install_python(PROGRAMS
   scripts/controller_node.py
   scripts/gps_health_node.py
   scripts/gps_logger_node.py
+  scripts/gui_gateway_node.py
   scripts/mock_io_node.py
   scripts/ntrip_node.py
   scripts/pca9685_node.py

@@ -14,7 +14,7 @@ sys.path.insert(0, str(CORE_SRC))
 
 from rcboat_core.constants import VALUES  # noqa: E402
 from rcboat_core.controller_logic import ControllerLogic, GpsSample, RcSample  # noqa: E402
-from rcboat_core.navigation import RouteManager  # noqa: E402
+from rcboat_core.navigation import RouteManager, position_along_route  # noqa: E402
 from rcboat_core.ntrip_protocol import build_gga, nmea_coordinate, pop_rtcm_frames  # noqa: E402
 
 
@@ -158,6 +158,17 @@ class NtripProtocolTests(unittest.TestCase):
         self.assertEqual(buffer, bytearray())
 
 
+class HilGeometryTests(unittest.TestCase):
+    def test_position_along_route_interpolates_and_stops_at_destination(self) -> None:
+        points = [(35.0, 129.0), (35.0001, 129.0)]
+        midpoint, course = position_along_route(points, 5.5)
+        self.assertGreater(midpoint[0], points[0][0])
+        self.assertLess(midpoint[0], points[1][0])
+        self.assertAlmostEqual(course, 0.0, delta=0.1)
+        end, _course = position_along_route(points, 1000.0)
+        self.assertEqual(end, points[-1])
+
+
 class ConfigurationTests(unittest.TestCase):
     def test_safety_constants_match_production_contract(self) -> None:
         self.assertEqual((VALUES.steering_channel, VALUES.throttle_channel), (0, 6))
@@ -170,6 +181,33 @@ class ConfigurationTests(unittest.TestCase):
             (5800, 6450, 7000),
         )
         self.assertEqual(VALUES.remote_heartbeat_timeout_s, 0.7)
+
+    def test_windows_gui_uses_ros_gateway_tree_only(self) -> None:
+        gui_root = ROOT / "windows_gui_source"
+        worker = (
+            gui_root / "windows_app" / "rcboat_gui" / "ssh_worker.py"
+        ).read_text(encoding="utf-8")
+        gateway = (
+            ROOT
+            / "catkin_ws"
+            / "src"
+            / "rcboat_core"
+            / "scripts"
+            / "gui_gateway_node.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("ROS_GUI_GATEWAY_PORT = 8876", worker)
+        self.assertNotIn("127.0.0.1\", 8765", worker)
+        self.assertIn('{"127.0.0.1", "::1", "localhost"}', gateway)
+        self.assertNotIn("rcboat_daemon", gateway)
+        for command in (
+            "SET_MODE",
+            "EMERGENCY_STOP",
+            "REMOTE_CONTROL",
+            "SELECT_ROUTE",
+            "CONFIGURE_NTRIP",
+            "START_GPS_LOGGING",
+        ):
+            self.assertIn(f'"{command}"', gateway)
 
 
 if __name__ == "__main__":

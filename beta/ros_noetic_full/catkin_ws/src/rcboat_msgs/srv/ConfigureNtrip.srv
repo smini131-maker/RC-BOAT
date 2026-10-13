@@ -1,0 +1,10 @@
+bool enabled
+string host
+uint32 port
+string mountpoint
+string username
+string password
+bool tls
+---
+bool success
+string message

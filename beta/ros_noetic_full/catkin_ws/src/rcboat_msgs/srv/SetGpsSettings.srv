@@ -1,0 +1,7 @@
+float64 navigation_max_hdop
+bool rtk_required_for_navigation
+bool rtk_fallback_to_gps
+float64 rtk_correction_max_age_s
+---
+bool success
+string message

@@ -25,3 +25,9 @@ float64 distance_to_route_m
 bool route_complete
 bool route_recording
 int32 recorded_point_count
+string recording_name
+bool mock
+bool hil_active
+float64 hil_latitude
+float64 hil_longitude
+float64 hil_course_deg

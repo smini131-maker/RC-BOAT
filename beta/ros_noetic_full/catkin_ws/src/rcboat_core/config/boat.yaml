@@ -1,4 +1,5 @@
 auto_cruise_pwm: 6650
+allow_hil: false
 
 gps:
   stale_s: 2.0

@@ -22,6 +22,14 @@
   <node pkg="rcboat_core" type="controller_node.py" name="rcboat_controller" output="screen" required="true">
     <param name="config_file" value="$(arg core_dir)/config/boat.yaml" />
     <param name="routes_file" value="$(arg core_dir)/config/routes.json" />
+    <param name="mock" value="false" />
+  </node>
+
+  <node pkg="rcboat_core" type="gui_gateway_node.py" name="rcboat_gui_gateway" output="screen" respawn="true">
+    <param name="bind_host" value="127.0.0.1" />
+    <param name="port" value="8876" />
+    <param name="config_file" value="$(arg core_dir)/config/boat.yaml" />
+    <param name="routes_file" value="$(arg core_dir)/config/routes.json" />
   </node>
 
   <node pkg="rcboat_core" type="gps_logger_node.py" name="rcboat_gps_logger" output="screen" respawn="true">

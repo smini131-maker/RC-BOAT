@@ -38,6 +38,26 @@ def angle_error_deg(target: float, current: float) -> float:
     return (target - current + 180.0) % 360.0 - 180.0
 
 
+def position_along_route(
+    points: list[tuple[float, float]], distance_m: float
+) -> tuple[tuple[float, float], float]:
+    """Return an interpolated position and course for a distance along a route."""
+    if len(points) < 2:
+        raise ValueError("at least two route points are required")
+    remaining = max(0.0, distance_m)
+    for start, end in zip(points, points[1:]):
+        segment_m = max(0.001, haversine_m(start, end))
+        course = bearing_deg(start, end)
+        if remaining <= segment_m:
+            ratio = remaining / segment_m
+            return (
+                start[0] + (end[0] - start[0]) * ratio,
+                start[1] + (end[1] - start[1]) * ratio,
+            ), course
+        remaining -= segment_m
+    return points[-1], bearing_deg(points[-2], points[-1])
+
+
 def _local_xy_m(origin: tuple[float, float], point: tuple[float, float]) -> tuple[float, float]:
     lat0 = math.radians(origin[0])
     x = math.radians(point[1] - origin[1]) * EARTH_RADIUS_M * math.cos(lat0)

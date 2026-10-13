@@ -24,6 +24,8 @@ NTRIP -> /rtcm -> ublox_gps -> GPS ----------------+        |
                                                      /rcboat/pwm_command
                                                               |
                                                      pca9685_node -> I2C -> PCA9685
+
+Windows GUI -> SSH tunnel -> gui_gateway_node -> ROS topics/services
 ```
 
 ROS를 사용해도 GPS USB 케이블 자체는 시리얼 장치입니다. 차이는 Python에서 `serial.readline()`으로 직접 읽는 대신 `ublox_gps` ROS 드라이버가 포트를 열고 `NavSatFix`, `NavPVT`, `NavDOP`, `NavRELPOSNED` 토픽을 발행한다는 점입니다.
@@ -45,6 +47,7 @@ ROS를 사용해도 GPS USB 케이블 자체는 시리얼 장치입니다. 차�
 - RTK 보정 손실 시 일반 GPS 대체 운항
 - GPS CSV 기록
 - 실제 장치를 열지 않는 Mock launch
+- ROS 베타 전용 Windows GUI와 loopback 전용 Gateway
 
 ## 기준 환경
 
@@ -79,6 +82,19 @@ rostopic echo /rcboat/state
 Mock에서는 실제 Arduino, GPS, PCA9685를 열지 않습니다.
 
 Mock은 소프트웨어 검증용입니다. 기존 운영 버전의 실 PWM HIL 기능은 운영 폴더에 그대로 남아 있으며, 베타에서는 실물 GPS 없이 모터를 구동하는 기능을 안전상 자동 제공하지 않습니다.
+
+## Windows GUI
+
+베타 전용 GUI는 `windows_gui_source/`에 있습니다. 기존 GUI를 덮어쓰지 않으며 실행 파일 이름도 `RCBoatROSControlBeta.exe`로 분리됩니다.
+
+```bat
+cd beta\ros_noetic_full\windows_gui_source
+build.bat
+```
+
+GUI는 Jetson SSH에 접속한 뒤 `127.0.0.1:8876`의 `gui_gateway_node`로 터널을 만듭니다. Gateway는 기존 daemon이 아니라 ROS 토픽과 서비스만 호출합니다. 자세한 내용은 `windows_gui_source/README.md`를 확인하십시오.
+
+HIL 서비스도 ROS로 연결되어 있지만 기본값은 `allow_hil: false`입니다. 실제 PWM HIL이 필요하면 프로펠러를 분리한 상태에서 이 값을 명시적으로 `true`로 변경하고 재시작해야 합니다.
 
 ## 실물 실행 전 충돌 방지
 
@@ -128,6 +144,11 @@ sudo systemctl enable --now rcboat.service
 /rcboat/cancel_route_recording
 /rcboat/start_gps_logging
 /rcboat/stop_gps_logging
+/rcboat/configure_ntrip
+/rcboat/set_gps_settings
+/rcboat/reload_routes
+/rcboat/start_hil
+/rcboat/stop_hil
 ```
 
 ## 안전 주의

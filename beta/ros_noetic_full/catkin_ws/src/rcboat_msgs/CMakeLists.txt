@@ -8,6 +8,7 @@ add_message_files(FILES
   PwmCommand.msg
   GpsStatus.msg
   NtripStatus.msg
+  GpsLogStatus.msg
   BoatState.msg
 )
 
@@ -17,6 +18,9 @@ add_service_files(FILES
   SetAutoCruise.srv
   SetMultipath.srv
   StartRouteRecording.srv
+  ConfigureNtrip.srv
+  SetGpsSettings.srv
+  StartHil.srv
 )
 
 generate_messages(DEPENDENCIES std_msgs)

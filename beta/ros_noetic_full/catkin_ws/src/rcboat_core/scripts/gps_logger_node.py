@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 import rospy
-from rcboat_msgs.msg import GpsStatus
+from rcboat_msgs.msg import GpsLogStatus, GpsStatus
 from std_srvs.srv import Trigger, TriggerResponse
 
 
@@ -16,16 +16,30 @@ class GpsLoggerNode:
         self.handle = None
         self.writer = None
         self.path = ""
+        self.samples = 0
+        self.status_pub = rospy.Publisher(
+            "/rcboat/gps_log_status", GpsLogStatus, queue_size=1, latch=True
+        )
         rospy.Subscriber("/rcboat/gps_status", GpsStatus, self.callback, queue_size=100)
         rospy.Service("/rcboat/start_gps_logging", Trigger, self.start)
         rospy.Service("/rcboat/stop_gps_logging", Trigger, self.stop)
         rospy.on_shutdown(self.close)
+        self.publish_status()
+
+    def publish_status(self) -> None:
+        message = GpsLogStatus()
+        message.header.stamp = rospy.Time.now()
+        message.active = self.handle is not None
+        message.samples = self.samples
+        message.file_path = self.path
+        self.status_pub.publish(message)
 
     def start(self, _request) -> TriggerResponse:
         if self.handle is not None:
             return TriggerResponse(False, "GPS logging already active")
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.path = str(self.log_dir / time.strftime("gps_%Y%m%d_%H%M%S.csv"))
+        self.samples = 0
         self.handle = open(self.path, "w", encoding="utf-8-sig", newline="")
         fields = [
             "ros_time", "latitude", "longitude", "altitude_m", "fix_quality",
@@ -36,6 +50,7 @@ class GpsLoggerNode:
         self.writer = csv.DictWriter(self.handle, fieldnames=fields)
         self.writer.writeheader()
         self.handle.flush()
+        self.publish_status()
         return TriggerResponse(True, self.path)
 
     def stop(self, _request) -> TriggerResponse:
@@ -43,6 +58,7 @@ class GpsLoggerNode:
             return TriggerResponse(False, "GPS logging is not active")
         path = self.path
         self.close()
+        self.publish_status()
         return TriggerResponse(True, path)
 
     def close(self) -> None:
@@ -75,7 +91,9 @@ class GpsLoggerNode:
                 "correction_age_s": message.correction_age_s,
             }
         )
+        self.samples += 1
         self.handle.flush()
+        self.publish_status()
 
 
 if __name__ == "__main__":
