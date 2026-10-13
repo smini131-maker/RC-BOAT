@@ -441,60 +441,93 @@ class MainWindow(QMainWindow):
         return page
 
     def _gps_rtk_tab(self) -> QWidget:
-        page = QWidget(); layout = QVBoxLayout(page)
-        health_box = QGroupBox("GPS Health · 수신 상세")
-        health_layout = QGridLayout(health_box)
-        self.gps_detail_labels: dict[str, QLabel] = {}
-        detail_fields = (
-            ("FIX (RTK_FIXED 최상)", "fix_label"), ("UTC", "utc_time"), ("Satellite (좋음 ≥8 / 주의 6~7)", "satellites"),
-            ("HDOP (좋음 ≤2 / 항법 ≤3)", "hdop"), ("PDOP (좋음 ≤2 / 주의 ≤4)", "pdop"), ("VDOP (표면항법 참고 · 좋음 ≤5)", "vdop"),
-            ("C/N0 (좋음 ≥40 / 주의 ≥35 dB-Hz)", "cno"), ("hAcc (좋음 ≤1.5 / 주의 ≤3 m)", "hacc"), ("데이터 age (정상 ≤2 s)", "age"),
-            ("UTM", "utm"), ("RTK 상태 (RTK_FIXED 권장)", "rtk_state"), ("보정 age (좋음 ≤5 / 허용 ≤10 s)", "correction_age"),
-        )
-        for index, (title, key) in enumerate(detail_fields):
-            health_layout.addWidget(QLabel(title), index // 4 * 2, index % 4)
-            value = QLabel("-")
-            value.setStyleSheet("font-weight:700; color:#edf4ff")
-            self.gps_detail_labels[key] = value
-            health_layout.addWidget(value, index // 4 * 2 + 1, index % 4)
-        self.gps_health_status = QLabel("GPS Health: UNKNOWN")
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setSpacing(10)
+
+        health_box = QGroupBox("GPS · GNSS 상태")
+        health_layout = QVBoxLayout(health_box)
+        health_layout.setSpacing(8)
+
+        self.gps_health_status = QLabel("GPS 상태 확인 대기")
+        self.gps_health_status.setObjectName("healthHeadline")
         self.gps_health_status.setWordWrap(True)
-        health_layout.addWidget(self.gps_health_status, 6, 0, 1, 4)
         self.gps_health_primary_reason = QLabel("")
         self.gps_health_primary_reason.setWordWrap(True)
-        self.gps_health_primary_reason.setStyleSheet("color:#f8bd58; font-size:8.5pt;")
-        health_layout.addWidget(self.gps_health_primary_reason, 7, 0, 1, 4)
+        self.gps_health_primary_reason.setStyleSheet(
+            "color:#f8bd58; font-size:9pt; font-weight:700;"
+        )
+        health_layout.addWidget(self.gps_health_status)
+        health_layout.addWidget(self.gps_health_primary_reason)
+
+        metrics = QGridLayout()
+        metrics.setHorizontalSpacing(8)
+        metrics.setVerticalSpacing(8)
+        self.gps_detail_labels: dict[str, QLabel] = {}
+        self.gps_metric_cards: dict[str, MetricCard] = {}
+        detail_fields = (
+            ("GNSS 해", "fix_label", "RTK_FIXED가 최고 정밀도"),
+            ("UTC 시각", "utc_time", "수신기 GNSS 시간"),
+            ("위성 수", "satellites", "≥8 좋음 · 6~7 주의"),
+            ("HDOP", "hdop", "≤2 좋음 · ≤3 항법 허용"),
+            ("PDOP", "pdop", "≤2 좋음 · ≤4 주의"),
+            ("VDOP", "vdop", "≤5 양호 · 표면항법 Gate 제외"),
+            ("C/N0", "cno", "≥40 좋음 · 30~39 주의 · <30 나쁨"),
+            ("수평 정확도 hAcc", "hacc", "≤1.5 m 좋음 · ≤3 m 주의"),
+            ("GPS 데이터 지연", "age", "≤2 s 정상"),
+            ("UTM 좌표", "utm", "좌표 기반 미터 단위 위치"),
+            ("RTK 해 상태", "rtk_state", "FIXED / FLOAT / DGPS 실시간 표시"),
+            ("보정 데이터 지연", "correction_age", "≤5 s 좋음 · ≤10 s 허용"),
+        )
+        for index, (title, key, hint) in enumerate(detail_fields):
+            card = MetricCard(title, hint)
+            self.gps_metric_cards[key] = card
+            self.gps_detail_labels[key] = card.value_label
+            metrics.addWidget(card, index // 4, index % 4)
+        health_layout.addLayout(metrics)
+
         self.gps_range_note = QLabel(
-            "판정 기준(R12.1): 위성 좋음 ≥8 · HDOP 좋음 ≤2 / ≤3 항법 허용 · "
-            "PDOP ≤2 GOOD / ≤4 WARNING · VDOP ≤5 GOOD(표면 자율항법 Gate에는 직접 사용하지 않음) · "
-            "C/N0 ≥40 GOOD / ≥35 WARNING · hAcc ≤1.5 m GOOD / ≤3 m WARNING · "
-            "GPS age ≤2 s · RTK 보정 age ≤5 s GOOD / ≤10 s WARNING"
+            "항법 안전 Gate 핵심: GPS 연결 · 유효 위치 FIX · 위치 age ≤2 s · "
+            "HDOP ≤설정값. VDOP는 표면 자율항법 Gate를 직접 차단하지 않습니다."
         )
         self.gps_range_note.setWordWrap(True)
-        self.gps_range_note.setStyleSheet("color:#8ea4c4; font-size:9pt;")
-        health_layout.addWidget(self.gps_range_note, 8, 0, 1, 4)
+        self.gps_range_note.setObjectName("sectionHint")
+        health_layout.addWidget(self.gps_range_note)
 
-        logging_box = QGroupBox("GPS 데이터 로그 (기존 항로 기록과 별도)")
+        logging_box = QGroupBox("원시 GPS 데이터 로그")
         logging_layout = QHBoxLayout(logging_box)
         self.gps_log_start = QPushButton("GPS 데이터 기록 시작")
-        self.gps_log_start.clicked.connect(lambda: self.command("START_GPS_LOGGING"))
+        self.gps_log_start.clicked.connect(
+            lambda: self.command("START_GPS_LOGGING")
+        )
         self.gps_log_stop = QPushButton("GPS 데이터 기록 종료")
         self.gps_log_stop.setObjectName("safe")
-        self.gps_log_stop.clicked.connect(lambda: self.command("STOP_GPS_LOGGING"))
+        self.gps_log_stop.clicked.connect(
+            lambda: self.command("STOP_GPS_LOGGING")
+        )
         self.gps_log_status = QLabel("기록 대기")
-        logging_layout.addWidget(self.gps_log_start); logging_layout.addWidget(self.gps_log_stop)
+        self.gps_log_status.setObjectName("sectionHint")
+        logging_layout.addWidget(self.gps_log_start)
+        logging_layout.addWidget(self.gps_log_stop)
         logging_layout.addWidget(self.gps_log_status, 1)
 
-        ntrip_box = QGroupBox("RTK / NTRIP 설정 · 비밀번호는 Jetson 보안 파일에만 저장")
+        ntrip_box = QGroupBox("RTK / NTRIP 보정")
         ntrip_layout = QGridLayout(ntrip_box)
-        self.ntrip_enabled = QCheckBox("RTK 사용")
-        self.ntrip_host = QLineEdit(); self.ntrip_host.setPlaceholderText("발급받은 NTRIP Host")
-        self.ntrip_port = QSpinBox(); self.ntrip_port.setRange(1, 65535); self.ntrip_port.setValue(2101)
-        self.ntrip_mountpoint = QLineEdit(); self.ntrip_mountpoint.setPlaceholderText("Mount Point")
-        self.ntrip_username = QLineEdit(); self.ntrip_username.setPlaceholderText("발급 ID · 한 번 저장하면 이 PC에 기억")
-        self.ntrip_password = QLineEdit(); self.ntrip_password.setEchoMode(QLineEdit.Password)
+        self.ntrip_enabled = QCheckBox("NTRIP 보정 사용")
+        self.ntrip_host = QLineEdit()
+        self.ntrip_host.setPlaceholderText("발급받은 NTRIP Host")
+        self.ntrip_port = QSpinBox()
+        self.ntrip_port.setRange(1, 65535)
+        self.ntrip_port.setValue(2101)
+        self.ntrip_mountpoint = QLineEdit()
+        self.ntrip_mountpoint.setPlaceholderText("Mount Point")
+        self.ntrip_username = QLineEdit()
+        self.ntrip_username.setPlaceholderText("발급 ID · 이 PC에 기억")
+        self.ntrip_password = QLineEdit()
+        self.ntrip_password.setEchoMode(QLineEdit.Password)
         self.ntrip_password.setPlaceholderText("비밀번호 변경 시에만 입력")
         self.ntrip_tls = QCheckBox("TLS")
+
         self.ntrip_apply = QPushButton("설정 저장 · 연결")
         self.ntrip_apply.clicked.connect(self.apply_ntrip)
         self.ntrip_enabled.toggled.connect(self._mark_ntrip_dirty)
@@ -504,36 +537,76 @@ class MainWindow(QMainWindow):
         self.ntrip_mountpoint.textEdited.connect(self._mark_ntrip_dirty)
         self.ntrip_username.textEdited.connect(self._mark_ntrip_dirty)
         self.ntrip_password.textEdited.connect(self._mark_ntrip_dirty)
-        ntrip_disable = QPushButton("RTK 연결 해제")
+
+        ntrip_disable = QPushButton("보정 연결 해제")
         ntrip_disable.clicked.connect(lambda: self.command("DISABLE_NTRIP"))
         refresh = QPushButton("상태 새로고침")
         refresh.clicked.connect(lambda: self.command("REFRESH_NTRIP"))
         self.ntrip_mount_fix = QPushButton("VRS-RTCM32 적용")
         self.ntrip_mount_fix.setVisible(False)
         self.ntrip_mount_fix.clicked.connect(self.apply_recommended_mountpoint)
-        self.ntrip_status = QLabel("NTRIP 비활성")
-        self.ntrip_status.setWordWrap(True)
+
         ntrip_layout.addWidget(self.ntrip_enabled, 0, 0)
-        for column, (label, widget) in enumerate((("Host", self.ntrip_host), ("Port", self.ntrip_port), ("Mount Point", self.ntrip_mountpoint), ("Username", self.ntrip_username), ("Password", self.ntrip_password)), 1):
-            box = QVBoxLayout(); box.addWidget(QLabel(label)); box.addWidget(widget)
+        for column, (label, widget) in enumerate(
+            (
+                ("Host", self.ntrip_host),
+                ("Port", self.ntrip_port),
+                ("Mount Point", self.ntrip_mountpoint),
+                ("Username", self.ntrip_username),
+                ("Password", self.ntrip_password),
+            ),
+            1,
+        ):
+            box = QVBoxLayout()
+            box.addWidget(QLabel(label))
+            box.addWidget(widget)
             ntrip_layout.addLayout(box, 0, column)
+
         ntrip_layout.addWidget(self.ntrip_tls, 1, 0)
         ntrip_layout.addWidget(self.ntrip_apply, 1, 1)
         ntrip_layout.addWidget(ntrip_disable, 1, 2)
         ntrip_layout.addWidget(refresh, 1, 3)
         ntrip_layout.addWidget(self.ntrip_mount_fix, 1, 4)
-        ntrip_layout.addWidget(self.ntrip_status, 1, 5)
+
+        self.ntrip_status = QLabel(
+            "NTRIP 보정링크: 비활성 · GNSS 해: 확인 대기"
+        )
+        self.ntrip_status.setWordWrap(True)
+        self.ntrip_status.setStyleSheet(
+            "background:#0f1a2c; border:1px solid #243652; border-radius:8px; "
+            "padding:9px 12px; font-weight:700;"
+        )
+        ntrip_layout.addWidget(self.ntrip_status, 2, 0, 1, 6)
+
+        ntrip_explain = QLabel(
+            "보정 서버 연결 여부와 RTK FIX 여부는 서로 다릅니다. "
+            "NTRIP이 연결되어도 수신 환경에 따라 DGPS 또는 RTK_FLOAT일 수 있습니다."
+        )
+        ntrip_explain.setWordWrap(True)
+        ntrip_explain.setObjectName("sectionHint")
+        ntrip_layout.addWidget(ntrip_explain, 3, 0, 1, 6)
 
         safety_box = QGroupBox("GPS 항법 안전 Gate")
         safety_layout = QHBoxLayout(safety_box)
-        self.rtk_fallback = QCheckBox("RTK 끊김 시 일반 GPS로 계속 운항")
+        self.rtk_fallback = QCheckBox("RTK 미고정/끊김 시 일반 GPS로 계속 운항")
         self.rtk_fallback.setChecked(True)
-        self.gps_max_hdop = QDoubleSpinBox(); self.gps_max_hdop.setRange(0.5, 20.0); self.gps_max_hdop.setValue(3.0); self.gps_max_hdop.setSuffix(" HDOP")
+        self.gps_max_hdop = QDoubleSpinBox()
+        self.gps_max_hdop.setRange(0.5, 20.0)
+        self.gps_max_hdop.setValue(3.0)
+        self.gps_max_hdop.setSuffix(" HDOP")
         save_safety = QPushButton("안전 기준 저장")
         save_safety.clicked.connect(self.apply_gps_safety)
-        safety_layout.addWidget(self.rtk_fallback); safety_layout.addWidget(QLabel("최대 허용")); safety_layout.addWidget(self.gps_max_hdop); safety_layout.addWidget(save_safety); safety_layout.addStretch(1)
+        safety_layout.addWidget(self.rtk_fallback)
+        safety_layout.addWidget(QLabel("최대 허용 HDOP"))
+        safety_layout.addWidget(self.gps_max_hdop)
+        safety_layout.addWidget(save_safety)
+        safety_layout.addStretch(1)
 
-        layout.addWidget(health_box); layout.addWidget(logging_box); layout.addWidget(ntrip_box); layout.addWidget(safety_box); layout.addStretch(1)
+        layout.addWidget(health_box)
+        layout.addWidget(ntrip_box)
+        layout.addWidget(safety_box)
+        layout.addWidget(logging_box)
+        layout.addStretch(1)
         return page
 
     def _mark_ntrip_dirty(self, *_args) -> None:
