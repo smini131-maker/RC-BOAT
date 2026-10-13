@@ -66,6 +66,8 @@ class BoatController:
         self._events: list[dict[str, Any]] = []
         self.started_monotonic = time.monotonic()
         self._navigation_route_prepared = False
+        self._navigation_severe_turn_active = False
+        self._navigation_pause_until = 0.0
         self.gps_logger = GpsCsvLogger(self.routes.route_path.parent / "logs" / "gps")
         self._last_logged_gps_update = 0.0
         self.routes.configure_multipath(self.settings.multipath_settings())
@@ -226,6 +228,8 @@ class BoatController:
             )
             self.operation_state = "NAVIGATION_WAITING_GPS"
             self._navigation_route_prepared = False
+            self._navigation_severe_turn_active = False
+            self._navigation_pause_until = 0.0
         elif mode == "REMOTE":
             self._manual_waiting_for_neutral = False
             self.remote_last_heartbeat = now
@@ -506,6 +510,32 @@ class BoatController:
         # needs water flow to turn, so large heading error slows the boat
         # instead of repeatedly switching between cruise and full stop.
         abs_error = abs(error)
+        if abs_error >= 150.0 and not self._navigation_severe_turn_active:
+            self._navigation_severe_turn_active = True
+            self._navigation_pause_until = now + 0.4
+            self._event(
+                "WARNING",
+                f"NAVIGATION severe heading error {error:+.1f} deg: brief pause then slow turn",
+            )
+        elif self._navigation_severe_turn_active and abs_error <= 100.0:
+            self._navigation_severe_turn_active = False
+            self._navigation_pause_until = 0.0
+
+        if self._navigation_severe_turn_active and now < self._navigation_pause_until:
+            self._last_route_status.update({
+                "target_bearing_deg": round(target_bearing, 1),
+                "course_deg": round(float(snap.gps_course_deg), 1),
+                "heading_error_deg": round(error, 1),
+                "navigation_steering_inverted": VALUES.navigation_steering_inverted,
+                "navigation_speed_fraction": 0.0,
+                "navigation_throttle_pwm": VALUES.throttle_stop_pwm,
+                "navigation_steering_pwm": int(round(steering)),
+                "severe_turn_recovery": True,
+            })
+            self.operation_state = "NAVIGATION_TURN_PAUSE"
+            self.failsafe_reason = ""
+            return int(round(steering)), VALUES.throttle_stop_pwm
+
         if abs_error <= VALUES.navigation_full_speed_error_deg:
             speed_fraction = 1.0
         elif abs_error >= VALUES.navigation_slow_error_deg:
@@ -546,6 +576,7 @@ class BoatController:
             "navigation_speed_fraction": round(speed_fraction, 3),
             "navigation_throttle_pwm": throttle,
             "navigation_steering_pwm": int(round(steering)),
+            "severe_turn_recovery": self._navigation_severe_turn_active,
         })
         self.operation_state = "NAVIGATION_ACTIVE"
         self.failsafe_reason = ""
