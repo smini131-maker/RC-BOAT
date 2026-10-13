@@ -14,24 +14,24 @@ class PackagingRegression(unittest.TestCase):
         self.assertFalse((ROOT/'jetson_backend').exists())
         self.assertFalse((ROOT/'rcboat.service').exists())
         self.assertTrue((ROOT/'systemd/rcboat_ros.service').exists())
-        self.assertIn('Conflicts=rcboat.service',(ROOT/'systemd/rcboat_ros.service').read_text())
+        self.assertIn('Conflicts=rcboat.service',(ROOT/'systemd/rcboat_ros.service').read_text(encoding='utf-8'))
     def test_no_hil_files(self):
         pkg=ROOT/'catkin_ws/src/rcboat_ros'
         files=[x.as_posix().lower() for x in pkg.rglob('*') if x.is_file()]
         self.assertFalse(any('hil' in x for x in files))
     def test_cmd_always_pauses(self):
         for n in ('BUILD_ROS_GUI.cmd','UPLOAD_GITHUB.cmd','DEPLOY_ROS.cmd','INSTALL_ROS.cmd','USE_ROS.cmd','USE_DAEMON.cmd','CHECK_ROS.cmd','CHECK_BACKEND.cmd'):
-            d=(ROOT/n).read_text()
+            d=(ROOT/n).read_text(encoding='utf-8')
             self.assertIn('pause',d,n)
             self.assertIn('runner.ps1',d,n)
             self.assertIn('RCBOAT_NO_PAUSE',d,n)
     def test_runner_logs(self):
-        text=(ROOT/'tools/windows/runner.ps1').read_text()
+        text=(ROOT/'tools/windows/runner.ps1').read_text(encoding='utf-8')
         for required in ('Start-Transcript','Stop-Transcript','BUILD_GUI','UPLOAD_GITHUB','Get-FileHash','PyInstaller','--smoke-test','git','clone','push'):
             self.assertIn(required,text)
         self.assertIn('logs',text)
     def test_client_path_deployed(self):
-        gui=(ROOT/'windows_gui/app.py').read_text()
+        gui=(ROOT/'windows_gui/app.py').read_text(encoding='utf-8')
         self.assertIn('/home/jetson/rcboat_ros_ws/deployment/jetson/bridge_client.py',gui)
         self.assertTrue((ROOT/'deployment/jetson/bridge_client.py').exists())
         self.assertIn('--smoke-test',gui)
@@ -39,7 +39,7 @@ class PackagingRegression(unittest.TestCase):
         for p in list((ROOT/'catkin_ws').rglob('*.py'))+list((ROOT/'deployment').rglob('*.py'))+list((ROOT/'windows_gui').rglob('*.py'))+list((ROOT/'tools').rglob('*.py')):
             ast.parse(p.read_text(encoding='utf-8'),filename=str(p),feature_version=(3,8) if 'catkin_ws' in str(p) else None)
     def test_ros_check_nonzero_on_missing_topic(self):
-        script=(ROOT/'deployment/jetson/check_ros.sh').read_text()
+        script=(ROOT/'deployment/jetson/check_ros.sh').read_text(encoding='utf-8')
         self.assertIn('ROS HEALTH CHECK FAILED',script)
         self.assertIn('exit 1',script)
         self.assertIn('fail=1',script)
@@ -60,11 +60,11 @@ class PackagingRegression(unittest.TestCase):
         self.assertTrue(all(r['actual_steering_pwm']=='6000' and r['actual_throttle_pwm']=='6450' for r in rows))
         self.assertTrue(any(r['desired_steering_pwm'] not in ('','6000') for r in rows))
     def test_package_manual_contains_restrictions(self):
-        t=(ROOT/'VIDEO_GROUND_TEST_따라하기_설명서.md').read_text()
+        t=(ROOT/'VIDEO_GROUND_TEST_따라하기_설명서.md').read_text(encoding='utf-8')
         for x in ('TimeStep','VWorld','RTK_FIXED','Non-Disturbance','Disturbance','5300','6620','영상의 제목은 확인'):
             self.assertIn(x,t)
     def test_archive_workflow_root(self):
-        workflow=(ROOT/'github_workflow/build-ros-v2-windows.yml').read_text()
+        workflow=(ROOT/'github_workflow/build-ros-v2-windows.yml').read_text(encoding='utf-8')
         self.assertIn('setup-python@v5',workflow)
         self.assertIn('app.py --smoke-test',workflow)
         self.assertIn('windows-latest',workflow)
