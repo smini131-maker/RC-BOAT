@@ -205,21 +205,15 @@ class RoutePlot(QWidget):
         ]
 
     def _origin(self) -> tuple[float, float]:
-        points: list[tuple[float, float]] = []
+        # Use a fixed real route point as the local tangent-plane origin.
+        # The moving boat position must not shift the map coordinate frame.
         for route in self._visible_routes():
-            points.extend(
-                (float(p["lat"]), float(p["lon"]))
-                for p in route.get("waypoints", [])
-                if p.get("lat") is not None and p.get("lon") is not None
-            )
+            for point in route.get("waypoints", []):
+                if point.get("lat") is not None and point.get("lon") is not None:
+                    return float(point["lat"]), float(point["lon"])
         if self.position is not None:
-            points.append(self.position)
-        if not points:
-            return 0.0, 0.0
-        return (
-            sum(p[0] for p in points) / len(points),
-            sum(p[1] for p in points) / len(points),
-        )
+            return self.position
+        return 0.0, 0.0
 
     @staticmethod
     def _to_local_m(
