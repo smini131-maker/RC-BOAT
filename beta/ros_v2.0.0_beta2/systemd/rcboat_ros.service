@@ -1,0 +1,23 @@
+[Unit]
+Description=RCBoat independent ROS Noetic beta backend
+After=network-online.target
+Wants=network-online.target
+Conflicts=rcboat.service
+[Service]
+Type=simple
+User=jetson
+Group=jetson
+SupplementaryGroups=dialout i2c
+WorkingDirectory=/home/jetson/rcboat_ros_ws
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/home/jetson/rcboat_ros_data/ntrip.env
+ExecStartPre=/bin/bash /home/jetson/rcboat_ros_ws/deployment/jetson/hardware_gate.sh
+ExecStart=/bin/bash -lc 'source /opt/ros/noetic/setup.bash; source /home/jetson/rcboat_ros_ws/catkin_ws/devel/setup.bash; exec roslaunch rcboat_ros rcboat.launch'
+ExecStopPost=/usr/bin/python3 /home/jetson/rcboat_ros_ws/deployment/jetson/set_safe_pwm.py
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+KillMode=control-group
+# This unit must NOT be enabled in beta stage.
+[Install]
+WantedBy=multi-user.target

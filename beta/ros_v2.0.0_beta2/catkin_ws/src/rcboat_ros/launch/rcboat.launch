@@ -1,0 +1,15 @@
+<launch>
+  <arg name="config" default="$(find rcboat_ros)/config/boat.yaml" />
+  <arg name="routes" default="$(env HOME)/rcboat_ros_data/routes.json" />
+  <rosparam command="load" file="$(arg config)" ns="rcboat" />
+  <param name="/rcboat/routes_file" value="$(arg routes)" />
+  <node pkg="rcboat_ros" type="rc_input_node.py" name="rc_input_node" output="screen" required="true" />
+  <node pkg="rcboat_ros" type="gps_node.py" name="gps_node" output="screen" required="true" />
+  <node pkg="rcboat_ros" type="ntrip_node.py" name="ntrip_node" output="screen" />
+  <node pkg="rcboat_ros" type="route_manager_node.py" name="route_manager_node" output="screen" required="true" />
+  <node pkg="rcboat_ros" type="navigation_node.py" name="navigation_node" output="screen" required="true" />
+  <node pkg="rcboat_ros" type="safety_supervisor_node.py" name="safety_supervisor_node" output="screen" required="true" />
+  <node pkg="rcboat_ros" type="actuator_node.py" name="actuator_node" output="screen" required="true" />
+  <node pkg="rcboat_ros" type="ground_test_logger_node.py" name="ground_test_logger_node" output="screen" />
+  <node pkg="rcboat_ros" type="gui_bridge_node.py" name="gui_bridge_node" output="screen" />
+</launch>

@@ -1,0 +1,58 @@
+name: RC Boat ROS v2.0.0-beta.2 Windows EXE
+on:
+  push:
+    branches:
+      - beta/ros-v2.0.0-beta.2
+    paths:
+      - 'beta/ros_v2.0.0_beta2/**'
+      - '.github/workflows/build-ros-v2-beta2-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-build:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: x64
+      - name: Install Windows requirements
+        working-directory: beta/ros_v2.0.0_beta2/windows_gui
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: Python unit/regression tests
+        run: python -m unittest discover -s beta/ros_v2.0.0_beta2/tests -v
+      - name: GUI headless smoke
+        shell: pwsh
+        working-directory: beta/ros_v2.0.0_beta2/windows_gui
+        run: |
+          $env:QT_QPA_PLATFORM='offscreen'
+          python app.py --smoke-test
+          if ($LASTEXITCODE -ne 0) { throw 'PySide6 smoke failed' }
+      - name: Windows PyInstaller build
+        working-directory: beta/ros_v2.0.0_beta2/windows_gui
+        run: python -m PyInstaller --clean --noconfirm --onefile --windowed --name RCBoatControl_ROS_v2.0.0-beta.2 app.py
+      - name: Test bundled EXE and write SHA256
+        shell: pwsh
+        run: |
+          $exe='beta/ros_v2.0.0_beta2/windows_gui/dist/RCBoatControl_ROS_v2.0.0-beta.2.exe'
+          if (!(Test-Path -LiteralPath $exe)) { throw 'EXE missing' }
+          $env:QT_QPA_PLATFORM='offscreen'
+          & (Resolve-Path $exe) --smoke-test
+          if ($LASTEXITCODE -ne 0) { throw "Bundled EXE smoke failed: $LASTEXITCODE" }
+          $hash=(Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash
+          "$hash *RCBoatControl_ROS_v2.0.0-beta.2.exe" | Out-File -FilePath (Join-Path (Split-Path $exe) 'SHA256SUMS.txt') -Encoding ascii
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RCBoatControl_ROS_v2.0.0-beta.2_Windows_x64
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            beta/ros_v2.0.0_beta2/windows_gui/dist/RCBoatControl_ROS_v2.0.0-beta.2.exe
+            beta/ros_v2.0.0_beta2/windows_gui/dist/SHA256SUMS.txt

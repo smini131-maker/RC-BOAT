@@ -1,0 +1,41 @@
+version: '2.0.0-beta.2'
+arduino_port: '/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_55639303534351D01210-if00'
+gps_port: '/dev/serial/by-id/usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00'
+arduino_baudrate: 9600
+gps_baudrate: 115200
+gps_stale_s: 2.0
+max_hdop: 3.0
+steering_low: 4900
+steering_center: 6000
+steering_high: 7300
+throttle_stop: 6450
+throttle_forward_max: 7000
+throttle_reverse_max: 5800
+cruise_pwm: 6650
+nav_invert_steering: true
+pca_bus: 1
+pca_address: 64
+pca_frequency: 60
+steering_channel: 0
+throttle_channel: 6
+command_timeout_s: 0.75
+remote_heartbeat_s: 0.7
+log_rate_hz: 4.0
+endpoint_tolerance_m: 0.75
+off_route_distance_m: 8.0
+off_route_hold_s: 3.0
+closer_advantage_m: 2.0
+switch_cooldown_s: 5.0
+# This beta intentionally requires an explicit field-test unlock.
+# Propulsion remains disabled by default, even in NAVIGATION.
+propulsion_allowed: false
+
+# v2.0.0-beta.2: safe experimental comparison; these never unlock propulsion.
+tracking_mode: 'HEADING'
+lookahead_base_m: 2.0
+lookahead_speed_gain_s: 2.5
+lookahead_min_m: 2.0
+lookahead_max_m: 10.0
+speed_feedback_enabled: false
+target_speed_mps: 0.6
+experimental_nav_actuation_enabled: false

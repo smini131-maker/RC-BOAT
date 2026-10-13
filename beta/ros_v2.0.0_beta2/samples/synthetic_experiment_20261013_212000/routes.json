@@ -1,0 +1,62 @@
+{
+  "selected_route_id": "training_right",
+  "routes": [
+    {
+      "id": "training_left",
+      "name": "LEFT",
+      "arrival_radius_m": 1.5,
+      "waypoints": [
+        {
+          "lat": 35.00005,
+          "lon": 129.0
+        },
+        {
+          "lat": 35.00015,
+          "lon": 128.9997
+        },
+        {
+          "lat": 35.00025,
+          "lon": 129.0
+        }
+      ]
+    },
+    {
+      "id": "training_center",
+      "name": "CENTER",
+      "arrival_radius_m": 1.5,
+      "waypoints": [
+        {
+          "lat": 35.00005,
+          "lon": 129.0
+        },
+        {
+          "lat": 35.00015,
+          "lon": 129.0
+        },
+        {
+          "lat": 35.00025,
+          "lon": 129.0
+        }
+      ]
+    },
+    {
+      "id": "training_right",
+      "name": "RIGHT",
+      "arrival_radius_m": 1.5,
+      "waypoints": [
+        {
+          "lat": 35.00005,
+          "lon": 129.0
+        },
+        {
+          "lat": 35.00015,
+          "lon": 129.0003
+        },
+        {
+          "lat": 35.00025,
+          "lon": 129.0
+        }
+      ]
+    }
+  ]
+}

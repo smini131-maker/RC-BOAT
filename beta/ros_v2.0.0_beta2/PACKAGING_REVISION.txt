@@ -1,0 +1,2 @@
+ROS2.0-beta.1 Windows-build/upload hotfix and video-method manual
+Generated: 2026-10-13

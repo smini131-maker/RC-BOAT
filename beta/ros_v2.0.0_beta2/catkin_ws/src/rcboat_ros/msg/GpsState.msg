@@ -1,0 +1,10 @@
+std_msgs/Header header
+float64 latitude
+float64 longitude
+float64 heading_deg
+float64 speed_mps
+float64 hdop
+float64 hacc_m
+string rtk_state
+bool fix
+bool healthy
