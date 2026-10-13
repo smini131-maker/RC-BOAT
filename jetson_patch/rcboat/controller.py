@@ -340,6 +340,18 @@ class BoatController:
         self.operation_state = "AUTO_SAFE"
         self._event("INFO", "HIL stopped; safe output applied")
 
+    def delete_route(self, route_id: str) -> str:
+        deleted_name = self.routes.delete_recorded_route(route_id)
+        selected = self.routes.selected
+        self._navigation_route_prepared = False
+        self._last_route_status = {}
+        self._event(
+            "INFO",
+            f"Recorded route deleted: {deleted_name} ({route_id}); "
+            f"selected={selected.route_id if selected else '-'}",
+        )
+        return deleted_name
+
     def select_route(self, route_id: str) -> None:
         """Select a route while immediately returning navigation output to safe."""
 
