@@ -15,7 +15,7 @@ class GpsHealthThresholds:
     hdop_max_navigation: float = 3.0
     pdop_good: float = 2.0
     pdop_warning: float = 4.0
-    vdop_good: float = 1.5
+    vdop_good: float = 5.0
     cno_good: float = 40.0
     cno_warning: float = 35.0
     hacc_good_m: float = 1.5
@@ -121,10 +121,12 @@ def evaluate_gps_health(
         levels.append(level)
         navigation_levels.append(level)
     if vdop is not None:
+        # Surface navigation does not use vertical dilution directly.
+        # Keep VDOP as an overall reception-quality hint, but never let VDOP
+        # alone downgrade the autonomous-navigation safety gate.
         level = 0 if float(vdop) <= thresholds.vdop_good else 1
         reasons.append(f"VDOP {float(vdop):.2f}" + (" (warning)" if level else ""))
         levels.append(level)
-        navigation_levels.append(level)
     if cno is not None:
         level = 0 if float(cno) >= thresholds.cno_good else 1 if float(cno) >= thresholds.cno_warning else 2
         reasons.append(f"C/N0 {float(cno):.1f} dB-Hz" + (" (low)" if level == 2 else ""))
