@@ -2,7 +2,7 @@
 
 > 참고 영상: https://youtu.be/C5KsczjSD5Y  
 > 확인된 영상 제목: **지상환경에서 GPS 기반 Path-Tracking 알고리즘 검증: Matlab Plot 및 QGIS 시각화 방법 설명**  
-> **출처 표시:** 영상의 제목은 확인했으나 장면별 영상·자막은 확보하지 못했다. 이 설명서는 영상 제목에서 확인되는 목표와 사용자가 제공한 실험 조건, 제공 소스의 실제 작동 경로를 바탕으로 재구성한 **RC BOAT용 실행 절차**이다. 영상 속 특정 장면·분·초의 설명을 직접 인용한 것이 아니다.
+> **영상 검증 갱신 (2026-10-14):** 1시간 9분 58초 영상의 한국어 자동 생성 자막 전체 구간을 브라우저로 확인해 시간대별 요약을 확보했습니다. 축어 자막 전문과 장면별 프레임 파일은 별도 확보하지 못했습니다. 전체 시간대별 내용과 코드 검증표는 `VIDEO_VALIDATION_20261014_KO.md`를 확인하세요.
 
 ## 1. 이 실험에서 검증해야 하는 것
 
@@ -194,3 +194,13 @@ CSV 열: `index`, `timestamp`, `elapsed_time_s`, `latitude`, `longitude`, `utm_e
 - 실패/보완 사항 및 재실험 필요 여부:
 
 **주의:** 제공된 `samples/`와 `sample_ground_test.csv`는 생성된 합성 검증자료이다. 이를 실제 GPS RTK 보행시험 결과인 것처럼 제출해서는 안 된다.
+
+## 추가: 영상 구간별 MATLAB / QGIS 검증
+
+영상 20:38–52:05에서는 MATLAB figure/plot/legend, RGB 색상, font, axis 범위를 다룹니다. 수정 분석기는 Times New Roman, 좌측 Blue/우측 Red, 0도 neutral, 시간축 `linkaxes`, 수직 Multi-Path switch 표시를 지원합니다.
+
+영상 52:05–57:53은 속도(m/s) 및 경로 전환 비교입니다. `speed_mps`는 재변환하지 않고 **0.6m/s 보행 속도 참고선**만 추가합니다. 이 값은 ESC 설정이 아닙니다. `route_switch_timeline.png`으로 대상 항로 변경 시점을 추가 분석합니다.
+
+영상 57:53–1:09:58은 QGIS EPSG:4326, VWorld Satellite, TMS4 Korea, Index/TimeStep 라벨링입니다. `qgis/setup_qgis_layers.py`를 QGIS 3 Python Console에서 `runpy.run_path(r'C:/.../experiment_.../qgis/setup_qgis_layers.py')`로 실행하면 4개 CSV의 색상/라벨과 QGZ 프로젝트를 구성합니다. 위성지도 플러그인 설정 및 실제 표시 테스트는 QGIS 실행 환경에서 직접 검증해야 합니다.
+
+실험 종료와 사용자가 해야 할 일은 `TODO_FIELD_TEST_KO.md`을 참고하세요.

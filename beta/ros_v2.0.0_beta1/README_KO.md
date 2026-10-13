@@ -67,3 +67,11 @@ GitHub 베타 작업 브랜치 `beta/ros-v2.0.0-beta.1`은 생성되어 있지�
 
 
 > **수정 패키지 주의:** Windows 초기 설정 및 오류 로그는 `docs/WINDOWS_빌드_업로드_문제해결.md`를, ROS Noetic 준비는 `docs/JETSON_ROS_NOETIC_설치_사전점검.md`를 참조하세요.
+
+## 영상 전체 구간 분석 및 지상 실험 보강 (2026-10-14)
+
+- `VIDEO_VALIDATION_20261014_KO.md`: 영상 전체(1:09:58)의 자막 구간 요약, 구현 확인, 현장 미검증 체크.
+- `TODO_FIELD_TEST_KO.md`: 사용자 Windows/Jetson/Matlab/QGIS 단계별 할 일.
+- `qgis/setup_qgis_layers.py`: EPSG:4326 네 레이어와 색상·Index/TimeStep 레이블 생성.
+- 안전 잠금/PWM 확인 실패 때 지상 실험 시작 거절, Multi-Path CSV switch 이벤트 보존.
+- MATLAB에 보행 0.6m/s 참고선(모터 제어값 아님), 경로 변경 타임라인을 추가했습니다.

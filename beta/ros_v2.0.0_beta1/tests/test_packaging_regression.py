@@ -61,7 +61,7 @@ class PackagingRegression(unittest.TestCase):
         self.assertTrue(any(r['desired_steering_pwm'] not in ('','6000') for r in rows))
     def test_package_manual_contains_restrictions(self):
         t=(ROOT/'VIDEO_GROUND_TEST_따라하기_설명서.md').read_text(encoding='utf-8')
-        for x in ('TimeStep','VWorld','RTK_FIXED','Non-Disturbance','Disturbance','5300','6620','영상의 제목은 확인'):
+        for x in ('TimeStep','VWorld','RTK_FIXED','Non-Disturbance','Disturbance','5300','6620','영상 검증 갱신'):
             self.assertIn(x,t)
     def test_archive_workflow_root(self):
         workflow=(ROOT/'github_workflow/build-ros-v2-windows.yml').read_text(encoding='utf-8')

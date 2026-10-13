@@ -6,7 +6,7 @@ on:
       - beta/ros-v2.0.0-beta.1
     paths:
       - 'beta/ros_v2.0.0_beta1/source_payload.b64'
-      - 'beta/ros_v2.0.0_beta1/windows_gui/**'
+      - 'beta/ros_v2.0.0_beta1/**'
       - '.github/workflows/build-ros-v2-windows.yml'
   workflow_dispatch:
 
