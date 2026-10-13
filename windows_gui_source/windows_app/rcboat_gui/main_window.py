@@ -1268,8 +1268,14 @@ class MainWindow(QMainWindow):
 
         waypoints = [
             {
+                "timestamp": str(point.get("timestamp") or ""),
                 "lat": float(point["lat"]),
                 "lon": float(point["lon"]),
+                "heading_deg": (
+                    None
+                    if point.get("heading_deg") is None
+                    else float(point["heading_deg"]) % 360.0
+                ),
             }
             for point in route.get("waypoints", [])
             if point.get("lat") is not None and point.get("lon") is not None
@@ -1277,22 +1283,42 @@ class MainWindow(QMainWindow):
 
         try:
             if path.suffix.lower() == ".csv":
-                lines = ["index,latitude,longitude"]
-                lines.extend(
-                    f"{index},{point['lat']:.8f},{point['lon']:.8f}"
-                    for index, point in enumerate(waypoints, 1)
-                )
+                lines = ["index,timestamp,latitude,longitude,heading_deg"]
+                for index, point in enumerate(waypoints, 1):
+                    heading = (
+                        ""
+                        if point["heading_deg"] is None
+                        else f"{float(point['heading_deg']):.2f}"
+                    )
+                    lines.append(
+                        f"{index},{point['timestamp']},"
+                        f"{point['lat']:.8f},{point['lon']:.8f},{heading}"
+                    )
                 path.write_text("\n".join(lines) + "\n", encoding="utf-8-sig")
             elif path.suffix.lower() == ".gpx":
                 route_name = html.escape(name)
-                track_points = "\n".join(
-                    f'      <trkpt lat="{point["lat"]:.8f}" lon="{point["lon"]:.8f}" />'
-                    for point in waypoints
-                )
+                track_lines: list[str] = []
+                for point in waypoints:
+                    track_lines.append(
+                        f'      <trkpt lat="{point["lat"]:.8f}" lon="{point["lon"]:.8f}">'
+                    )
+                    if point["timestamp"]:
+                        track_lines.append(
+                            f"        <time>{html.escape(point['timestamp'])}</time>"
+                        )
+                    if point["heading_deg"] is not None:
+                        track_lines.append(
+                            "        <extensions>"
+                            f"<rcboat:heading_deg>{float(point['heading_deg']):.2f}</rcboat:heading_deg>"
+                            "</extensions>"
+                        )
+                    track_lines.append("      </trkpt>")
+                track_points = "\n".join(track_lines)
                 gpx = (
                     '<?xml version="1.0" encoding="UTF-8"?>\n'
                     '<gpx version="1.1" creator="RCBoatControl" '
-                    'xmlns="http://www.topografix.com/GPX/1/1">\n'
+                    'xmlns="http://www.topografix.com/GPX/1/1" '
+                    'xmlns:rcboat="https://github.com/smini131-maker/RC-BOAT">\n'
                     f"  <trk><name>{route_name}</name><trkseg>\n"
                     f"{track_points}\n"
                     "  </trkseg></trk>\n"
@@ -1972,8 +1998,22 @@ class MainWindow(QMainWindow):
         point_count = int(recording.get("point_count") or 0)
         if recording_active:
             save_note = "저장 가능" if point_count >= 2 else "저장하려면 최소 2개 지점 필요"
+            latest_sample = recording.get("latest_sample") or {}
+            latest_detail = ""
+            if latest_sample:
+                heading = latest_sample.get("heading_deg")
+                heading_text = (
+                    "-" if heading is None else f"{float(heading):.1f}°"
+                )
+                latest_detail = (
+                    f" · 최근 {latest_sample.get('timestamp') or '-'}"
+                    f" · {float(latest_sample.get('lat') or 0):.7f}, "
+                    f"{float(latest_sample.get('lon') or 0):.7f}"
+                    f" · 헤딩 {heading_text}"
+                )
             self.route_record_status.setText(
-                f"기록 중 · {recording.get('name', '-')} · {point_count}개 지점 · {save_note}"
+                f"기록 중 · {recording.get('name', '-')} · {point_count}개 지점"
+                f" · {save_note}{latest_detail}"
             )
         else:
             self.route_record_status.setText("기록 대기")
