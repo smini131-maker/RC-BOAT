@@ -41,6 +41,7 @@ class GpsData:
     parser_error_count: int = 0
     nmea_sentence_count: int = 0
     ubx_message_count: int = 0
+    nav_pvt_message_count: int = 0
     utm_easting: float | None = None
     utm_northing: float | None = None
     utm_zone: str | None = None
@@ -309,6 +310,7 @@ class MixedGpsParser:
         payload = packet[6:-2]
         if (msg_class, msg_id) != (0x01, 0x07) or len(payload) < 92:
             return False
+        self.data.nav_pvt_message_count += 1
         year = int.from_bytes(payload[4:6], "little")
         month, day, hour, minute, second = payload[6:11]
         valid = payload[11]
