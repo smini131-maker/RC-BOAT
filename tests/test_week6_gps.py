@@ -362,6 +362,34 @@ class RoutePersistenceTests(unittest.TestCase):
                 manager.delete_recorded_route("training_a")
 
 
+class RouteDeleteSafetyTests(unittest.TestCase):
+    def test_controller_rejects_route_delete_during_navigation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "routes.json"
+            payload = {
+                "selected_route_id": "recorded_x",
+                "routes": [
+                    {
+                        "id": "training_a",
+                        "name": "훈련 경로 A",
+                        "waypoints": [{"lat": 35.0, "lon": 129.0}],
+                    },
+                    {
+                        "id": "recorded_x",
+                        "name": "기록",
+                        "waypoints": [{"lat": 35.1, "lon": 129.1}],
+                    },
+                ],
+            }
+            path.write_text(__import__("json").dumps(payload), encoding="utf-8")
+            controller = BoatController(
+                MockHardware(), RouteManager(path), RuntimeSettings()
+            )
+            controller.mode = "NAVIGATION"
+            with self.assertRaises(RuntimeError):
+                controller.delete_route("recorded_x")
+
+
 class SafetyRepositoryTests(unittest.TestCase):
     def test_controller_boots_auto_safe(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
