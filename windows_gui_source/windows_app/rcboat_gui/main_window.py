@@ -40,6 +40,9 @@ from .ssh_worker import SSHWorker
 from .widgets import MetricCard, RoutePlot, StatusCard, TelemetryGraph
 
 
+APP_VERSION = "1.6.0"
+
+
 STYLE = """
 QMainWindow, QWidget { background:#09111f; color:#edf4ff; font-family:'Malgun Gothic','Segoe UI'; font-size:10pt; }
 QGroupBox { border:1px solid #26334a; border-radius:8px; margin-top:12px; padding:12px; font-weight:600; }
@@ -77,7 +80,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         bundle_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
         self.setWindowIcon(QIcon(str(bundle_root / "assets" / "cat_boat_icon.ico")))
-        self.setWindowTitle("RC 보트 관제센터")
+        self.setWindowTitle(f"RC 보트 관제센터 v{APP_VERSION}")
         screen = QApplication.primaryScreen()
         if screen is not None:
             available = screen.availableGeometry()
@@ -144,7 +147,9 @@ class MainWindow(QMainWindow):
         title_box = QVBoxLayout()
         title = QLabel("RC 보트 관제센터")
         title.setObjectName("appTitle")
-        subtitle = QLabel("Jetson Nano · Arduino · GPS · PCA9685 통합 제어")
+        subtitle = QLabel(
+            f"v{APP_VERSION} · Jetson Nano · Arduino · GPS · PCA9685 통합 제어"
+        )
         subtitle.setObjectName("appSubtitle")
         title_box.addWidget(title)
         title_box.addWidget(subtitle)
