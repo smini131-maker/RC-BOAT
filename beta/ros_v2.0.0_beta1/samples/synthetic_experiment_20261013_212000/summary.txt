@@ -1,0 +1,14 @@
+Duration_s: 54.75
+Samples: 220
+Mean_GPS_Rate_Hz: 4.0
+Mean_CSV_Sample_Rate_Hz: 4.0
+Mean_Speed_mps: 0.75
+Max_Heading_Error_deg: 173.5752231088788
+Mean_Abs_Heading_Error_deg: 39.70354677201079
+Max_Cross_Track_Error_m: 9.422934314047865
+Mean_Cross_Track_Error_m: 1.7066376640400658
+Multi_Path_Switch_Count: 1
+Initial_Route: training_right
+Final_Route: training_center
+RTK_Fixed_Ratio: 0.9272727272727272
+GPS_Dropouts: 0

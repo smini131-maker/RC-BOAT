@@ -1,0 +1,43 @@
+name: Build RC Boat ROS v2 Windows GUI
+on:
+  push:
+    branches: ["beta/ros-v2.0.0-beta.1"]
+    paths:
+      - 'beta/ros_v2.0.0_beta1/windows_gui/**'
+      - '.github/workflows/build-ros-v2-windows.yml'
+  workflow_dispatch:
+jobs:
+  windows-build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: 'x64'
+      - name: Install GUI dependencies
+        working-directory: beta/ros_v2.0.0_beta1/windows_gui
+        run: python -m pip install -r requirements.txt
+      - name: Offline regression suite
+        run: python -m unittest discover -s beta/ros_v2.0.0_beta1/tests -v
+      - name: Headless GUI smoke test
+        working-directory: beta/ros_v2.0.0_beta1/windows_gui
+        shell: pwsh
+        run: |
+          $env:QT_QPA_PLATFORM='offscreen'
+          python app.py --smoke-test
+      - name: Compile Windows EXE
+        working-directory: beta/ros_v2.0.0_beta1/windows_gui
+        run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name RCBoatControl_ROS_v2.0.0-beta.1 app.py
+      - name: Verify Windows artifact
+        shell: pwsh
+        run: |
+          $artifact='beta/ros_v2.0.0_beta1/windows_gui/dist/RCBoatControl_ROS_v2.0.0-beta.1.exe'
+          if (!(Test-Path $artifact)) { throw 'EXE is missing' }
+          Get-FileHash $artifact -Algorithm SHA256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RCBoatControl_ROS_v2.0.0-beta.1
+          path: beta/ros_v2.0.0_beta1/windows_gui/dist/RCBoatControl_ROS_v2.0.0-beta.1.exe
+          if-no-files-found: error

@@ -1,0 +1,6 @@
+{
+  "synthetic": true,
+  "real_gps": false,
+  "purpose": "CSV/QGIS/MATLAB schema verification only",
+  "version": "2.0.0-beta.1"
+}
