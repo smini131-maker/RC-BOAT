@@ -1,7 +1,7 @@
 param(
     [string]$JetsonIp = "10.69.235.215",
     [string]$UserName = "jetson",
-    [string]$Ref = "main"
+    [string]$Ref = "release/1.6.0"
 )
 
 $ErrorActionPreference = "Stop"
