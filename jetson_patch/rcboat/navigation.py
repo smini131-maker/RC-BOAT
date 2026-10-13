@@ -213,6 +213,8 @@ class RouteManager:
         """Delete one operator-recorded route and persist a safe fallback selection."""
 
         route_id = str(route_id).strip()
+        if self.recording:
+            raise RuntimeError("stop GPS route recording before deleting a route")
         if not route_id:
             raise ValueError("route id is required")
         if route_id.startswith("training_"):
