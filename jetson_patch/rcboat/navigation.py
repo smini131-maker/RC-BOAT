@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import datetime as dt
 import json
 import math
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -65,6 +66,7 @@ class Route:
     name: str
     points: list[tuple[float, float]]
     arrival_radius_m: float
+    waypoint_records: list[dict[str, Any]] = field(default_factory=list)
 
 
 class RouteManager:
@@ -87,6 +89,7 @@ class RouteManager:
         self.recording = False
         self.recording_name = ""
         self.recording_points: list[tuple[float, float]] = []
+        self.recording_samples: list[dict[str, Any]] = []
         self._recording_last_at: float | None = None
         self.recording_minimum_distance_m = 1.0
         self.recording_minimum_interval_s = 0.5
@@ -130,7 +133,20 @@ class RouteManager:
                 route_id = str(item["id"]).strip()
                 if not route_id or route_id in seen_ids:
                     raise ValueError(f"duplicate or empty route id: {route_id!r}")
-                points = [(float(p["lat"]), float(p["lon"])) for p in item.get("waypoints", [])]
+                points: list[tuple[float, float]] = []
+                waypoint_records: list[dict[str, Any]] = []
+                for raw_point in item.get("waypoints", []):
+                    lat = float(raw_point["lat"])
+                    lon = float(raw_point["lon"])
+                    points.append((lat, lon))
+                    record: dict[str, Any] = {"lat": lat, "lon": lon}
+                    timestamp = raw_point.get("timestamp")
+                    if timestamp:
+                        record["timestamp"] = str(timestamp)
+                    heading = raw_point.get("heading_deg")
+                    if heading is not None:
+                        record["heading_deg"] = float(heading) % 360.0
+                    waypoint_records.append(record)
                 if not points:
                     continue
                 arrival_radius = float(item.get("arrival_radius_m", 3.0))
@@ -142,6 +158,7 @@ class RouteManager:
                         name=str(item.get("name", route_id)),
                         points=points,
                         arrival_radius_m=arrival_radius,
+                        waypoint_records=waypoint_records,
                     )
                 )
                 seen_ids.add(route_id)
@@ -316,6 +333,7 @@ class RouteManager:
         self.recording = True
         self.recording_name = clean_name
         self.recording_points = []
+        self.recording_samples = []
         self._recording_last_at = None
         self.recording_minimum_distance_m = float(minimum_distance_m)
         self.recording_minimum_interval_s = float(minimum_interval_s)
@@ -326,6 +344,8 @@ class RouteManager:
         position: tuple[float, float],
         now: float | None = None,
         *,
+        heading_deg: float | None = None,
+        timestamp: str | None = None,
         minimum_distance_m: float | None = None,
         minimum_interval_s: float | None = None,
     ) -> bool:
@@ -336,9 +356,27 @@ class RouteManager:
         now = time.monotonic() if now is None else now
         if self._recording_last_at is not None and now - self._recording_last_at < minimum_interval_s:
             return False
-        if self.recording_points and haversine_m(self.recording_points[-1], position) < minimum_distance_m:
+        point = (float(position[0]), float(position[1]))
+        if self.recording_points and haversine_m(self.recording_points[-1], point) < minimum_distance_m:
             return False
-        self.recording_points.append((float(position[0]), float(position[1])))
+
+        if timestamp is None:
+            timestamp = dt.datetime.now().astimezone().isoformat(timespec="milliseconds")
+        heading = None
+        if heading_deg is not None:
+            candidate = float(heading_deg)
+            if math.isfinite(candidate):
+                heading = round(candidate % 360.0, 2)
+
+        self.recording_points.append(point)
+        self.recording_samples.append(
+            {
+                "timestamp": str(timestamp),
+                "lat": round(point[0], 8),
+                "lon": round(point[1], 8),
+                "heading_deg": heading,
+            }
+        )
         self._recording_last_at = now
         return True
 
@@ -347,10 +385,12 @@ class RouteManager:
             raise RuntimeError("GPS route recording is not active")
         name = self.recording_name
         points = list(self.recording_points)
+        samples = [dict(item) for item in self.recording_samples]
         if not save:
             self.recording = False
             self.recording_name = ""
             self.recording_points = []
+            self.recording_samples = []
             self._recording_last_at = None
             return None
         if len(points) < 2:
@@ -370,14 +410,25 @@ class RouteManager:
         while route_id in existing_ids:
             route_id = f"{base_id}_{suffix}"
             suffix += 1
+        if len(samples) != len(points):
+            samples = [
+                {
+                    "timestamp": "",
+                    "lat": round(lat, 8),
+                    "lon": round(lon, 8),
+                    "heading_deg": None,
+                }
+                for lat, lon in points
+            ]
         items.append(
             {
                 "id": route_id,
                 "name": name,
                 "arrival_radius_m": self.recording_arrival_radius_m,
-                "waypoints": [
-                    {"lat": round(lat, 8), "lon": round(lon, 8)} for lat, lon in points
-                ],
+                "recorded_at_start": samples[0].get("timestamp") or None,
+                "recorded_at_end": samples[-1].get("timestamp") or None,
+                "saved_at": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
+                "waypoints": samples,
             }
         )
         payload["selected_route_id"] = route_id
@@ -390,6 +441,7 @@ class RouteManager:
         self.recording = False
         self.recording_name = ""
         self.recording_points = []
+        self.recording_samples = []
         self._recording_last_at = None
         if not self.load():
             raise RuntimeError(self.load_error or "saved route could not be reloaded")
@@ -404,10 +456,10 @@ class RouteManager:
             "minimum_distance_m": self.recording_minimum_distance_m,
             "minimum_interval_s": self.recording_minimum_interval_s,
             "arrival_radius_m": self.recording_arrival_radius_m,
-            "waypoints": [
-                {"lat": lat, "lon": lon}
-                for lat, lon in self.recording_points
-            ],
+            "waypoints": [dict(item) for item in self.recording_samples],
+            "latest_sample": (
+                dict(self.recording_samples[-1]) if self.recording_samples else None
+            ),
         }
 
     def _group_indices(self, reference_index: int | None = None) -> list[int]:
@@ -549,12 +601,20 @@ class RouteManager:
         }
 
     def public_routes(self) -> list[dict[str, Any]]:
-        return [
-            {
-                "id": route.route_id,
-                "name": route.name,
-                "waypoints": [{"lat": lat, "lon": lon} for lat, lon in route.points],
-                "arrival_radius_m": route.arrival_radius_m,
-            }
-            for route in self.routes
-        ]
+        result: list[dict[str, Any]] = []
+        for route in self.routes:
+            if len(route.waypoint_records) == len(route.points):
+                waypoints = [dict(item) for item in route.waypoint_records]
+            else:
+                waypoints = [
+                    {"lat": lat, "lon": lon} for lat, lon in route.points
+                ]
+            result.append(
+                {
+                    "id": route.route_id,
+                    "name": route.name,
+                    "waypoints": waypoints,
+                    "arrival_radius_m": route.arrival_radius_m,
+                }
+            )
+        return result
