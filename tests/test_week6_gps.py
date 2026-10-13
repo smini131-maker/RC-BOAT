@@ -250,5 +250,72 @@ class ControllerWeek6Tests(unittest.TestCase):
             self.assertEqual(controller.operation_state, "NAVIGATION_ACTIVE")
 
 
+
+class RoutePersistenceTests(unittest.TestCase):
+    def test_reload_prefers_persisted_selected_route(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "routes.json"
+            payload = {
+                "selected_route_id": "a",
+                "routes": [
+                    {"id": "a", "name": "A", "waypoints": [{"lat": 35.0, "lon": 129.0}]},
+                    {"id": "b", "name": "B", "waypoints": [{"lat": 35.1, "lon": 129.1}]},
+                ],
+            }
+            path.write_text(__import__("json").dumps(payload), encoding="utf-8")
+            manager = RouteManager(path)
+            self.assertEqual(manager.selected.route_id, "a")
+            payload["selected_route_id"] = "b"
+            path.write_text(__import__("json").dumps(payload), encoding="utf-8")
+            self.assertTrue(manager.load())
+            self.assertEqual(manager.selected.route_id, "b")
+            self.assertEqual(manager.persisted_selected_route_id, "b")
+
+    def test_saved_recorded_route_is_reloaded_and_selected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "routes.json"
+            path.write_text(
+                '{"selected_route_id":"a","routes":[{"id":"a","name":"A","waypoints":[{"lat":35.0,"lon":129.0}]}]}',
+                encoding="utf-8",
+            )
+            manager = RouteManager(path)
+            manager.start_recording("Recorded", minimum_distance_m=0.1, minimum_interval_s=0.1)
+            self.assertTrue(manager.record_position((35.0, 129.0), now=1.0))
+            self.assertTrue(manager.record_position((35.00001, 129.00001), now=2.0))
+            route_id = manager.stop_recording(save=True)
+            self.assertIsNotNone(route_id)
+            self.assertEqual(manager.selected.route_id, route_id)
+            self.assertEqual(manager.persisted_selected_route_id, route_id)
+            self.assertIn(route_id, [item["id"] for item in manager.public_routes()])
+
+
+class SafetyRepositoryTests(unittest.TestCase):
+    def test_controller_boots_auto_safe(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            hardware = MockHardware()
+            controller = BoatController(
+                hardware, RouteManager(routes_file(temp)), RuntimeSettings()
+            )
+            self.assertEqual(controller.mode, "AUTO")
+            self.assertEqual(controller.operation_state, "AUTO_SAFE")
+            self.assertEqual(controller.failsafe_reason, "BOOT_SAFE")
+            self.assertEqual(controller.steering_pwm, 6000)
+            self.assertEqual(controller.throttle_pwm, 6450)
+
+    def test_fresh_auxiliary_data_does_not_hide_stale_position(self) -> None:
+        source = {
+            "fix": True,
+            "latitude": 35.0,
+            "longitude": 129.0,
+            "satellites": 10,
+            "hdop": 0.8,
+            "last_update_monotonic": 99.9,
+            "last_valid_fix_monotonic": 95.0,
+        }
+        health = evaluate_gps_health(source, connected=True, now=100.0)
+        self.assertEqual(health["navigation_status"], "STALE")
+        self.assertGreater(health["position_age_s"], 2.0)
+
+
 if __name__ == "__main__":
     unittest.main()
