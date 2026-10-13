@@ -266,5 +266,24 @@ class Week6GuiSmokeTests(unittest.TestCase):
         self.assertIsInstance(self.window.centralWidget(), QScrollArea)
         self.assertTrue(self.window.centralWidget().widgetResizable())
 
+
+    def test_ntrip_404_shows_mountpoint_fix(self) -> None:
+        state = self.state()
+        state["ntrip"].update({
+            "enabled": True,
+            "connected": False,
+            "mountpoint": "VRS_RTCM32",
+            "last_error": "NTRIP caster rejected request: HTTP/1.1 404 Mountpoint of request not found",
+        })
+        self.window.update_telemetry(state)
+        self.assertIn("Mount Point 없음(404)", self.window.ntrip_status.text())
+        self.assertTrue(self.window.ntrip_mount_fix.isVisible())
+
+    def test_recommended_mountpoint_button_sets_hyphen_value(self) -> None:
+        self.window.ntrip_mountpoint.setText("VRS_RTCM32")
+        self.window.apply_recommended_mountpoint()
+        self.assertEqual(self.window.ntrip_mountpoint.text(), "VRS-RTCM32")
+        self.assertTrue(self.window._ntrip_dirty)
+
 if __name__ == "__main__":
     unittest.main()
