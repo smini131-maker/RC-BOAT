@@ -526,17 +526,7 @@ class BoatController:
             VALUES.throttle_stop_pwm + cruise_delta * speed_fraction
         ))
 
-        # A very large cross-track error is treated as a real route-loss
-        # condition rather than ordinary steering correction. Multi-Path gets
-        # a chance to switch first in update_position(); only the remaining
-        # active route distance is checked here.
-        cross_track = float(
-            self._last_route_status.get("distance_to_route_m") or 0.0
-        )
-        if cross_track >= VALUES.navigation_hard_off_route_m:
-            self.operation_state = "NAVIGATION_RECOVERY_STOP"
-            self.failsafe_reason = "ROUTE_DEVIATION_TOO_LARGE"
-            self._last_route_status.update({
+        self._last_route_status.update({
                 "target_bearing_deg": round(target_bearing, 1),
                 "course_deg": round(float(snap.gps_course_deg), 1),
                 "heading_error_deg": round(error, 1),
@@ -556,7 +546,6 @@ class BoatController:
             "navigation_speed_fraction": round(speed_fraction, 3),
             "navigation_throttle_pwm": throttle,
             "navigation_steering_pwm": int(round(steering)),
-            "hard_off_route_stop_m": VALUES.navigation_hard_off_route_m,
         })
         self.operation_state = "NAVIGATION_ACTIVE"
         self.failsafe_reason = ""
