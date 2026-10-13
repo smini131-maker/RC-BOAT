@@ -52,13 +52,16 @@ chmod +x install_patch.sh
 - SSH 터미널 준비 이벤트가 현재 탭을 강제로 SSH 터미널 탭으로 바꾸지 않습니다.
 - RTK/NTRIP 연결 요청, 설정 ACK, 연결/해제/오류 상태 변화, RTCM byte 수신 시작을 운항 기록 로그에 표시합니다.
 - AUTO_SAFE 부팅(6000/6450)과 GPS 위치 자체의 stale 판정 보정을 GitHub 기준 소스에도 반영했습니다.
+- GPS Health가 WARNING/BAD/NO_FIX/STALE이면 가장 중요한 원인을 작은 글씨로 별도 표시합니다.
+- 전체 제어 화면은 스크롤 가능하게 구성해 작은 해상도나 높은 Windows 배율에서도 하단 컨트롤이 잘리지 않습니다.
+- VDOP는 표면 보트의 수평 항법 Gate를 직접 막지 않으며, GOOD 기준을 ≤5로 완화했습니다.
 
 ## R12.1 Windows RTK GUI 수정
 
 - `RTK 사용` 체크 직후 주기 telemetry의 이전 `enabled=false` 값이 편집 중인 체크박스를 다시 해제하던 문제를 수정했습니다.
 - Host / Port / Mount Point / Username / Password / TLS를 사용자가 편집 중일 때 telemetry가 입력값을 덮어쓰지 않습니다.
 - `CONFIGURE_NTRIP` ACK를 확인한 뒤 서버 상태 동기화로 복귀합니다.
-- GPS/RTK 화면에 R12.1 health 기준을 함께 표시합니다: Satellite GOOD ≥8, HDOP GOOD ≤2 / 항법 허용 ≤3, PDOP GOOD ≤2 / WARNING ≤4, VDOP GOOD ≤1.5, C/N0 GOOD ≥40 / WARNING ≥35 dB-Hz, hAcc GOOD ≤1.5 m / WARNING ≤3 m, GPS age ≤2 s, correction age GOOD ≤5 s / WARNING ≤10 s.
+- GPS/RTK 화면에 R12.1 health 기준을 함께 표시합니다: Satellite GOOD ≥8, HDOP GOOD ≤2 / 항법 허용 ≤3, PDOP GOOD ≤2 / WARNING ≤4, VDOP GOOD ≤5(표면 자율항법 Gate에는 직접 사용하지 않음), C/N0 GOOD ≥40 / WARNING ≥35 dB-Hz, hAcc GOOD ≤1.5 m / WARNING ≤3 m, GPS age ≤2 s, correction age GOOD ≤5 s / WARNING ≤10 s.
 - 이 수정은 Windows GUI만 변경하며 Jetson daemon, Direct-I2C, PWM, HIL, Multi-Path, routes 프로토콜은 변경하지 않습니다.
 
 ## NTRIP 설정
