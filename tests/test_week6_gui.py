@@ -246,5 +246,23 @@ class Week6GuiSmokeTests(unittest.TestCase):
         self.assertIn("RTK/NTRIP 상태 변경", log_text)
         self.assertIn("RTK 보정 데이터 수신 시작", log_text)
 
+
+    def test_bad_gps_shows_primary_reason(self) -> None:
+        state = self.state()
+        state["gps"]["health"] = {
+            "status": "BAD",
+            "navigation_status": "BAD",
+            "rtk_status": "UNAVAILABLE",
+            "reasons": ["Satellites 12", "HDOP 2.20 (warning)", "C/N0 17.6 dB-Hz (low)"],
+        }
+        self.window.update_telemetry(state)
+        self.assertIn("주요 원인", self.window.gps_health_primary_reason.text())
+        self.assertIn("C/N0 17.6", self.window.gps_health_primary_reason.text())
+
+    def test_main_control_surface_is_scrollable(self) -> None:
+        from PySide6.QtWidgets import QScrollArea
+        self.assertIsInstance(self.window.centralWidget(), QScrollArea)
+        self.assertTrue(self.window.centralWidget().widgetResizable())
+
 if __name__ == "__main__":
     unittest.main()
