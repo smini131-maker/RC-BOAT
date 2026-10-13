@@ -349,6 +349,13 @@ class RoutePlot(QWidget):
             painter.setPen(QColor("#ffffff"))
             painter.drawText(point + QPointF(11, -9), "현재 보트")
 
+        painter.setPen(QColor("#7f94b4"))
+        painter.setFont(QFont("Malgun Gothic", 8))
+        painter.drawText(
+            QPointF(area.left() + 8, area.top() + 16),
+            f"좌표 기준 {origin[0]:.6f}, {origin[1]:.6f}",
+        )
+
         # North arrow.
         painter.setPen(QPen(QColor("#9fb0c9"), 2))
         north_x = area.right() - 18
