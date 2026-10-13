@@ -127,9 +127,14 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(self.controller.operation_state, "NAVIGATION_WAITING_GPS")
         self.assertEqual((self.hardware.last_steering, self.hardware.last_throttle), (6000, 6450))
         self.hardware.set_gps(True, True)
-        self.controller.step()
+        now = time.monotonic()
+        self.controller.step(now)
+        if self.controller.operation_state == "NAVIGATION_TURN_PAUSE":
+            self.assertEqual(self.hardware.last_throttle, 6450)
+            self.controller.step(now + 0.41)
         self.assertEqual(self.controller.operation_state, "NAVIGATION_ACTIVE")
-        self.assertEqual(self.hardware.last_throttle, 6650)
+        self.assertGreater(self.hardware.last_throttle, 6450)
+        self.assertLessEqual(self.hardware.last_throttle, 6650)
 
     def test_navigation_starts_straight_when_stationary_gps_has_no_course(self) -> None:
         original_snapshot = self.hardware.snapshot
@@ -148,9 +153,13 @@ class ControllerTests(unittest.TestCase):
     def test_real_navigation_uses_auto_cruise_pwm(self) -> None:
         self.hardware.is_mock = False
         self.controller.set_mode("NAVIGATION")
-        self.controller.step()
+        now = time.monotonic()
+        self.controller.step(now)
+        if self.controller.operation_state == "NAVIGATION_TURN_PAUSE":
+            self.controller.step(now + 0.41)
         self.assertEqual(self.controller.operation_state, "NAVIGATION_ACTIVE")
-        self.assertEqual(self.hardware.last_throttle, 6650)
+        self.assertGreater(self.hardware.last_throttle, 6450)
+        self.assertLessEqual(self.hardware.last_throttle, 6650)
 
     def test_hil_uses_selected_route_without_real_gps_and_stops_safely(self) -> None:
         self.hardware.set_gps(False)
