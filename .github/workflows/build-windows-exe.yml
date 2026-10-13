@@ -1,0 +1,32 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          architecture: "x64"
+      - name: Build RCBoatControl.exe
+        shell: cmd
+        run: windows_gui_source\build.bat
+      - name: Copy release name
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Path release -Force | Out-Null
+          Copy-Item windows_gui_source\windows_app\dist\RCBoatControl.exe release\RCBoatControl_R12_1_FullFix.exe
+          Get-FileHash release\RCBoatControl_R12_1_FullFix.exe -Algorithm SHA256 | Format-List
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RCBoatControl_R12_1_FullFix
+          path: release/RCBoatControl_R12_1_FullFix.exe
+          if-no-files-found: error
+          retention-days: 30
