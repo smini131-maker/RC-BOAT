@@ -368,7 +368,7 @@ class MainWindow(QMainWindow):
         self.gps_health_primary_reason.setStyleSheet("color:#f8bd58; font-size:8.5pt;")
         health_layout.addWidget(self.gps_health_primary_reason, 7, 0, 1, 4)
         self.gps_range_note = QLabel(
-            "판정 기준(R12.1): 위성 ≥8 GOOD · HDOP ≤2 GOOD / ≤3 항법 허용 · "
+            "판정 기준(R12.1): 위성 좋음 ≥8 · HDOP 좋음 ≤2 / ≤3 항법 허용 · "
             "PDOP ≤2 GOOD / ≤4 WARNING · VDOP ≤5 GOOD(표면 자율항법 Gate에는 직접 사용하지 않음) · "
             "C/N0 ≥40 GOOD / ≥35 WARNING · hAcc ≤1.5 m GOOD / ≤3 m WARNING · "
             "GPS age ≤2 s · RTK 보정 age ≤5 s GOOD / ≤10 s WARNING"
