@@ -16,8 +16,8 @@ class GpsHealthThresholds:
     pdop_good: float = 2.0
     pdop_warning: float = 4.0
     vdop_good: float = 5.0
-    cno_good: float = 40.0
-    cno_warning: float = 30.0
+    cno_good: float = 30.0
+    cno_warning: float = 25.0
     hacc_good_m: float = 1.5
     hacc_warning_m: float = 3.0
     correction_good_s: float = 5.0
@@ -183,8 +183,12 @@ def navigation_gate_reason(
     hdop = _value(source, "hdop", _value(source, "gps_hdop"))
     if hdop is not None and float(hdop) > hdop_max:
         return "GPS_HDOP_BAD"
-    if status == "BAD":
-        return "GPS_HEALTH_BAD"
+    # C/N0, PDOP, VDOP, satellite count and hAcc are valuable quality
+    # diagnostics but can fluctuate rapidly.  They must not repeatedly cut
+    # propulsion while a fresh valid position and acceptable HDOP remain.
+    # Hard navigation stops are handled explicitly above: disconnected,
+    # stale position, no fix, invalid coordinates and HDOP over the limit.
+    # RTK requirements are handled separately below.
     # RTK/NTRIP improves precision but is not a propulsion safety dependency when
     # fallback is enabled.  A valid ordinary GPS fix therefore keeps navigation
     # running even if RTK Fixed or correction data is lost.
