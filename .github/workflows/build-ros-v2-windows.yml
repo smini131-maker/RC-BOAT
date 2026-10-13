@@ -1,0 +1,118 @@
+name: RC Boat ROS v2.0.0-beta.1 Windows EXE
+
+on:
+  push:
+    branches:
+      - beta/ros-v2.0.0-beta.1
+    paths:
+      - 'beta/ros_v2.0.0_beta1/source_payload.b64'
+      - 'beta/ros_v2.0.0_beta1/windows_gui/**'
+      - '.github/workflows/build-ros-v2-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - name: Check out beta branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Set up Python 3.11 x64
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: x64
+
+      - name: Extract verified ROS beta source archive
+        shell: pwsh
+        run: |
+          @'
+          import base64, io, lzma, pathlib, tarfile
+          dest = pathlib.Path('beta/ros_v2.0.0_beta1')
+          b64 = (dest / 'source_payload.b64').read_text(encoding='ascii').strip()
+          blob = lzma.decompress(base64.b64decode(b64, validate=True))
+          n = 0
+          with tarfile.open(fileobj=io.BytesIO(blob), mode='r:') as archive:
+              for entry in archive:
+                  path = pathlib.PurePosixPath(entry.name)
+                  if not entry.isfile() or not path.parts or path.is_absolute() or '..' in path.parts:
+                      raise RuntimeError('Unexpected archive entry: ' + entry.name)
+                  out = dest.joinpath(*path.parts)
+                  out.parent.mkdir(parents=True, exist_ok=True)
+                  with archive.extractfile(entry) as fh:
+                      out.write_bytes(fh.read())
+                  n += 1
+          if n < 80:
+              raise RuntimeError(f'Incomplete source archive: {n} files')
+          print(f'Extracted {n} ROS source files to {dest}')
+          '@ | python -
+
+      - name: Publish extracted source files to beta branch
+        id: source_commit
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- beta/ros_v2.0.0_beta1
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "ROS beta source already committed"
+            exit 0
+          }
+          if ($LASTEXITCODE -ne 1) { throw "git diff failed" }
+          git commit -m "feat(ros-v2): expand 93 source files for beta build"
+          if ($LASTEXITCODE -ne 0) { throw "git commit failed" }
+          git push origin HEAD:beta/ros-v2.0.0-beta.1
+          if ($LASTEXITCODE -ne 0) { throw "GitHub branch push failed; check workflow token write permission" }
+
+      - name: Install Windows dependencies
+        working-directory: beta/ros_v2.0.0_beta1/windows_gui
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run ROS beta Python regression tests
+        run: python -m unittest discover -s beta/ros_v2.0.0_beta1/tests -v
+
+      - name: Smoke test actual Windows PySide6 GUI
+        working-directory: beta/ros_v2.0.0_beta1/windows_gui
+        shell: pwsh
+        run: |
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          python app.py --smoke-test
+          if ($LASTEXITCODE -ne 0) { throw "Windows GUI smoke test failed" }
+
+      - name: Build actual Windows 64-bit EXE
+        working-directory: beta/ros_v2.0.0_beta1/windows_gui
+        shell: pwsh
+        run: |
+          python -m PyInstaller --clean --noconfirm --onefile --windowed --name RCBoatControl_ROS_v2.0.0-beta.1 app.py
+          if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
+
+      - name: Verify EXE and checksum
+        shell: pwsh
+        run: |
+          $exe = 'beta/ros_v2.0.0_beta1/windows_gui/dist/RCBoatControl_ROS_v2.0.0-beta.1.exe'
+          if (!(Test-Path -LiteralPath $exe)) { throw 'Expected EXE was not produced' }
+          $file = Get-Item -LiteralPath $exe
+          if ($file.Length -lt 100000) { throw "EXE unexpectedly small: $($file.Length)" }
+          $hash = Get-FileHash -LiteralPath $exe -Algorithm SHA256
+          Write-Host "EXE SHA256 = $($hash.Hash)"
+          "$($hash.Hash) *RCBoatControl_ROS_v2.0.0-beta.1.exe" | Set-Content -Path (Join-Path (Split-Path $exe) 'SHA256SUMS.txt') -Encoding ascii
+
+      - name: Upload Windows EXE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RCBoatControl_ROS_v2.0.0-beta.1_Windows_x64
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            beta/ros_v2.0.0_beta1/windows_gui/dist/RCBoatControl_ROS_v2.0.0-beta.1.exe
+            beta/ros_v2.0.0_beta1/windows_gui/dist/SHA256SUMS.txt
