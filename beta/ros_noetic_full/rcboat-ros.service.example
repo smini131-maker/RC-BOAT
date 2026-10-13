@@ -1,0 +1,19 @@
+[Unit]
+Description=RC Boat ROS1 Noetic Full Beta
+After=network-online.target
+Wants=network-online.target
+Conflicts=rcboat.service
+
+[Service]
+Type=simple
+User=jetson
+Group=jetson
+WorkingDirectory=/home/jetson/RC-BOAT/beta/ros_noetic_full
+ExecStart=/home/jetson/RC-BOAT/beta/ros_noetic_full/run_real.sh
+Restart=on-failure
+RestartSec=2
+KillSignal=SIGINT
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

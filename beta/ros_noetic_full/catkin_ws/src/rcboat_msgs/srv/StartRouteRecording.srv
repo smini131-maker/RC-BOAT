@@ -1,0 +1,7 @@
+string name
+float64 minimum_distance_m
+float64 minimum_interval_s
+float64 arrival_radius_m
+---
+bool success
+string message

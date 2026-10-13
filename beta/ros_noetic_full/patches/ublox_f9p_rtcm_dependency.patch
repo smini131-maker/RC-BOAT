@@ -1,0 +1,31 @@
+diff --git a/ublox_gps/CMakeLists.txt b/ublox_gps/CMakeLists.txt
+index 8570888..b9d28c1 100644
+--- a/ublox_gps/CMakeLists.txt
++++ b/ublox_gps/CMakeLists.txt
+@@ -4,6 +4,7 @@ find_package(catkin REQUIRED COMPONENTS
+   roscpp_serialization
+   ublox_msgs
+   ublox_serialization
++  rtcm_msgs
+   diagnostic_updater
+ )
+ 
+@@ -12,6 +13,6 @@ catkin_package(
+     INCLUDE_DIRS include
+     LIBRARIES ${PROJECT_NAME}
+-    CATKIN_DEPENDS roscpp ublox_msgs ublox_serialization)
++    CATKIN_DEPENDS roscpp ublox_msgs ublox_serialization rtcm_msgs)
+ 
+ # include boost
+ find_package(Boost REQUIRED COMPONENTS system regex thread)
+diff --git a/ublox_gps/package.xml b/ublox_gps/package.xml
+index 4eb2b88..900d908 100644
+--- a/ublox_gps/package.xml
++++ b/ublox_gps/package.xml
+@@ -19,5 +19,6 @@
+   <depend>roscpp</depend>
+   <depend>roscpp_serialization</depend>
+   <depend>diagnostic_updater</depend>
++  <depend>rtcm_msgs</depend>
+ 
+ </package>

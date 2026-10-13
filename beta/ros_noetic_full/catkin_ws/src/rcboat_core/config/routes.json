@@ -1,0 +1,24 @@
+{
+  "selected_route_id": "training_a",
+  "routes": [
+    {
+      "id": "training_a",
+      "name": "훈련 항로 A",
+      "arrival_radius_m": 3.0,
+      "waypoints": [
+        {"lat": 35.07800000, "lon": 129.08600000},
+        {"lat": 35.07830000, "lon": 129.08630000}
+      ]
+    },
+    {
+      "id": "training_b",
+      "name": "훈련 항로 B",
+      "arrival_radius_m": 3.0,
+      "waypoints": [
+        {"lat": 35.07800000, "lon": 129.08600000},
+        {"lat": 35.07815000, "lon": 129.08645000},
+        {"lat": 35.07830000, "lon": 129.08630000}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+<launch>
+  <arg name="core_dir" default="$(find rcboat_core)" />
+
+  <node pkg="rcboat_core" type="mock_io_node.py" name="rcboat_mock_io" output="screen" required="true" />
+
+  <node pkg="rcboat_core" type="controller_node.py" name="rcboat_controller" output="screen" required="true">
+    <param name="config_file" value="$(arg core_dir)/config/boat.yaml" />
+    <param name="routes_file" value="$(arg core_dir)/config/routes.json" />
+  </node>
+
+  <node pkg="rcboat_core" type="gps_logger_node.py" name="rcboat_gps_logger" output="screen">
+    <param name="log_dir" value="$(arg core_dir)/logs/gps" />
+  </node>
+</launch>

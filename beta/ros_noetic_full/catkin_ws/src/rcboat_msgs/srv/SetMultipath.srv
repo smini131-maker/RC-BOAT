@@ -1,0 +1,9 @@
+bool enabled
+float64 endpoint_tolerance_m
+float64 off_route_distance_m
+float64 off_route_hold_s
+float64 closer_advantage_m
+float64 switch_cooldown_s
+---
+bool success
+string message
