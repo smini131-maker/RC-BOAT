@@ -491,8 +491,8 @@ class MainWindow(QMainWindow):
             ("HDOP", "hdop", "≤2 좋음 · ≤3 항법 허용"),
             ("PDOP", "pdop", "≤2 좋음 · ≤4 주의"),
             ("VDOP", "vdop", "≤5 양호 · 표면항법 Gate 제외"),
-            ("C/N0", "cno", "≥40 좋음 · 30~39 주의 · <30 나쁨"),
-            ("수평 정확도 hAcc", "hacc", "≤1.5 m 좋음 · ≤3 m 주의"),
+            ("평균 C/N0", "cno", "≥30 좋음 · 25~29 주의 · <25 나쁨"),
+            ("수평 정확도 hAcc", "hacc", "UBX NAV-PVT · ≤1.5 m 좋음 · ≤3 m 주의"),
             ("GPS 데이터 지연", "age", "≤2 s 정상"),
             ("UTM 좌표", "utm", "좌표 기반 미터 단위 위치"),
             ("RTK 해 상태", "rtk_state", "FIXED / FLOAT / DGPS 실시간 표시"),
@@ -587,15 +587,22 @@ class MainWindow(QMainWindow):
         ntrip_layout.addWidget(refresh, 1, 3)
         ntrip_layout.addWidget(self.ntrip_mount_fix, 1, 4)
 
-        self.ntrip_status = QLabel(
-            "NTRIP 보정링크: 비활성 · GNSS 해: 확인 대기"
-        )
+        ntrip_cards = QGridLayout()
+        ntrip_cards.setHorizontalSpacing(8)
+        self.ntrip_link_card = MetricCard("보정 서버", "NTRIP caster 연결")
+        self.ntrip_solution_card = MetricCard("현재 위치 해", "FIXED / FLOAT / DGPS")
+        self.ntrip_bytes_card = MetricCard("RTCM 누적 수신", "수신량이 증가하면 보정 데이터 유입 중")
+        self.ntrip_age_card = MetricCard("보정 지연", "≤5 s 좋음 · ≤10 s 허용")
+        ntrip_cards.addWidget(self.ntrip_link_card, 0, 0)
+        ntrip_cards.addWidget(self.ntrip_solution_card, 0, 1)
+        ntrip_cards.addWidget(self.ntrip_bytes_card, 0, 2)
+        ntrip_cards.addWidget(self.ntrip_age_card, 0, 3)
+        ntrip_layout.addLayout(ntrip_cards, 2, 0, 1, 6)
+
+        self.ntrip_status = QLabel("연결 상세 대기")
         self.ntrip_status.setWordWrap(True)
-        self.ntrip_status.setStyleSheet(
-            "background:#0f1a2c; border:1px solid #243652; border-radius:8px; "
-            "padding:9px 12px; font-weight:700;"
-        )
-        ntrip_layout.addWidget(self.ntrip_status, 2, 0, 1, 6)
+        self.ntrip_status.setObjectName("sectionHint")
+        ntrip_layout.addWidget(self.ntrip_status, 3, 0, 1, 6)
 
         ntrip_explain = QLabel(
             "보정 서버 연결 여부와 RTK FIX 여부는 서로 다릅니다. "
@@ -603,7 +610,7 @@ class MainWindow(QMainWindow):
         )
         ntrip_explain.setWordWrap(True)
         ntrip_explain.setObjectName("sectionHint")
-        ntrip_layout.addWidget(ntrip_explain, 3, 0, 1, 6)
+        ntrip_layout.addWidget(ntrip_explain, 4, 0, 1, 6)
 
         safety_box = QGroupBox("GPS 항법 안전 Gate")
         safety_layout = QHBoxLayout(safety_box)
