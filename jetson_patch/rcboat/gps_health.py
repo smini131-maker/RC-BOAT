@@ -42,6 +42,11 @@ def evaluate_gps_health(
     now = time.monotonic() if now is None else now
     last_update = float(_value(source, "last_update_monotonic", _value(source, "gps_last_update", 0.0)) or 0.0)
     age_s = max(0.0, now - last_update) if last_update > 0 else None
+    raw_last_fix = _value(source, "last_valid_fix_monotonic", _value(source, "gps_last_fix", None))
+    if raw_last_fix is None:
+        raw_last_fix = last_update
+    last_valid_fix = float(raw_last_fix or 0.0)
+    position_age_s = max(0.0, now - last_valid_fix) if last_valid_fix > 0 else None
     fix = bool(_value(source, "fix", _value(source, "gps_fix", False)))
     latitude = _value(source, "latitude", _value(source, "gps_lat"))
     longitude = _value(source, "longitude", _value(source, "gps_lon"))
@@ -70,6 +75,14 @@ def evaluate_gps_health(
         return {
             "status": "NO_FIX", "navigation_status": "NO_FIX", "rtk_status": "UNAVAILABLE",
             "reasons": ["No valid GPS position"], "age_s": age_s,
+            "position_age_s": position_age_s,
+        }
+    if position_age_s is None or position_age_s > thresholds.stale_s:
+        value = "unknown" if position_age_s is None else f"{position_age_s:.1f} s"
+        return {
+            "status": "STALE", "navigation_status": "STALE", "rtk_status": "UNAVAILABLE",
+            "reasons": [f"GPS position age {value}"], "age_s": age_s,
+            "position_age_s": position_age_s,
         }
 
     if satellites >= thresholds.satellite_good:
@@ -139,6 +152,7 @@ def evaluate_gps_health(
         "rtk_status": rtk_status,
         "reasons": reasons,
         "age_s": age_s,
+        "position_age_s": position_age_s,
     }
 
 
