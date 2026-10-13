@@ -32,7 +32,7 @@ function Resolve-RCBoatPython {
  if (-not [string]::IsNullOrWhiteSpace($env:RCBOAT_PYTHON)) {
    $item = Get-Item -LiteralPath $env:RCBOAT_PYTHON -ErrorAction SilentlyContinue
    Check ($null -ne $item) "RCBOAT_PYTHON does not exist: $env:RCBOAT_PYTHON"
-   & $item.FullName -c $code
+   & $item.FullName -c $code | Out-Null
    Check ($LASTEXITCODE -eq 0) 'RCBOAT_PYTHON must be Python 3.11-3.13 x64.'
    return @{ Exe=$item.FullName; Prefix=@() }
  }
@@ -42,7 +42,7 @@ function Resolve-RCBoatPython {
    if ($LASTEXITCODE -eq 0) {
      foreach($ver in @('3.11','3.12','3.13')) {
        if (@($listed | Where-Object { $_ -match ('(?<![0-9])3\.'+$ver.Substring(2)+'(?![0-9])') }).Count -gt 0) {
-         & $launcher.Source ('-'+$ver) -c $code
+         & $launcher.Source ('-'+$ver) -c $code | Out-Null
          if ($LASTEXITCODE -eq 0) { return @{ Exe=$launcher.Source; Prefix=@('-'+$ver) } }
        }
      }
@@ -50,7 +50,7 @@ function Resolve-RCBoatPython {
  }
  $python=Get-Command python.exe -ErrorAction SilentlyContinue
  if ($python) {
-   & $python.Source -c $code
+   & $python.Source -c $code | Out-Null
    if ($LASTEXITCODE -eq 0) { return @{ Exe=$python.Source; Prefix=@() } }
  }
  return $null
