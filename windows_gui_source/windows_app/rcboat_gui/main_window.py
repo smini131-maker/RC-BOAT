@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSlider,
     QSpinBox,
     QSplitter,
@@ -69,7 +70,15 @@ class MainWindow(QMainWindow):
         bundle_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
         self.setWindowIcon(QIcon(str(bundle_root / "assets" / "cat_boat_icon.ico")))
         self.setWindowTitle("RC 보트 관제센터")
-        self.resize(1420, 900)
+        screen = QApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            self.resize(
+                max(480, min(1420, available.width() - 32)),
+                max(420, min(900, available.height() - 48)),
+            )
+        else:
+            self.resize(1420, 900)
         self.setStyleSheet(STYLE)
         self.settings = QSettings("AdventureDesign", "RCBoatControl")
         self.worker: SSHWorker | MockWorker | None = None
@@ -105,8 +114,15 @@ class MainWindow(QMainWindow):
             app.installEventFilter(self)
 
     def _build_ui(self) -> None:
+        # The entire control surface can scroll instead of clipping controls
+        # on smaller screens or high Windows display scaling.
+        viewport = QScrollArea()
+        viewport.setWidgetResizable(True)
+        viewport.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        viewport.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         central = QWidget()
-        self.setCentralWidget(central)
+        viewport.setWidget(central)
+        self.setCentralWidget(viewport)
         outer = QVBoxLayout(central)
 
         header = QHBoxLayout()
@@ -334,7 +350,7 @@ class MainWindow(QMainWindow):
         self.gps_detail_labels: dict[str, QLabel] = {}
         detail_fields = (
             ("FIX (RTK_FIXED 최상)", "fix_label"), ("UTC", "utc_time"), ("Satellite (좋음 ≥8 / 주의 6~7)", "satellites"),
-            ("HDOP (좋음 ≤2 / 항법 ≤3)", "hdop"), ("PDOP (좋음 ≤2 / 주의 ≤4)", "pdop"), ("VDOP (좋음 ≤1.5)", "vdop"),
+            ("HDOP (좋음 ≤2 / 항법 ≤3)", "hdop"), ("PDOP (좋음 ≤2 / 주의 ≤4)", "pdop"), ("VDOP (표면항법 참고 · 좋음 ≤5)", "vdop"),
             ("C/N0 (좋음 ≥40 / 주의 ≥35 dB-Hz)", "cno"), ("hAcc (좋음 ≤1.5 / 주의 ≤3 m)", "hacc"), ("데이터 age (정상 ≤2 s)", "age"),
             ("UTM", "utm"), ("RTK 상태 (RTK_FIXED 권장)", "rtk_state"), ("보정 age (좋음 ≤5 / 허용 ≤10 s)", "correction_age"),
         )
@@ -347,14 +363,19 @@ class MainWindow(QMainWindow):
         self.gps_health_status = QLabel("GPS Health: UNKNOWN")
         self.gps_health_status.setWordWrap(True)
         health_layout.addWidget(self.gps_health_status, 6, 0, 1, 4)
+        self.gps_health_primary_reason = QLabel("")
+        self.gps_health_primary_reason.setWordWrap(True)
+        self.gps_health_primary_reason.setStyleSheet("color:#f8bd58; font-size:8.5pt;")
+        health_layout.addWidget(self.gps_health_primary_reason, 7, 0, 1, 4)
         self.gps_range_note = QLabel(
             "판정 기준(R12.1): 위성 ≥8 GOOD · HDOP ≤2 GOOD / ≤3 항법 허용 · "
-            "PDOP ≤2 GOOD / ≤4 WARNING · VDOP ≤1.5 GOOD · C/N0 ≥40 GOOD / ≥35 WARNING · "
-            "hAcc ≤1.5 m GOOD / ≤3 m WARNING · GPS age ≤2 s · RTK 보정 age ≤5 s GOOD / ≤10 s WARNING"
+            "PDOP ≤2 GOOD / ≤4 WARNING · VDOP ≤5 GOOD(표면 자율항법 Gate에는 직접 사용하지 않음) · "
+            "C/N0 ≥40 GOOD / ≥35 WARNING · hAcc ≤1.5 m GOOD / ≤3 m WARNING · "
+            "GPS age ≤2 s · RTK 보정 age ≤5 s GOOD / ≤10 s WARNING"
         )
         self.gps_range_note.setWordWrap(True)
         self.gps_range_note.setStyleSheet("color:#8ea4c4; font-size:9pt;")
-        health_layout.addWidget(self.gps_range_note, 7, 0, 1, 4)
+        health_layout.addWidget(self.gps_range_note, 8, 0, 1, 4)
 
         logging_box = QGroupBox("GPS 데이터 로그 (기존 항로 기록과 별도)")
         logging_layout = QHBoxLayout(logging_box)
@@ -373,7 +394,7 @@ class MainWindow(QMainWindow):
         self.ntrip_host = QLineEdit(); self.ntrip_host.setPlaceholderText("발급받은 NTRIP Host")
         self.ntrip_port = QSpinBox(); self.ntrip_port.setRange(1, 65535); self.ntrip_port.setValue(2101)
         self.ntrip_mountpoint = QLineEdit(); self.ntrip_mountpoint.setPlaceholderText("Mount Point")
-        self.ntrip_username = QLineEdit(); self.ntrip_username.setPlaceholderText("발급 ID")
+        self.ntrip_username = QLineEdit(); self.ntrip_username.setPlaceholderText("발급 ID · 한 번 저장하면 이 PC에 기억")
         self.ntrip_password = QLineEdit(); self.ntrip_password.setEchoMode(QLineEdit.Password)
         self.ntrip_password.setPlaceholderText("비밀번호 변경 시에만 입력")
         self.ntrip_tls = QCheckBox("TLS")
@@ -609,6 +630,7 @@ class MainWindow(QMainWindow):
         self.host.setText(self.settings.value("host", "10.122.105.215"))
         self.port.setValue(int(self.settings.value("port", 22)))
         self.username.setText(self.settings.value("username", "jetson"))
+        self.ntrip_username.setText(self.settings.value("ntrip_username", ""))
         stored = load_password(self.host.text(), self.username.text())
         if stored:
             self.password.setText(stored)
@@ -997,6 +1019,7 @@ class MainWindow(QMainWindow):
                 self.ntrip_apply.setEnabled(True)
                 self.ntrip_apply.setText("설정 저장 · 연결")
                 self.ntrip_status.setText("RTK/NTRIP 설정 저장 완료 · 연결 상태 수신 대기")
+                self.settings.setValue("ntrip_username", self.ntrip_username.text().strip())
                 self.log("RTK/NTRIP 설정 저장 ACK 수신 · caster 연결 상태를 기다리는 중")
             if ack.get("command") == "DISABLE_NTRIP":
                 self._pending_ntrip_request = None
@@ -1063,6 +1086,24 @@ class MainWindow(QMainWindow):
                     + " · 최소 2개 위치 지점이 필요합니다"
                 )
             self.log(f"명령 거부 {ack.get('command')}: {ack.get('error')}")
+
+    @staticmethod
+    def _primary_gps_health_reason(health: dict) -> str:
+        reasons = [str(item) for item in health.get("reasons") or [] if str(item).strip()]
+        if not reasons:
+            return ""
+        status = str(health.get("status") or "UNKNOWN")
+        if status in {"BAD", "NO_FIX", "STALE"}:
+            tokens = ("disconnected", "No valid", " age ", "(low)", "(bad)", " > ")
+        elif status == "WARNING":
+            tokens = ("(warning)", "N/A")
+        else:
+            return ""
+        for token in tokens:
+            for reason in reasons:
+                if token in reason:
+                    return reason
+        return reasons[0]
 
     @staticmethod
     def _fmt(value, digits=6, suffix="") -> str:
@@ -1146,8 +1187,14 @@ class MainWindow(QMainWindow):
         health_title = f"GPS 항법: {navigation_health} · 전체 수신: {health_status}"
         if gps.get("rtk_fallback_active"):
             health_title += " · RTK 손실 → GPS 대체 운항"
-        self.gps_health_status.setText(health_title + (f"\n{reasons}" if reasons else ""))
+        self.gps_health_status.setText(health_title)
+        self.gps_health_status.setToolTip(reasons)
         self.gps_health_status.setStyleSheet(f"color:{colors.get(navigation_health, '#8ea4c4')}; font-weight:700")
+        primary_reason = self._primary_gps_health_reason(health)
+        self.gps_health_primary_reason.setText(
+            f"주요 원인: {primary_reason}" if primary_reason else ""
+        )
+        self.gps_health_primary_reason.setVisible(bool(primary_reason))
         self.gps_detail_labels["fix_label"].setText(str(gps.get("fix_label") or "-"))
         self.gps_detail_labels["utc_time"].setText(str(gps.get("utc_time") or "-"))
         self.gps_detail_labels["satellites"].setText(self._fmt(gps.get("satellites"), 0))
@@ -1226,12 +1273,16 @@ class MainWindow(QMainWindow):
 
         recording = state.get("gps_recording") or {}
         recording_active = bool(recording.get("active"))
-        self.route_record_status.setText(
-            f"기록 중 · {recording.get('name', '-')} · {int(recording.get('point_count') or 0)}개 지점"
-            if recording_active else "기록 대기"
-        )
+        point_count = int(recording.get("point_count") or 0)
+        if recording_active:
+            save_note = "저장 가능" if point_count >= 2 else "저장하려면 최소 2개 지점 필요"
+            self.route_record_status.setText(
+                f"기록 중 · {recording.get('name', '-')} · {point_count}개 지점 · {save_note}"
+            )
+        else:
+            self.route_record_status.setText("기록 대기")
         self.route_record_start.setEnabled(not recording_active)
-        self.route_record_save.setEnabled(recording_active)
+        self.route_record_save.setEnabled(recording_active and point_count >= 2)
         self.route_record_cancel.setEnabled(recording_active)
         hil = state.get("hil") or {}
         hil_active = bool(hil.get("active"))
