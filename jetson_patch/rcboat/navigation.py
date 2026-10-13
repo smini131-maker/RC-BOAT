@@ -402,6 +402,10 @@ class RouteManager:
             "minimum_distance_m": self.recording_minimum_distance_m,
             "minimum_interval_s": self.recording_minimum_interval_s,
             "arrival_radius_m": self.recording_arrival_radius_m,
+            "waypoints": [
+                {"lat": lat, "lon": lon}
+                for lat, lon in self.recording_points
+            ],
         }
 
     def _group_indices(self, reference_index: int | None = None) -> list[int]:
