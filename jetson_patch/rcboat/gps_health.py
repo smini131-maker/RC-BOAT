@@ -88,15 +88,12 @@ def evaluate_gps_health(
     if satellites >= thresholds.satellite_good:
         reasons.append(f"Satellites {satellites}")
         levels.append(0)
-        navigation_levels.append(0)
     elif satellites >= thresholds.satellite_warning:
         reasons.append(f"Satellites {satellites} (warning)")
         levels.append(1)
-        navigation_levels.append(1)
     else:
         reasons.append(f"Satellites {satellites} (low)")
         levels.append(2)
-        navigation_levels.append(2)
 
     if hdop is None:
         reasons.append("HDOP N/A")
@@ -119,7 +116,6 @@ def evaluate_gps_health(
         level = 0 if float(pdop) <= thresholds.pdop_good else 1 if float(pdop) <= thresholds.pdop_warning else 2
         reasons.append(f"PDOP {float(pdop):.2f}" + (" (bad)" if level == 2 else ""))
         levels.append(level)
-        navigation_levels.append(level)
     if vdop is not None:
         # Surface navigation does not use vertical dilution directly.
         # Keep VDOP as an overall reception-quality hint, but never let VDOP
@@ -131,12 +127,10 @@ def evaluate_gps_health(
         level = 0 if float(cno) >= thresholds.cno_good else 1 if float(cno) >= thresholds.cno_warning else 2
         reasons.append(f"C/N0 {float(cno):.1f} dB-Hz" + (" (low)" if level == 2 else ""))
         levels.append(level)
-        navigation_levels.append(level)
     if hacc is not None:
         level = 0 if float(hacc) <= thresholds.hacc_good_m else 1 if float(hacc) <= thresholds.hacc_warning_m else 2
         reasons.append(f"hAcc {float(hacc):.2f} m" + (" (bad)" if level == 2 else ""))
         levels.append(level)
-        navigation_levels.append(level)
     rtk_status = "UNAVAILABLE"
     if correction_age_s is not None:
         level = 0 if correction_age_s <= thresholds.correction_good_s else 1 if correction_age_s <= thresholds.correction_warning_s else 2
