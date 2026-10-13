@@ -392,6 +392,24 @@ class MainWindow(QMainWindow):
 
         self.route_plot = RoutePlot()
 
+        multipath_group_box = QGroupBox("Multi-Path 묶음 상태")
+        multipath_group_layout = QVBoxLayout(multipath_group_box)
+        self.multipath_group_status = QLabel(
+            "선택 항로 기준으로 시작점·도착점이 허용거리 안에 겹치는 경로를 자동으로 묶습니다."
+        )
+        self.multipath_group_status.setWordWrap(True)
+        self.multipath_group_status.setStyleSheet(
+            "background:#0f1a2c; border:1px solid #243652; border-radius:8px; "
+            "padding:9px 12px; font-weight:700;"
+        )
+        multipath_group_hint = QLabel(
+            "현재 활성 경로는 보트 위치와 가장 가까운 그룹 경로로 자동 전환될 수 있습니다."
+        )
+        multipath_group_hint.setWordWrap(True)
+        multipath_group_hint.setObjectName("sectionHint")
+        multipath_group_layout.addWidget(self.multipath_group_status)
+        multipath_group_layout.addWidget(multipath_group_hint)
+
         multipath_box = QGroupBox("Multi-Path 기준 (R11 호환)")
         multipath_layout = QGridLayout(multipath_box)
         self.multipath_enabled = QCheckBox("사용")
@@ -437,6 +455,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(record_box)
         layout.addWidget(layer_box)
         layout.addWidget(self.route_plot, 1)
+        layout.addWidget(multipath_group_box)
         layout.addWidget(multipath_box)
         return page
 
