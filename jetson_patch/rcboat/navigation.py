@@ -209,6 +209,64 @@ class RouteManager:
                 return
         raise ValueError(f"unknown route: {route_id}")
 
+    def delete_recorded_route(self, route_id: str) -> str:
+        """Delete one operator-recorded route and persist a safe fallback selection."""
+
+        route_id = str(route_id).strip()
+        if not route_id:
+            raise ValueError("route id is required")
+        if route_id.startswith("training_"):
+            raise ValueError("training routes are protected and cannot be deleted")
+
+        try:
+            payload = json.loads(self.route_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError) as exc:
+            raise RuntimeError(f"routes.json cannot delete route: {exc}") from exc
+        items = payload.get("routes")
+        if not isinstance(items, list):
+            raise RuntimeError("routes.json does not contain a routes list")
+
+        deleted_name = ""
+        remaining: list[dict[str, Any]] = []
+        found = False
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("id", "")).strip() == route_id:
+                found = True
+                deleted_name = str(item.get("name", route_id))
+                continue
+            remaining.append(item)
+        if not found:
+            raise ValueError(f"unknown route: {route_id}")
+        if not remaining:
+            raise RuntimeError("the last route cannot be deleted")
+
+        remaining_ids = [str(item.get("id", "")).strip() for item in remaining]
+        selected = str(payload.get("selected_route_id", "")).strip()
+        if selected == route_id or selected not in remaining_ids:
+            selected = remaining_ids[0]
+        payload["routes"] = remaining
+        payload["selected_route_id"] = selected
+
+        temporary = self.route_path.with_name(f".{self.route_path.name}.tmp")
+        try:
+            temporary.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            os.replace(temporary, self.route_path)
+        except OSError as exc:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise RuntimeError(f"routes.json route delete failed: {exc}") from exc
+
+        if not self.load():
+            raise RuntimeError(self.load_error or "routes could not be reloaded after delete")
+        return deleted_name or route_id
+
     def _persist_selected_route(self, route_id: str) -> None:
         """Persist the operator-selected route without changing recorded routes."""
 
