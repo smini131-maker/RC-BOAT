@@ -1,38 +1,29 @@
-# Windows EXE 빌드와 GitHub 업로드 진단
+# RC BOAT ROS v2.0.0-beta.2 — Windows 체크/빌드/업로드 사용법
 
-## 핵심 변경 사항
+## 사용자 출력의 실제 원인
 
-이전 CMD는 성공/실패에 관계없이 종료될 수 있었고 로그가 남지 않았습니다. 이번 CMD는 창을 유지하고 `logs/BUILD_GUI_날짜.log`, `logs/UPLOAD_GITHUB_날짜.log`를 작성합니다. 더블클릭했을 때 마지막의 `계속하려면 아무 키나 누르십시오`를 누르기 전까지 닫히지 않습니다.
+`where git.exe`는 Git을 찾지 못하면 Windows의 '정보: 제공된 패턴에 해당되는 파일을 찾지 못했습니다.'를 출력합니다. **Git은 체크·GUI 실행·EXE 빌드에 필요하지 않고 GitHub 직접 업로드에만 필요합니다.**
 
-## 빌드
+`py -0p`에서 Python **3.13 x64**가 확인됐습니다. 이번 버전은 3.11, 3.12, **3.13** x64를 지원하므로 Python 3.11을 추가 설치할 필요가 없습니다.
 
-1. ZIP을 압축 해제하고 `BUILD_ROS_GUI.cmd`를 **해제된 폴더에서** 실행합니다.
-2. Python 3.11 또는 3.12 x64가 필요합니다. Windows의 `py -0p`로 설치 버전을 확인합니다. Python 3.13만 있으면 3.11을 추가 설치합니다.
-3. 최초 실행 시 pip가 PySide6·Paramiko·PyInstaller를 내려받으므로 인터넷 연결이 필요합니다. 네트워크/권한/보안 프로그램 오류는 로그에서 확인합니다.
-4. 성공 시 `windows_gui/dist/RCBoatControl_ROS_v2.0.0-beta.1.exe`가 생깁니다. `Windows GUI` 빌드는 Jetson ROS 설치를 수행하지 않습니다.
-5. SSH 접속 전에 Git Bash/Windows OpenSSH로 호스트키를 확인해야 합니다. 프로그램의 호스트키 정책은 자동 신뢰가 아닌 RejectPolicy입니다.
+`WINDOWS_鍮...`로 보이는 문구는 UTF-8 한글을 레거시 CMD 코드페이지에서 출력한 결과였습니다. 배치 파일의 안내문은 영문 ASCII로 정리하고, 한글 지침은 UTF-8 마크다운 문서에 남겼습니다.
 
-## GitHub 업로드
+## 직접 실행 순서
 
-1. Windows에 Git for Windows를 설치합니다. PowerShell에서 `git --version`을 확인합니다.
-2. `git config --global user.name "Your Name"` 와 `git config --global user.email "you@example.com"`를 최초 한 번 설정합니다.
-3. `UPLOAD_GITHUB.cmd`를 실행합니다. 기존 `release/1.6.0`이 아닌 `beta/ros-v2.0.0-beta.1`의 **별도 디렉터리**로만 업로드합니다.
-4. GitHub 인증이 필요하면 Git Credential Manager 브라우저 로그인을 완료합니다. 암호/토큰을 스크립트에 저장하지 않습니다.
-5. GitHub 저장소의 Actions에서 **Build RC Boat ROS v2 Windows GUI** 실행/완료 여부를 보고 artifact를 다운로드합니다. 워크플로가 업로드되기 전에는 실행되지 않습니다.
-6. 업로드 실패 시 `logs/UPLOAD_GITHUB_날짜.log`를 보고, 임시 clone 경로에서 git status를 확인합니다. GitHub 저장소에 업로드되었다고 가정하지 마세요.
+1. 전체 ZIP을 반드시 실제 폴더로 압축 해제합니다. 예: `C:\RCBoatBeta2`. ZIP 미리보기에서 CMD만 실행하면 필수 파일을 찾지 못합니다.
+2. `CHECK_WINDOWS.cmd`를 실행합니다. 정상이라면 `[OK] Windows preflight completed.`가 표시되고 `logs/CHECK_WINDOWS_날짜.log`가 기록됩니다. 검사 과정에 설치/SSH 접속은 없습니다.
+3. Git이 없으면 `[OPTIONAL] git.exe is absent`라고 표시되지만 오류가 아닙니다. ssh/scp도 Jetson에 연결할 때만 필요합니다.
+4. **GUI만 실행**: 이미 빌드된 `RCBoatControl_ROS_v2.0.0-beta.2.exe`를 실행합니다. Python과 Git은 설치할 필요가 없습니다.
+5. **GUI 직접 재빌드**: `BUILD_ROS_GUI.cmd`를 실행합니다. Python 3.13도 지원합니다. 프로젝트 내부 `windows_gui\.venv`에 GUI 패키지를 설치하고 테스트 후 `windows_gui\dist`에 EXE를 생성합니다. 첫 설치에는 인터넷이 필요합니다.
+6. Python/Git/SSH 중 필요한 항목이 실제로 빠졌다면 `SETUP_WINDOWS.cmd`로 해당 항목을 *선택적으로* 설치합니다.
+7. `UPLOAD_GITHUB.cmd`는 Git for Windows와 GitHub 인증, `git config user.name/user.email`이 있을 때만 사용합니다.
+8. Jetson은 확인된 SSH 계정/IP로 접속하세요. `nano.local`처럼 다른 사용자가 연결되는 이름을 기본으로 신뢰하지 마세요.
 
-## 오류별 확인
+## 자동화/실패 점검
 
-- `py.exe not found` / `Python 3.11...`: Python 3.11 x64 설치 + Windows용 Python launcher 활성화
-- `No module named pip`: Python 설치 프로그램에서 pip 포함 재설치
-- `No matching distribution found`: Python 버전, x64 여부, 인터넷/프록시 확인
-- `Microsoft Visual C++ Runtime` 오류: Windows 런타임 설치 확인
-- `Git author not configured`: git config user.name, user.email 설정
-- `Authentication failed`: Git Credential Manager 인증 또는 GitHub 계정 권한 확인
-- `src refspec` / branch missing: GitHub에 해당 beta 브랜치가 있는지 확인
-- `SSH Host key ...` 또는 `Unknown host key`: SSH 콘솔에서 먼저 지문을 검증해 known_hosts에 등록
-- `ROS Noetic missing`: Jetson에 ROS1 Noetic 선행 설치 필요, 실행 실패와 빌드 실패는 다른 문제
-
-## 점검 결과의 의미
-
-Windows `.exe` 파일 생성은 PyInstaller 빌드 성공만 뜻합니다. Jetson에서 ROS Noetic 설치, 노드 구동, 실제 GPS·RTK 연결, PCA9685 안전 출력을 검증하지 않는 한 수상 운항을 허용하지 않습니다.
+- 로그: `logs/CHECK_WINDOWS_*.log`, `logs/BUILD_GUI_*.log` 등.
+- 자동 테스트: `set "RCBOAT_NO_PAUSE=1"` 후 `call CHECK_WINDOWS.cmd`. 성공/실패는 `%ERRORLEVEL%`로 구분됩니다.
+- Python 경로 강제 선택: `set "RCBOAT_PYTHON=C:\경로\python.exe"` (명시 경로가 Python 3.11~3.13 x64여야 함).
+- GitHub Actions는 Windows에서 *실제* `CHECK_WINDOWS.cmd`를 정상 경로 및 한글·공백 경로로 실행하고, Python 3.13으로 `BUILD_ROS_GUI.cmd`를 통해 EXE를 새로 빌드·실행합니다. 결과가 성공인지 GitHub Actions에서 확인하세요.
+- Python이 32비트이거나 3.10 이하면 로컬 빌드가 지원되지 않아 명시적으로 실패합니다.
+- ROS/Jetson 하드웨어가 실제로 안전한지는 Windows 테스트로 증명할 수 없습니다. 기본 `propulsion_allowed=false`를 유지하고 daemon과 ROS를 동시에 실행하지 마세요.
