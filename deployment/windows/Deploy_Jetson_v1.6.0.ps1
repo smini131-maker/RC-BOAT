@@ -7,7 +7,7 @@ param(
 $ErrorActionPreference = "Stop"
 $ExpectedVersion = "1.6.0"
 $Repo = "smini131-maker/RC-BOAT"
-$ArchiveUrl = "https://github.com/$Repo/archive/$Ref.zip"
+$ArchiveUrl = "https://github.com/$Repo/archive/refs/heads/$Ref.zip"
 $TempRoot = Join-Path $env:TEMP ("RCBoatDeploy_" + [guid]::NewGuid().ToString("N"))
 $ZipPath = Join-Path $TempRoot "source.zip"
 $ExtractPath = Join-Path $TempRoot "src"
