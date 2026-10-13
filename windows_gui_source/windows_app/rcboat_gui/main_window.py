@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import html
 import json
 import sys
 from pathlib import Path
@@ -12,6 +13,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QGridLayout,
     QGroupBox,
@@ -35,7 +37,7 @@ from PySide6.QtWidgets import (
 from .credentials import delete_password, load_password, save_password
 from .mock_worker import MockWorker
 from .ssh_worker import SSHWorker
-from .widgets import RoutePlot, StatusCard, TelemetryGraph
+from .widgets import MetricCard, RoutePlot, StatusCard, TelemetryGraph
 
 
 STYLE = """
@@ -61,6 +63,12 @@ QTabBar::tab { background:#111a2b; padding:9px 18px; }
 QTabBar::tab:selected { background:#1c2b45; color:#61caff; }
 QSlider::groove:horizontal { height:6px; background:#26334a; border-radius:3px; }
 QSlider::handle:horizontal { width:16px; margin:-5px 0; background:#4da3ff; border-radius:8px; }
+QFrame#metricCard { background:#0f1a2c; border:1px solid #243652; border-radius:10px; }
+QLabel#metricTitle { color:#8fa7c8; font-size:9pt; font-weight:600; }
+QLabel#metricValue { color:#f5f9ff; font-size:14pt; font-weight:800; }
+QLabel#metricHint { color:#7187a6; font-size:8pt; }
+QLabel#healthHeadline { font-size:12pt; font-weight:800; padding:4px 0; }
+QLabel#sectionHint { color:#7187a6; font-size:8.5pt; }
 """
 
 
@@ -105,6 +113,9 @@ class MainWindow(QMainWindow):
         self._pending_route_request: str | None = None
         self._last_ntrip_status_signature: tuple | None = None
         self._ntrip_received_corrections = False
+        self._latest_routes: list[dict] = []
+        self._route_layer_signature: tuple[tuple[str, str], ...] = ()
+        self.route_layer_checks: dict[str, QCheckBox] = {}
         self._remote_keys: set[int] = set()
         self._build_ui()
         self._load_settings()
