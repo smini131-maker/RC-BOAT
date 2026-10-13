@@ -42,12 +42,13 @@ class ControllerTests(unittest.TestCase):
         self.hardware.close()
         self.temp.cleanup()
 
-    def test_boot_is_manual_and_waits_safely_for_neutral(self) -> None:
-        self.controller.step()
+    def test_boot_is_auto_safe_and_keeps_neutral_outputs(self) -> None:
         state = self.controller.state()
-        self.assertEqual(state["mode"], "MANUAL")
+        self.assertEqual(state["mode"], "AUTO")
+        self.assertEqual(state["operation_state"], "AUTO_SAFE")
+        self.assertEqual(state["failsafe_reason"], "BOOT_SAFE")
         self.assertFalse(state["navigation_active"])
-        self.assertEqual((self.hardware.last_steering, self.hardware.last_throttle), (6000, 6450))
+        self.assertEqual((self.controller.steering_pwm, self.controller.throttle_pwm), (6000, 6450))
 
     def test_auto_to_manual_waits_for_neutral_then_activates(self) -> None:
         self.hardware.set_rc(1640, 1700)
