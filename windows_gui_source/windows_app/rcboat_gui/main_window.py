@@ -91,6 +91,11 @@ class MainWindow(QMainWindow):
         self._ntrip_dirty = False
         self._syncing_ntrip = False
         self._pending_ntrip_request: str | None = None
+        self._route_dirty = False
+        self._syncing_route = False
+        self._pending_route_request: str | None = None
+        self._last_ntrip_status_signature: tuple | None = None
+        self._ntrip_received_corrections = False
         self._remote_keys: set[int] = set()
         self._build_ui()
         self._load_settings()
@@ -246,7 +251,10 @@ class MainWindow(QMainWindow):
         page = QWidget(); layout = QVBoxLayout(page)
         controls = QHBoxLayout()
         self.route_combo = QComboBox()
-        select = QPushButton("항로 선택"); select.setIcon(self.style().standardIcon(QStyle.SP_DialogApplyButton)); select.clicked.connect(self.select_route)
+        self.route_combo.currentIndexChanged.connect(self._on_route_editor_changed)
+        self.route_select_button = QPushButton("항로 선택")
+        self.route_select_button.setIcon(self.style().standardIcon(QStyle.SP_DialogApplyButton))
+        self.route_select_button.clicked.connect(self.select_route)
         self.route_start_button = QPushButton("선택 항로 운행 시작")
         self.route_start_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
         self.route_start_button.setObjectName("safe")
@@ -255,7 +263,7 @@ class MainWindow(QMainWindow):
         self.route_status = QLabel("항로 정보 없음")
         self.route_storage_status = QLabel("항로 저장 파일: 연결 후 확인")
         self.route_storage_status.setStyleSheet("color:#8ea4c4; font-size:9pt;")
-        controls.addWidget(QLabel("주행 항로")); controls.addWidget(self.route_combo); controls.addWidget(select); controls.addWidget(self.route_start_button); controls.addWidget(reload_button); controls.addStretch(1); controls.addWidget(self.route_status)
+        controls.addWidget(QLabel("주행 항로")); controls.addWidget(self.route_combo); controls.addWidget(self.route_select_button); controls.addWidget(self.route_start_button); controls.addWidget(reload_button); controls.addStretch(1); controls.addWidget(self.route_status)
         self.route_plot = RoutePlot()
         multipath_box = QGroupBox("Multi-Path 기준 (R11 호환)")
         multipath_layout = QGridLayout(multipath_box)
@@ -411,10 +419,30 @@ class MainWindow(QMainWindow):
             self.ntrip_apply.setText("설정 저장 · 연결 *")
 
     def apply_ntrip(self) -> None:
+        enabled = self.ntrip_enabled.isChecked()
+        host = self.ntrip_host.text().strip()
+        mountpoint = self.ntrip_mountpoint.text().strip()
+        username = self.ntrip_username.text().strip()
+        if enabled and not all((host, mountpoint, username)):
+            missing = [
+                label for label, value in (
+                    ("Host", host), ("Mount Point", mountpoint), ("Username", username)
+                ) if not value
+            ]
+            message = "RTK를 켜려면 다음 값이 필요합니다: " + ", ".join(missing)
+            self.ntrip_status.setText(message)
+            self.log(f"RTK 연결 요청 거부(GUI): {message}")
+            QMessageBox.warning(self, "RTK 설정 확인", message)
+            return
+        self.log(
+            f"RTK/NTRIP 연결 요청: enabled={enabled} · "
+            f"{host or '-'}:{self.ntrip_port.value()} / {mountpoint or '-'} · "
+            f"username={username or '-'} · TLS={'ON' if self.ntrip_tls.isChecked() else 'OFF'}"
+        )
         request_id = self.command(
-            "CONFIGURE_NTRIP", enabled=self.ntrip_enabled.isChecked(),
-            host=self.ntrip_host.text().strip(), port=self.ntrip_port.value(),
-            mountpoint=self.ntrip_mountpoint.text().strip(), username=self.ntrip_username.text().strip(),
+            "CONFIGURE_NTRIP", enabled=enabled,
+            host=host, port=self.ntrip_port.value(),
+            mountpoint=mountpoint, username=username,
             password=self.ntrip_password.text(), tls=self.ntrip_tls.isChecked(),
         )
         if request_id is not None:
@@ -647,6 +675,7 @@ class MainWindow(QMainWindow):
             self.auto_speed_spin,
             self.auto_speed_apply,
             self.auto_speed_reset,
+            self.route_select_button,
             self.route_start_button,
             self.route_record_name,
             self.route_record_start,
@@ -674,8 +703,9 @@ class MainWindow(QMainWindow):
         self._set_terminal_ready(ready, message)
         if ready:
             self.append_terminal_output(f"\n--- SSH 터미널 연결됨: {message} ---\n")
-            self.tabs.setCurrentIndex(self.terminal_tab_index)
-            self.terminal_input.setFocus()
+            self.log(f"SSH 터미널 준비됨: {message}")
+            if self.tabs.currentIndex() == self.terminal_tab_index:
+                self.terminal_input.setFocus()
         elif message:
             self.append_terminal_output(f"\n--- {message} ---\n")
 
@@ -697,6 +727,8 @@ class MainWindow(QMainWindow):
         self._pending_mode_request = None
         self._pending_mode_target = None
         self._pending_multipath_request = None
+        self._pending_route_request = None
+        self._pending_ntrip_request = None
         self._mode_dirty = False
         self.mode_button.setText("모드 적용")
         self.multipath_apply.setText("기준 저장 *" if self._multipath_dirty else "기준 저장")
@@ -832,11 +864,28 @@ class MainWindow(QMainWindow):
                 return True
         return super().eventFilter(watched, event)
 
+    def _on_route_editor_changed(self, _index: int) -> None:
+        if self._syncing_route:
+            return
+        route_id = self.route_combo.currentData()
+        if route_id is None:
+            return
+        self._route_dirty = True
+        self.route_select_button.setText("항로 선택 *")
+
     def select_route(self) -> None:
         route_id = self.route_combo.currentData()
         if route_id:
             self.pending_route_id = str(route_id)
-            self.command("SELECT_ROUTE", route_id=route_id)
+            request_id = self.command("SELECT_ROUTE", route_id=route_id)
+            if request_id is not None:
+                self._pending_route_request = request_id
+                self.route_select_button.setEnabled(False)
+                self.route_select_button.setText("저장 확인 중...")
+                self.route_storage_status.setText(
+                    f"선택 항로 {route_id}를 Jetson routes.json에 저장하고 확인하는 중입니다"
+                )
+                self.log(f"항로 선택 요청: {self.route_combo.currentText()} ({route_id})")
 
     def start_gps_recording(self) -> None:
         name = " ".join(self.route_record_name.text().strip().split())
@@ -917,6 +966,13 @@ class MainWindow(QMainWindow):
         if ack.get("ok"):
             if (
                 ack.get("command") == "SELECT_ROUTE"
+                and ack.get("request_id") == self._pending_route_request
+            ):
+                self._pending_route_request = None
+                self._route_dirty = False
+                self.log(f"항로 선택 저장 ACK 수신: {self.pending_route_id or '-'}")
+            if (
+                ack.get("command") == "SELECT_ROUTE"
                 and self.pending_route_start_request is not None
                 and ack.get("request_id") == self.pending_route_start_request
             ):
@@ -941,13 +997,22 @@ class MainWindow(QMainWindow):
                 self.ntrip_apply.setEnabled(True)
                 self.ntrip_apply.setText("설정 저장 · 연결")
                 self.ntrip_status.setText("RTK/NTRIP 설정 저장 완료 · 연결 상태 수신 대기")
+                self.log("RTK/NTRIP 설정 저장 ACK 수신 · caster 연결 상태를 기다리는 중")
             if ack.get("command") == "DISABLE_NTRIP":
                 self._pending_ntrip_request = None
                 self._ntrip_dirty = False
                 self.ntrip_apply.setEnabled(True)
                 self.ntrip_apply.setText("설정 저장 · 연결")
             if ack.get("command") == "STOP_GPS_RECORDING":
+                route_id = str(ack.get("route_id") or "")
+                if route_id:
+                    self.pending_route_id = route_id
+                    self._route_dirty = False
+                    self.route_record_status.setText(f"저장 완료 · {route_id} · 목록 갱신 중")
+                    self.log(f"GPS 기록 항로 저장 완료: {route_id} · 항로 목록 재조회")
                 self.command("RELOAD_ROUTES")
+            if ack.get("command") == "RELOAD_ROUTES":
+                self.log("Jetson routes.json 재조회 완료")
             if ack.get("command") == "START_HIL":
                 self._pending_mode_request = ack.get("request_id")
                 self._pending_mode_target = "NAVIGATION"
@@ -956,6 +1021,13 @@ class MainWindow(QMainWindow):
         else:
             if ack.get("command") == "SELECT_ROUTE":
                 self.pending_route_id = None
+                self._pending_route_request = None
+                self._route_dirty = False
+                self.route_select_button.setEnabled(True)
+                self.route_select_button.setText("항로 선택")
+                self.route_storage_status.setText(
+                    f"항로 저장 실패: {ack.get('error', '알 수 없는 오류')}"
+                )
                 if ack.get("request_id") == self.pending_route_start_request:
                     self.pending_route_start_request = None
             if ack.get("request_id") == self._pending_mode_request:
@@ -980,6 +1052,16 @@ class MainWindow(QMainWindow):
                 self.ntrip_apply.setEnabled(True)
                 self.ntrip_apply.setText("설정 저장 · 연결 *")
                 self.ntrip_status.setText(f"RTK 설정 실패: {ack.get('error', '알 수 없는 오류')}")
+                self.log(f"RTK/NTRIP 설정 실패: {ack.get('error', '알 수 없는 오류')}")
+            if ack.get("command") == "STOP_GPS_RECORDING":
+                self.route_record_status.setText(
+                    f"항로 저장 실패: {ack.get('error', '알 수 없는 오류')}"
+                )
+                self.log(
+                    "GPS 기록 항로 저장 실패: "
+                    + str(ack.get("error", "알 수 없는 오류"))
+                    + " · 최소 2개 위치 지점이 필요합니다"
+                )
             self.log(f"명령 거부 {ack.get('command')}: {ack.get('error')}")
 
     @staticmethod
@@ -1093,6 +1175,31 @@ class MainWindow(QMainWindow):
             + (f" · 오류: {ntrip.get('last_error')}" if ntrip.get("last_error") else "")
             + fallback_note
         )
+        ntrip_signature = (
+            bool(ntrip.get("enabled")),
+            bool(ntrip.get("connected")),
+            str(ntrip.get("last_error") or ""),
+            str(ntrip.get("host") or ""),
+            int(ntrip.get("port") or 0),
+            str(ntrip.get("mountpoint") or ""),
+        )
+        if self._last_ntrip_status_signature is None:
+            self._last_ntrip_status_signature = ntrip_signature
+        elif ntrip_signature != self._last_ntrip_status_signature:
+            self.log(
+                "RTK/NTRIP 상태 변경: "
+                + ("사용" if ntrip.get("enabled") else "비활성")
+                + " / "
+                + ("연결됨" if ntrip.get("connected") else "연결 안 됨")
+                + (f" / 오류={ntrip.get('last_error')}" if ntrip.get("last_error") else "")
+            )
+            self._last_ntrip_status_signature = ntrip_signature
+        received = int(ntrip.get("bytes_received") or 0)
+        if received > 0 and not self._ntrip_received_corrections:
+            self._ntrip_received_corrections = True
+            self.log(f"RTK 보정 데이터 수신 시작: {received} bytes")
+        elif received <= 0 and not ntrip.get("connected"):
+            self._ntrip_received_corrections = False
         if not self._ntrip_dirty and self._pending_ntrip_request is None:
             self._syncing_ntrip = True
             try:
@@ -1139,7 +1246,7 @@ class MainWindow(QMainWindow):
         multipath = route.get("multipath") or {}
         route_storage_path = str(route.get("storage_path") or "-")
         multipath_config_path = str(route.get("multipath_config_path") or "-")
-        persisted_mark = "저장됨" if route.get("selected_route_persisted") else "저장 확인 중"
+        persisted_mark = "저장됨" if route.get("selected_route_persisted") else "저장 불일치"
         self.route_storage_status.setText(
             f"항로 저장: {route_storage_path} · 선택 항로 {persisted_mark} · "
             f"Multi-Path 설정: {multipath_config_path}"
@@ -1159,17 +1266,40 @@ class MainWindow(QMainWindow):
         active_id = route.get("active_route_id", "")
         selected_id = route.get("selected_route_id", active_id)
         routes = state.get("routes", [])
-        existing = {self.route_combo.itemData(i) for i in range(self.route_combo.count())}
-        if {r.get("id") for r in routes} != existing:
-            self.route_combo.clear()
-            for item in routes:
-                self.route_combo.addItem(item.get("name", item.get("id", "route")), item.get("id"))
+        existing_ids = [self.route_combo.itemData(i) for i in range(self.route_combo.count())]
+        incoming_ids = [r.get("id") for r in routes]
+        desired_id = self.pending_route_id or (
+            self.route_combo.currentData() if self._route_dirty else selected_id
+        )
+        if incoming_ids != existing_ids:
+            self._syncing_route = True
+            try:
+                self.route_combo.clear()
+                for item in routes:
+                    self.route_combo.addItem(
+                        item.get("name", item.get("id", "route")), item.get("id")
+                    )
+                desired_index = self.route_combo.findData(desired_id)
+                if desired_index >= 0:
+                    self.route_combo.setCurrentIndex(desired_index)
+            finally:
+                self._syncing_route = False
         if self.pending_route_id == selected_id:
+            confirmed_id = self.pending_route_id
             self.pending_route_id = None
-        if self.pending_route_id is None:
+            self._pending_route_request = None
+            self._route_dirty = False
+            self.route_select_button.setEnabled(True)
+            self.route_select_button.setText("항로 선택")
+            self.log(f"항로 적용 확인: {confirmed_id} · Jetson telemetry와 일치")
+        if self.pending_route_id is None and not self._route_dirty:
             selected_index = self.route_combo.findData(selected_id)
             if selected_index >= 0 and self.route_combo.currentIndex() != selected_index:
-                self.route_combo.setCurrentIndex(selected_index)
+                self._syncing_route = True
+                try:
+                    self.route_combo.setCurrentIndex(selected_index)
+                finally:
+                    self._syncing_route = False
         selected_name = route.get("selected_route_name", route.get("active_route_name", "-"))
         active_name = route.get("active_route_name", "-")
         route_error = route.get("load_error")
