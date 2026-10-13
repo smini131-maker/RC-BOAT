@@ -360,16 +360,61 @@ class RoutePersistenceTests(unittest.TestCase):
             )
             manager = RouteManager(path)
             manager.start_recording("Recorded", minimum_distance_m=0.1, minimum_interval_s=0.1)
-            self.assertTrue(manager.record_position((35.0, 129.0), now=1.0))
-            self.assertTrue(manager.record_position((35.00001, 129.00001), now=2.0))
+            self.assertTrue(
+                manager.record_position(
+                    (35.0, 129.0), now=1.0,
+                    timestamp="2026-10-13T19:00:00.000+09:00",
+                    heading_deg=12.34,
+                )
+            )
+            self.assertTrue(
+                manager.record_position(
+                    (35.00001, 129.00001), now=2.0,
+                    timestamp="2026-10-13T19:00:01.000+09:00",
+                    heading_deg=361.0,
+                )
+            )
             state = manager.recording_state()
             self.assertEqual(state["point_count"], 2)
             self.assertEqual(len(state["waypoints"]), 2)
+            self.assertEqual(
+                state["latest_sample"]["timestamp"],
+                "2026-10-13T19:00:01.000+09:00",
+            )
+            self.assertEqual(state["latest_sample"]["heading_deg"], 1.0)
             route_id = manager.stop_recording(save=True)
             self.assertIsNotNone(route_id)
             self.assertEqual(manager.selected.route_id, route_id)
             self.assertEqual(manager.persisted_selected_route_id, route_id)
-            self.assertIn(route_id, [item["id"] for item in manager.public_routes()])
+            saved = __import__("json").loads(path.read_text(encoding="utf-8"))
+            recorded = next(
+                item for item in saved["routes"] if item["id"] == route_id
+            )
+            self.assertEqual(
+                recorded["waypoints"][0]["timestamp"],
+                "2026-10-13T19:00:00.000+09:00",
+            )
+            self.assertEqual(recorded["waypoints"][0]["heading_deg"], 12.34)
+            self.assertEqual(recorded["waypoints"][1]["heading_deg"], 1.0)
+            public = next(
+                item for item in manager.public_routes() if item["id"] == route_id
+            )
+            self.assertEqual(public["waypoints"][0]["heading_deg"], 12.34)
+            self.assertIn("timestamp", public["waypoints"][0])
+
+    def test_legacy_route_without_metadata_remains_compatible(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "routes.json"
+            path.write_text(
+                '{"routes":[{"id":"legacy","name":"Legacy","waypoints":['
+                '{"lat":35.0,"lon":129.0},{"lat":35.0001,"lon":129.0001}]}]}',
+                encoding="utf-8",
+            )
+            manager = RouteManager(path)
+            route = manager.public_routes()[0]
+            self.assertEqual(route["id"], "legacy")
+            self.assertEqual(route["waypoints"][0], {"lat": 35.0, "lon": 129.0})
+            self.assertEqual(len(manager.active.points), 2)
 
     def test_recorded_route_can_be_deleted_and_selection_falls_back(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
