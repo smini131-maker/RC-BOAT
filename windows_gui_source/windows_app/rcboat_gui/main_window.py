@@ -275,23 +275,123 @@ class MainWindow(QMainWindow):
         return page
 
     def _route_tab(self) -> QWidget:
-        page = QWidget(); layout = QVBoxLayout(page)
-        controls = QHBoxLayout()
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setSpacing(10)
+
+        operation_box = QGroupBox("항로 선택 · 운항")
+        operation_layout = QGridLayout(operation_box)
         self.route_combo = QComboBox()
+        self.route_combo.setMinimumWidth(240)
         self.route_combo.currentIndexChanged.connect(self._on_route_editor_changed)
-        self.route_select_button = QPushButton("항로 선택")
-        self.route_select_button.setIcon(self.style().standardIcon(QStyle.SP_DialogApplyButton))
+
+        self.route_select_button = QPushButton("선택 저장")
+        self.route_select_button.setIcon(
+            self.style().standardIcon(QStyle.SP_DialogApplyButton)
+        )
         self.route_select_button.clicked.connect(self.select_route)
-        self.route_start_button = QPushButton("선택 항로 운행 시작")
-        self.route_start_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+
+        self.route_start_button = QPushButton("이 항로로 운항 시작")
+        self.route_start_button.setIcon(
+            self.style().standardIcon(QStyle.SP_MediaPlay)
+        )
         self.route_start_button.setObjectName("safe")
         self.route_start_button.clicked.connect(self.start_selected_route)
-        reload_button = QPushButton("항로 파일 다시 읽기"); reload_button.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload)); reload_button.clicked.connect(lambda: self.command("RELOAD_ROUTES"))
+
+        self.route_export_button = QPushButton("PC로 저장")
+        self.route_export_button.setIcon(
+            self.style().standardIcon(QStyle.SP_DialogSaveButton)
+        )
+        self.route_export_button.clicked.connect(self.export_selected_route)
+
+        self.route_delete_button = QPushButton("기록 항로 삭제")
+        self.route_delete_button.setObjectName("danger")
+        self.route_delete_button.clicked.connect(self.delete_selected_route)
+
+        reload_button = QPushButton("Jetson 항로 새로고침")
+        reload_button.setIcon(
+            self.style().standardIcon(QStyle.SP_BrowserReload)
+        )
+        reload_button.clicked.connect(lambda: self.command("RELOAD_ROUTES"))
+
+        operation_layout.addWidget(QLabel("주행 항로"), 0, 0)
+        operation_layout.addWidget(self.route_combo, 0, 1)
+        operation_layout.addWidget(self.route_select_button, 0, 2)
+        operation_layout.addWidget(self.route_start_button, 0, 3)
+        operation_layout.addWidget(self.route_export_button, 0, 4)
+        operation_layout.addWidget(self.route_delete_button, 0, 5)
+        operation_layout.addWidget(reload_button, 0, 6)
+
         self.route_status = QLabel("항로 정보 없음")
+        self.route_status.setWordWrap(True)
+        self.route_status.setObjectName("sectionHint")
         self.route_storage_status = QLabel("항로 저장 파일: 연결 후 확인")
-        self.route_storage_status.setStyleSheet("color:#8ea4c4; font-size:9pt;")
-        controls.addWidget(QLabel("주행 항로")); controls.addWidget(self.route_combo); controls.addWidget(self.route_select_button); controls.addWidget(self.route_start_button); controls.addWidget(reload_button); controls.addStretch(1); controls.addWidget(self.route_status)
+        self.route_storage_status.setWordWrap(True)
+        self.route_storage_status.setObjectName("sectionHint")
+        operation_layout.addWidget(self.route_status, 1, 0, 1, 7)
+        operation_layout.addWidget(self.route_storage_status, 2, 0, 1, 7)
+
+        record_box = QGroupBox("GPS로 새 항로 기록")
+        record_layout = QGridLayout(record_box)
+        self.route_record_name = QLineEdit()
+        self.route_record_name.setPlaceholderText("새 항로 이름")
+        self.route_record_name.setMinimumWidth(220)
+        self.route_record_spacing = self._distance_spin(0.1, 100.0, 1.0, 0.1, " m")
+        self.route_record_interval = self._distance_spin(0.1, 60.0, 0.5, 0.1, " s")
+        self.route_arrival_radius = self._distance_spin(0.5, 100.0, 3.0, 0.5, " m")
+
+        self.route_record_start = QPushButton("● 기록 시작")
+        self.route_record_start.clicked.connect(self.start_gps_recording)
+        self.route_record_save = QPushButton("■ 정지 후 항로 저장")
+        self.route_record_save.setObjectName("safe")
+        self.route_record_save.clicked.connect(self.stop_gps_recording)
+        self.route_record_cancel = QPushButton("기록 취소")
+        self.route_record_cancel.clicked.connect(self.cancel_gps_recording)
+        self.route_record_status = QLabel("기록 대기")
+        self.route_record_status.setWordWrap(True)
+        self.route_record_status.setObjectName("sectionHint")
+
+        record_layout.addWidget(QLabel("이름"), 0, 0)
+        record_layout.addWidget(self.route_record_name, 0, 1)
+        record_layout.addWidget(QLabel("최소 이동"), 0, 2)
+        record_layout.addWidget(self.route_record_spacing, 0, 3)
+        record_layout.addWidget(QLabel("최소 시간"), 0, 4)
+        record_layout.addWidget(self.route_record_interval, 0, 5)
+        record_layout.addWidget(QLabel("도착 반경"), 0, 6)
+        record_layout.addWidget(self.route_arrival_radius, 0, 7)
+        record_layout.addWidget(self.route_record_start, 1, 0, 1, 2)
+        record_layout.addWidget(self.route_record_save, 1, 2, 1, 2)
+        record_layout.addWidget(self.route_record_cancel, 1, 4)
+        record_layout.addWidget(self.route_record_status, 1, 5, 1, 3)
+
+        layer_box = QGroupBox("지도에 표시할 기록 항로")
+        layer_layout = QVBoxLayout(layer_box)
+        layer_toolbar = QHBoxLayout()
+        self.route_layer_checks_widget = QWidget()
+        self.route_layer_checks_layout = QHBoxLayout(self.route_layer_checks_widget)
+        self.route_layer_checks_layout.setContentsMargins(0, 0, 0, 0)
+        self.route_layer_checks_layout.setSpacing(12)
+        self.route_layer_empty = QLabel("저장된 기록 항로가 없습니다")
+        self.route_layer_empty.setObjectName("sectionHint")
+        self.route_layer_checks_layout.addWidget(self.route_layer_empty)
+        self.route_layer_checks_layout.addStretch(1)
+
+        show_all = QPushButton("모두 켜기")
+        show_all.clicked.connect(lambda: self._set_all_route_layers(True))
+        hide_all = QPushButton("모두 끄기")
+        hide_all.clicked.connect(lambda: self._set_all_route_layers(False))
+        fit_map = QPushButton("지도 전체 맞춤")
+        fit_map.clicked.connect(self.route_plot_fit)
+        layer_toolbar.addWidget(QLabel("훈련 항로는 지도 표시에서 제외됩니다"))
+        layer_toolbar.addStretch(1)
+        layer_toolbar.addWidget(show_all)
+        layer_toolbar.addWidget(hide_all)
+        layer_toolbar.addWidget(fit_map)
+        layer_layout.addWidget(self.route_layer_checks_widget)
+        layer_layout.addLayout(layer_toolbar)
+
         self.route_plot = RoutePlot()
+
         multipath_box = QGroupBox("Multi-Path 기준 (R11 호환)")
         multipath_layout = QGridLayout(multipath_box)
         self.multipath_enabled = QCheckBox("사용")
@@ -304,6 +404,8 @@ class MainWindow(QMainWindow):
         self.multipath_apply = QPushButton("기준 저장")
         self.multipath_apply.clicked.connect(self.apply_multipath)
         self.multipath_status = QLabel("설정 대기")
+        self.multipath_status.setWordWrap(True)
+        self.multipath_status.setObjectName("sectionHint")
         multipath_layout.addWidget(self.multipath_enabled, 0, 0)
         for column, (label, widget) in enumerate((
             ("공통 출발·도착 허용", self.multipath_endpoint),
@@ -312,46 +414,30 @@ class MainWindow(QMainWindow):
             ("다른 경로 우위", self.multipath_advantage),
             ("전환 대기", self.multipath_cooldown),
         ), 1):
-            box = QVBoxLayout(); box.addWidget(QLabel(label)); box.addWidget(widget)
+            box = QVBoxLayout()
+            box.addWidget(QLabel(label))
+            box.addWidget(widget)
             multipath_layout.addLayout(box, 0, column)
         multipath_layout.addWidget(self.multipath_apply, 0, 6)
         multipath_layout.addWidget(self.multipath_status, 1, 0, 1, 7)
         for widget in (
-            self.multipath_enabled, self.multipath_endpoint, self.multipath_off_distance,
-            self.multipath_hold, self.multipath_advantage, self.multipath_cooldown,
+            self.multipath_enabled,
+            self.multipath_endpoint,
+            self.multipath_off_distance,
+            self.multipath_hold,
+            self.multipath_advantage,
+            self.multipath_cooldown,
         ):
             if isinstance(widget, QCheckBox):
                 widget.toggled.connect(self._mark_multipath_dirty)
             else:
                 widget.valueChanged.connect(self._mark_multipath_dirty)
-        record_box = QGroupBox("GPS 항로 기록")
-        record_layout = QHBoxLayout(record_box)
-        self.route_record_name = QLineEdit()
-        self.route_record_name.setPlaceholderText("새 항로 이름")
-        self.route_record_name.setMaximumWidth(260)
-        self.route_record_spacing = self._distance_spin(0.1, 100.0, 1.0, 0.1, " m")
-        self.route_record_interval = self._distance_spin(0.1, 60.0, 0.5, 0.1, " s")
-        self.route_arrival_radius = self._distance_spin(0.5, 100.0, 3.0, 0.5, " m")
-        self.route_record_start = QPushButton("기록 시작")
-        self.route_record_start.setIcon(self.style().standardIcon(QStyle.SP_DialogApplyButton))
-        self.route_record_start.clicked.connect(self.start_gps_recording)
-        self.route_record_save = QPushButton("정지 후 저장")
-        self.route_record_save.setObjectName("safe")
-        self.route_record_save.clicked.connect(self.stop_gps_recording)
-        self.route_record_cancel = QPushButton("기록 취소")
-        self.route_record_cancel.clicked.connect(self.cancel_gps_recording)
-        self.route_record_status = QLabel("기록 대기")
-        record_layout.addWidget(QLabel("이름"))
-        record_layout.addWidget(self.route_record_name)
-        record_layout.addWidget(QLabel("최소 간격")); record_layout.addWidget(self.route_record_spacing)
-        record_layout.addWidget(QLabel("최소 시간")); record_layout.addWidget(self.route_record_interval)
-        record_layout.addWidget(QLabel("도착 반경")); record_layout.addWidget(self.route_arrival_radius)
-        record_layout.addWidget(self.route_record_start)
-        record_layout.addWidget(self.route_record_save)
-        record_layout.addWidget(self.route_record_cancel)
-        record_layout.addStretch(1)
-        record_layout.addWidget(self.route_record_status)
-        layout.addLayout(controls); layout.addWidget(self.route_storage_status); layout.addWidget(multipath_box); layout.addWidget(record_box); layout.addWidget(self.route_plot, 1)
+
+        layout.addWidget(operation_box)
+        layout.addWidget(record_box)
+        layout.addWidget(layer_box)
+        layout.addWidget(self.route_plot, 1)
+        layout.addWidget(multipath_box)
         return page
 
     def _gps_rtk_tab(self) -> QWidget:
