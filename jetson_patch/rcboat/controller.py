@@ -557,18 +557,6 @@ class BoatController:
         ))
 
         self._last_route_status.update({
-                "target_bearing_deg": round(target_bearing, 1),
-                "course_deg": round(float(snap.gps_course_deg), 1),
-                "heading_error_deg": round(error, 1),
-                "navigation_steering_inverted": VALUES.navigation_steering_inverted,
-                "navigation_speed_fraction": 0.0,
-                "navigation_throttle_pwm": VALUES.throttle_stop_pwm,
-                "navigation_steering_pwm": int(round(steering)),
-                "hard_off_route_stop_m": VALUES.navigation_hard_off_route_m,
-            })
-            return int(round(steering)), VALUES.throttle_stop_pwm
-
-        self._last_route_status.update({
             "target_bearing_deg": round(target_bearing, 1),
             "course_deg": round(float(snap.gps_course_deg), 1),
             "heading_error_deg": round(error, 1),
