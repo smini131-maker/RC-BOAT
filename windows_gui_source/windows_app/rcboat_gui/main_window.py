@@ -896,6 +896,7 @@ class MainWindow(QMainWindow):
             self.auto_speed_reset,
             self.route_select_button,
             self.route_start_button,
+            self.route_delete_button,
             self.route_record_name,
             self.route_record_start,
             self.route_record_save,
@@ -906,6 +907,7 @@ class MainWindow(QMainWindow):
             widget.setEnabled(connected)
         for widget in getattr(self, "simulation_controls", []):
             widget.setEnabled(connected and self.is_simulation)
+        self._update_route_action_state()
         if not connected:
             message = (
                 "시뮬레이션에서는 SSH 터미널을 사용할 수 없습니다"
@@ -1090,7 +1092,8 @@ class MainWindow(QMainWindow):
         if route_id is None:
             return
         self._route_dirty = True
-        self.route_select_button.setText("항로 선택 *")
+        self.route_select_button.setText("선택 저장 *")
+        self._update_route_action_state()
 
     def select_route(self) -> None:
         route_id = self.route_combo.currentData()
@@ -1449,6 +1452,13 @@ class MainWindow(QMainWindow):
                     self.route_record_status.setText(f"저장 완료 · {route_id} · 목록 갱신 중")
                     self.log(f"GPS 기록 항로 저장 완료: {route_id} · 항로 목록 재조회")
                 self.command("RELOAD_ROUTES")
+            if ack.get("command") == "DELETE_ROUTE":
+                deleted_id = str(ack.get("route_id") or "")
+                deleted_name = str(ack.get("deleted_name") or deleted_id)
+                self.pending_route_id = None
+                self._route_dirty = False
+                self.log(f"기록 항로 삭제 완료: {deleted_name} ({deleted_id})")
+                self.command("RELOAD_ROUTES")
             if ack.get("command") == "RELOAD_ROUTES":
                 self.log("Jetson routes.json 재조회 완료")
             if ack.get("command") == "START_HIL":
@@ -1462,7 +1472,7 @@ class MainWindow(QMainWindow):
                 self._pending_route_request = None
                 self._route_dirty = False
                 self.route_select_button.setEnabled(True)
-                self.route_select_button.setText("항로 선택")
+                self.route_select_button.setText("선택 저장")
                 self.route_storage_status.setText(
                     f"항로 저장 실패: {ack.get('error', '알 수 없는 오류')}"
                 )
@@ -1491,6 +1501,11 @@ class MainWindow(QMainWindow):
                 self.ntrip_apply.setText("설정 저장 · 연결 *")
                 self.ntrip_status.setText(f"RTK 설정 실패: {ack.get('error', '알 수 없는 오류')}")
                 self.log(f"RTK/NTRIP 설정 실패: {ack.get('error', '알 수 없는 오류')}")
+            if ack.get("command") == "DELETE_ROUTE":
+                error = str(ack.get("error") or "알 수 없는 오류")
+                self.route_storage_status.setText(f"항로 삭제 실패: {error}")
+                self.log(f"기록 항로 삭제 실패: {error}")
+                self._update_route_action_state()
             if ack.get("command") == "STOP_GPS_RECORDING":
                 self.route_record_status.setText(
                     f"항로 저장 실패: {ack.get('error', '알 수 없는 오류')}"
@@ -1765,7 +1780,7 @@ class MainWindow(QMainWindow):
             self._pending_route_request = None
             self._route_dirty = False
             self.route_select_button.setEnabled(True)
-            self.route_select_button.setText("항로 선택")
+            self.route_select_button.setText("선택 저장")
             self.log(f"항로 적용 확인: {confirmed_id} · Jetson telemetry와 일치")
         if self.pending_route_id is None and not self._route_dirty:
             selected_index = self.route_combo.findData(selected_id)
