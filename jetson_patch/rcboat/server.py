@@ -92,16 +92,17 @@ class ControlServer:
             elif command == "CLEAR_ESTOP":
                 self.controller.clear_estop()
             elif command == "DELETE_ROUTE":
-            route_id = str(request.get("route_id", "")).strip()
-            deleted_name = self.controller.delete_route(route_id)
-            self._reply(
-                client,
-                request,
-                ok=True,
-                route_id=route_id,
-                deleted_name=deleted_name,
-            )
-        elif command == "SELECT_ROUTE":
+                route_id = str(msg.get("route_id", "")).strip()
+                deleted_name = self.controller.delete_route(route_id)
+                return {
+                    "type": "ack",
+                    "request_id": request_id,
+                    "command": command,
+                    "ok": True,
+                    "route_id": route_id,
+                    "deleted_name": deleted_name,
+                }
+            elif command == "SELECT_ROUTE":
                 self.controller.select_route(str(msg["route_id"]))
             elif command == "START_GPS_RECORDING":
                 self.controller.start_gps_recording(
