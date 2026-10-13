@@ -1,5 +1,6 @@
 @echo off
-setlocal
+setlocal EnableExtensions DisableDelayedExpansion
 set "DEST=%~1"
 if "%DEST%"=="" set "DEST=jetson@10.85.226.215"
-ssh -tt "%DEST%" "sudo bash /home/jetson/rcboat_ros_ws/deployment/jetson/backend_ctl.sh daemon"
+call "%~dp0..\..\USE_DAEMON.cmd" -Destination "%DEST%"
+exit /b %ERRORLEVEL%
