@@ -1302,6 +1302,13 @@ class MainWindow(QMainWindow):
         )
 
     def delete_selected_route(self) -> None:
+        if self.current_mode == "NAVIGATION":
+            QMessageBox.information(
+                self,
+                "운항 중 삭제 불가",
+                "GPS 항법/HIL을 정지한 뒤 기록 항로를 삭제하세요.",
+            )
+            return
         route = self._selected_route_payload()
         if route is None:
             QMessageBox.warning(
