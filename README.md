@@ -44,6 +44,14 @@ chmod +x install_patch.sh
 
 설치기는 현재 소스를 `/home/jetson/rcboat/backups/week6_gps_날짜_시간/`에 백업하고, Direct-I2C 드라이버를 확인한 뒤 Week6 모듈만 복사합니다. 의존성 설치와 문법 검사 후 서비스를 재시작하며 실패 시 기존 파일을 복원합니다.
 
+## R12.1 Windows RTK GUI 수정
+
+- `RTK 사용` 체크 직후 주기 telemetry의 이전 `enabled=false` 값이 편집 중인 체크박스를 다시 해제하던 문제를 수정했습니다.
+- Host / Port / Mount Point / Username / Password / TLS를 사용자가 편집 중일 때 telemetry가 입력값을 덮어쓰지 않습니다.
+- `CONFIGURE_NTRIP` ACK를 확인한 뒤 서버 상태 동기화로 복귀합니다.
+- GPS/RTK 화면에 R12.1 health 기준을 함께 표시합니다: Satellite GOOD ≥8, HDOP GOOD ≤2 / 항법 허용 ≤3, PDOP GOOD ≤2 / WARNING ≤4, VDOP GOOD ≤1.5, C/N0 GOOD ≥40 / WARNING ≥35 dB-Hz, hAcc GOOD ≤1.5 m / WARNING ≤3 m, GPS age ≤2 s, correction age GOOD ≤5 s / WARNING ≤10 s.
+- 이 수정은 Windows GUI만 변경하며 Jetson daemon, Direct-I2C, PWM, HIL, Multi-Path, routes 프로토콜은 변경하지 않습니다.
+
 ## NTRIP 설정
 
 실제 국토지리정보원 주소, 계정, 비밀번호, Mount Point는 이 저장소에 들어 있지 않습니다. 발급받은 값만 사용하십시오.
