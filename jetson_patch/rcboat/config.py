@@ -31,6 +31,15 @@ class ControlValues:
     steering_low_pwm: int = 4900
     steering_center_pwm: int = 6000
     steering_high_pwm: int = 7300
+    # Physical rudder linkage on the current boat is opposite to the
+    # mathematical bearing-error sign used by autonomous navigation.
+    # MANUAL/REMOTE mappings are intentionally left unchanged.
+    navigation_steering_inverted: bool = True
+    navigation_full_speed_error_deg: float = 35.0
+    navigation_slow_error_deg: float = 100.0
+    navigation_min_speed_fraction: float = 0.65
+    navigation_hard_off_route_m: float = 32.0
+
     throttle_reverse_pwm: int = 5800
     throttle_stop_pwm: int = 6450
     throttle_forward_pwm: int = 7000
