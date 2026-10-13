@@ -5,6 +5,8 @@ param(
  [string]$Destination = 'jetson@10.85.226.215'
 )
 $ErrorActionPreference = 'Stop'
+$env:PYTHONUTF8 = '1'
+$env:PYTHONIOENCODING = 'utf-8'
 Set-StrictMode -Version Latest
 $Root = (Resolve-Path -LiteralPath $Root).Path
 $LogDir = Join-Path $Root 'logs'
