@@ -102,7 +102,20 @@ try {
      $SmokeScript="import os,subprocess,sys; env=dict(os.environ); env['QT_QPA_PLATFORM']='offscreen'; rc=subprocess.run([sys.argv[1],'--smoke-test'],env=env,timeout=120).returncode; sys.exit(rc)"
      Run $Exe @('-c',$SmokeScript,$Artifact)
      Write-Host "BUILT FILE: $Artifact"
-     Write-Host "SHA256: $((Get-FileHash -Algorithm SHA256 -LiteralPath $Artifact).Hash)"
+     if (Get-Command Get-FileHash -ErrorAction SilentlyContinue) {
+       $Digest=(Get-FileHash -Algorithm SHA256 -LiteralPath $Artifact).Hash
+     } else {
+       # Get-FileHash may not be available in restricted Windows PowerShell hosts.
+       $HashAlgorithm=[System.Security.Cryptography.SHA256]::Create()
+       try {
+         $Stream=[System.IO.File]::OpenRead($Artifact)
+         try { $HashBytes=$HashAlgorithm.ComputeHash($Stream) }
+         finally { $Stream.Dispose() }
+       } finally { $HashAlgorithm.Dispose() }
+       $Digest=[System.BitConverter]::ToString($HashBytes).Replace('-','')
+     }
+     Write-Host "SHA256: $Digest"
+     ($Digest+' *'+$Name+'.exe') | Set-Content -LiteralPath (Join-Path (Split-Path -Parent $Artifact) 'SHA256SUMS.txt') -Encoding ASCII
      Write-Host 'Windows GUI EXE build complete. Hardware operation is NOT certified by this build.'
    } finally {Pop-Location}
  } elseif ($Action -eq 'UPLOAD_GITHUB') {
