@@ -93,6 +93,7 @@ class ParserTests(unittest.TestCase):
         parser.feed(stream, 10.0)
         self.assertEqual(parser.data.rtk_state, "RTK_FIXED")
         self.assertEqual(parser.data.ubx_message_count, 1)
+        self.assertEqual(parser.data.nav_pvt_message_count, 1)
         self.assertEqual(parser.data.nmea_sentence_count, 1)
         self.assertAlmostEqual(parser.data.hacc_m or 0, 0.02)
 
