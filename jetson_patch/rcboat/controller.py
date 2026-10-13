@@ -720,6 +720,12 @@ class BoatController:
                 "rtk_fallback_active": gps_data.get("rtk_fallback_active"),
                 "navigation_fix_mode": gps_data.get("navigation_fix_mode"),
                 "parser_error_count": gps_data.get("parser_error_count"),
+                "nmea_sentence_count": gps_data.get("nmea_sentence_count"),
+                "ubx_message_count": gps_data.get("ubx_message_count"),
+                "hacc_source": (
+                    "UBX-NAV-PVT" if gps_data.get("hacc_m") is not None
+                    else "UBX-NAV-PVT 대기"
+                ),
                 "utm_easting": gps_data.get("utm_easting"), "utm_northing": gps_data.get("utm_northing"),
                 "utm_zone": gps_data.get("utm_zone"),
             },
