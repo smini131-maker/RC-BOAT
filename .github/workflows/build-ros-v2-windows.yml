@@ -34,6 +34,7 @@ jobs:
           architecture: x64
 
       - name: Extract verified ROS beta source archive
+        if: ${{ hashFiles('beta/ros_v2.0.0_beta1/windows_gui/app.py') == '' }}
         shell: pwsh
         run: |
           @'
@@ -110,6 +111,20 @@ jobs:
           $hash = Get-FileHash -LiteralPath $exe -Algorithm SHA256
           Write-Host "EXE SHA256 = $($hash.Hash)"
           "$($hash.Hash) *RCBoatControl_ROS_v2.0.0-beta.1.exe" | Set-Content -Path (Join-Path (Split-Path $exe) 'SHA256SUMS.txt') -Encoding ascii
+
+      - name: Smoke test bundled Windows EXE
+        shell: pwsh
+        run: |
+          @'
+          import os, pathlib, subprocess
+          exe = pathlib.Path('beta/ros_v2.0.0_beta1/windows_gui/dist/RCBoatControl_ROS_v2.0.0-beta.1.exe').resolve()
+          env = dict(os.environ)
+          env['QT_QPA_PLATFORM'] = 'offscreen'
+          result = subprocess.run([str(exe), '--smoke-test'], env=env, timeout=90, check=False)
+          if result.returncode != 0:
+              raise RuntimeError(f'Bundled EXE smoke test failed with exit code {result.returncode}')
+          print('Bundled EXE smoke test passed')
+          '@ | python -
 
       - name: Upload Windows EXE artifact
         uses: actions/upload-artifact@v4
