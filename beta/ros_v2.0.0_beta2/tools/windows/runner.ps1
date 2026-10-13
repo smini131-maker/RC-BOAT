@@ -1,5 +1,5 @@
 param(
- [ValidateSet('BUILD_GUI','UPLOAD_GITHUB','CHECK_BACKEND','CHECK_ROS','DEPLOY_ROS','INSTALL_ROS','USE_ROS','USE_DAEMON')]
+ [ValidateSet('CHECK_WINDOWS','BUILD_GUI','UPLOAD_GITHUB','CHECK_BACKEND','CHECK_ROS','DEPLOY_ROS','INSTALL_ROS','USE_ROS','USE_DAEMON')]
  [string]$Action,
  [string]$Root,
  [string]$Destination = 'jetson@10.85.226.215'
@@ -26,28 +26,59 @@ function CmdPath([string]$name){
  Check ($null -ne $c) "$name not found. Install it, reopen this window, and retry."
  return $c.Source
 }
+function Resolve-RCBoatPython {
+ # Inspect optional executables silently. Supports 3.11-3.13 64-bit Python.
+ $code = 'import sys; ok=(3,11)<=sys.version_info[:2]<=(3,13) and sys.maxsize > 2**32; print("RCBoat Python:",sys.version.split()[0],"x64" if sys.maxsize > 2**32 else "x86"); sys.exit(0 if ok else 4)'
+ if (-not [string]::IsNullOrWhiteSpace($env:RCBOAT_PYTHON)) {
+   $item = Get-Item -LiteralPath $env:RCBOAT_PYTHON -ErrorAction SilentlyContinue
+   Check ($null -ne $item) "RCBOAT_PYTHON does not exist: $env:RCBOAT_PYTHON"
+   & $item.FullName -c $code
+   Check ($LASTEXITCODE -eq 0) 'RCBOAT_PYTHON must be Python 3.11-3.13 x64.'
+   return @{ Exe=$item.FullName; Prefix=@() }
+ }
+ $launcher=Get-Command py.exe -ErrorAction SilentlyContinue
+ if ($launcher) {
+   $listed=@(& $launcher.Source -0p 2>$null)
+   if ($LASTEXITCODE -eq 0) {
+     foreach($ver in @('3.11','3.12','3.13')) {
+       if (@($listed | Where-Object { $_ -match ('(?<![0-9])3\.'+$ver.Substring(2)+'(?![0-9])') }).Count -gt 0) {
+         & $launcher.Source ('-'+$ver) -c $code
+         if ($LASTEXITCODE -eq 0) { return @{ Exe=$launcher.Source; Prefix=@('-'+$ver) } }
+       }
+     }
+   }
+ }
+ $python=Get-Command python.exe -ErrorAction SilentlyContinue
+ if ($python) {
+   & $python.Source -c $code
+   if ($LASTEXITCODE -eq 0) { return @{ Exe=$python.Source; Prefix=@() } }
+ }
+ return $null
+}
+function Report-Tool([string]$name,[string]$usage){
+ $found=Get-Command $name -ErrorAction SilentlyContinue
+ if ($found){Write-Host "[OK] $name : $($found.Source)"}
+ else {Write-Host "[OPTIONAL] $name is absent. Needed only for $usage."}
+}
 try {
  Start-Transcript -LiteralPath $LogFile -Force -ErrorAction Stop | Out-Null
  $transcript=$true
  Write-Host "RCBoat ROS v2.0.0-beta.2 | $Action"
  Write-Host "Full log: $LogFile"
- if ($Action -eq 'BUILD_GUI') {
-   $PythonExe = $null
-   $c = Get-Command py.exe -ErrorAction SilentlyContinue
-   if ($c) {
-     foreach($ver in @('3.11','3.12')){
-       & $c.Source "-$ver" -c 'import sys; assert sys.maxsize > 2**32; print(sys.version)' 2>$null
-       if($LASTEXITCODE -eq 0){$PythonExe=$c.Source;$PythonPre=@("-$ver");break}
-     }
-   }
-   if(-not $PythonExe){
-     $c=Get-Command python.exe -ErrorAction SilentlyContinue
-     if($c){
-       & $c.Source -c 'import sys; assert (3,11) <= sys.version_info[:2] <= (3,12) and sys.maxsize>2**32' 2>$null
-       if($LASTEXITCODE -eq 0){$PythonExe=$c.Source;$PythonPre=@()}
-     }
-   }
-   Check ($null -ne $PythonExe) 'Python 3.11 or 3.12 x64 not found. Install from python.org with the launcher (py.exe) and PATH enabled.'
+ if ($Action -eq 'CHECK_WINDOWS') {
+   Write-Host '[OK] Windows PowerShell runner is working; source folder extracted.'
+   $py=Resolve-RCBoatPython
+   Check ($null -ne $py) 'No supported Python 3.11/3.12/3.13 x64 found. The prebuilt EXE does not require Python. For a local build, install supported x64 Python or use SETUP_WINDOWS.cmd.'
+   Write-Host "[OK] Python available for local GUI build: $($py.Exe) $($py.Prefix -join ' ')"
+   Report-Tool 'git.exe' 'UPLOAD_GITHUB.cmd (not needed to run EXE or build it)'
+   Report-Tool 'ssh.exe' 'CHECK_BACKEND / USE_ROS / other remote Jetson operations'
+   Report-Tool 'scp.exe' 'DEPLOY_ROS / INSTALL_ROS remote transfers'
+   Report-Tool 'winget.exe' 'optional prerequisite installation'
+   Write-Host '[OK] Windows environment check passed. No install or SSH action was performed.'
+ } elseif ($Action -eq 'BUILD_GUI') {
+   $py=Resolve-RCBoatPython
+   Check ($null -ne $py) 'No supported Python 3.11/3.12/3.13 x64 found. Use CHECK_WINDOWS.cmd for diagnosis.'
+   $PythonExe=$py.Exe; $PythonPre=$py.Prefix
    $AppDir = Join-Path $Root 'windows_gui'
    $Venv = Join-Path $AppDir '.venv'
    $Exe = Join-Path $Venv 'Scripts\python.exe'
@@ -67,6 +98,9 @@ try {
      $Artifact=Join-Path $AppDir ('dist\'+$Name+'.exe')
      Check (Test-Path -LiteralPath $Artifact) "Build command returned success but EXE is missing: $Artifact"
      Check ((Get-Item -LiteralPath $Artifact).Length -gt 100000) 'EXE size unexpectedly small'
+     # --windowed EXE must be waited for, otherwise PowerShell can leave an empty LASTEXITCODE.
+     $SmokeScript='import os,subprocess,sys; env=dict(os.environ); env["QT_QPA_PLATFORM"]="offscreen"; rc=subprocess.run([sys.argv[1],"--smoke-test"],env=env,timeout=120).returncode; sys.exit(rc)'
+     Run $Exe @('-c',$SmokeScript,$Artifact)
      Write-Host "BUILT FILE: $Artifact"
      Write-Host "SHA256: $((Get-FileHash -Algorithm SHA256 -LiteralPath $Artifact).Hash)"
      Write-Host 'Windows GUI EXE build complete. Hardware operation is NOT certified by this build.'
