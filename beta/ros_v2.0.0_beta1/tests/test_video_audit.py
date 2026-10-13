@@ -34,6 +34,10 @@ class VideoContract(unittest.TestCase):
         script=(ROOT/'catkin_ws/src/rcboat_ros/nodes/ground_test_logger_node.py').read_text()
         self.assertIn('or self.pending_switch',script)
         self.assertIn('actuator neutral command confirmation missing or stale',script)
+    def test_qgis_helper_deployed_with_ros_package(self):
+        runner=(ROOT/'tools/windows/runner.ps1').read_text()
+        self.assertIn("'matlab','qgis','tools'",runner)
+
     def test_plot_and_qgis_specs(self):
         m=(ROOT/'matlab/analyze_path_tracking.m').read_text()
         q=(ROOT/'qgis/setup_qgis_layers.py').read_text()

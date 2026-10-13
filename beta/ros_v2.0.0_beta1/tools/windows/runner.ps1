@@ -119,7 +119,7 @@ try {
      $SCP=CmdPath 'scp.exe'
      $RemoteRoot='/home/jetson/rcboat_ros_ws'
      Run $SSH @($Destination,"mkdir -p '$RemoteRoot'")
-     foreach($name in @('catkin_ws','deployment','systemd','matlab','tools')){
+     foreach($name in @('catkin_ws','deployment','systemd','matlab','qgis','tools')){
        $src=Join-Path $Root $name
        Check (Test-Path -LiteralPath $src) "Missing folder $src"
        # OpenSSH scp on Windows accepts backslashes in local paths; quote arguments via PowerShell array.
