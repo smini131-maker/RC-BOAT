@@ -131,6 +131,14 @@ class HealthTests(unittest.TestCase):
     def test_stale(self) -> None:
         self.assertEqual(evaluate_gps_health(self.source(), connected=True, now=103.0)["status"], "STALE")
 
+    def test_vdop_is_relaxed_and_does_not_downgrade_navigation_gate(self) -> None:
+        health = evaluate_gps_health(
+            self.source(vdop=6.0), connected=True, now=100.1
+        )
+        self.assertEqual(health["status"], "WARNING")
+        self.assertEqual(health["navigation_status"], "GOOD")
+
+
     def test_gate_hdop_and_rtk_falls_back_to_gps(self) -> None:
         source = self.source(hdop=4.0)
         health = evaluate_gps_health(source, connected=True, now=100.1)
