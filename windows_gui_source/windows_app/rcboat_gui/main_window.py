@@ -1605,7 +1605,8 @@ class MainWindow(QMainWindow):
             "NAVIGATION_WAITING_GPS": "GPS 대기", "NAVIGATION_WAITING_ROUTE": "항로 대기",
             "NAVIGATION_WAITING_COURSE": "진행방향 대기",
             "NAVIGATION_STARTING_COURSE": "진행방향 획득 중·직진 출발",
-            "NAVIGATION_ACTIVE": "자동 운항 중", "NAVIGATION_ROUTE_COMPLETE": "목적지 도착·정지",
+            "NAVIGATION_ACTIVE": "자동 운항 중", "NAVIGATION_RECOVERY_STOP": "경로 이탈 안전정지",
+            "NAVIGATION_ROUTE_COMPLETE": "목적지 도착·정지",
             "REMOTE_ACTIVE": "PC 원격 조종 중", "EMERGENCY_STOP": "비상정지",
             "HIL_ACTIVE": "HIL 항법 시험 중",
         }.get(operation, operation)
@@ -1656,6 +1657,7 @@ class MainWindow(QMainWindow):
             "ARDUINO_OR_RC_UNAVAILABLE": "Arduino/조종기 사용 불가",
             "GPS_COURSE_UNAVAILABLE": "GPS 진행방향 대기",
             "ROUTE_COMPLETE": "목적지 도착·안전 정지",
+            "ROUTE_DEVIATION_TOO_LARGE": "경로 이탈 과다·안전 정지",
             "ESTOP_CLEARED": "비상정지 해제 후 안전 대기",
             "SIMULATION": "시뮬레이션",
         }.get(failsafe, failsafe)
@@ -1768,8 +1770,8 @@ class MainWindow(QMainWindow):
         cno = gps.get("cno_avg_dbhz")
         cno_level = (
             "INFO" if cno is None
-            else "GOOD" if float(cno) >= 40.0
-            else "WARNING" if float(cno) >= 30.0
+            else "GOOD" if float(cno) >= 30.0
+            else "WARNING" if float(cno) >= 25.0
             else "BAD"
         )
         self.gps_metric_cards["cno"].set_value(
@@ -1783,8 +1785,18 @@ class MainWindow(QMainWindow):
             else "WARNING" if float(hacc) <= 3.0
             else "BAD"
         )
-        self.gps_metric_cards["hacc"].set_value(
-            self._fmt(hacc, 2, " m"), hacc_level
+        if hacc is None:
+            self.gps_metric_cards["hacc"].set_value("NAV-PVT 대기", "INFO")
+        else:
+            self.gps_metric_cards["hacc"].set_value(
+                self._fmt(hacc, 2, " m"), hacc_level
+            )
+        ubx_count = int(gps.get("ubx_message_count") or 0)
+        nmea_count = int(gps.get("nmea_sentence_count") or 0)
+        self.gps_metric_cards["hacc"].hint_label.setText(
+            f"{gps.get('hacc_source') or 'UBX-NAV-PVT'} · "
+            f"UBX {ubx_count} / NMEA {nmea_count}"
+            + (" · ≤1.5 m 좋음 · ≤3 m 주의" if hacc is not None else "")
         )
 
         gps_age = gps.get("age_s")
@@ -1862,30 +1874,37 @@ class MainWindow(QMainWindow):
             if gps.get("rtk_fallback_active")
             else ""
         )
+        link_level = (
+            "BAD" if ntrip_error
+            else "GOOD" if ntrip_connected
+            else "WARNING" if ntrip_enabled
+            else "INFO"
+        )
+        self.ntrip_link_card.set_value(link_state, link_level)
+        self.ntrip_solution_card.set_value(solution_note, solution_level)
+        received = int(ntrip.get("bytes_received") or 0)
+        if received >= 1_000_000:
+            received_text = f"{received / 1_000_000:.2f} MB"
+        elif received >= 1000:
+            received_text = f"{received / 1000:.1f} kB"
+        else:
+            received_text = f"{received} B"
+        self.ntrip_bytes_card.set_value(
+            received_text,
+            "GOOD" if received > 0 and ntrip_connected else "INFO",
+        )
+        self.ntrip_age_card.set_value(
+            self._fmt(correction_age, 1, " s"), correction_level
+        )
         self.ntrip_status.setText(
-            f"NTRIP 보정링크: {link_state}"
-            f" · 위치 해: {solution_note}"
-            f" · {ntrip.get('host') or '-'}:{ntrip.get('port') or '-'}"
+            f"{ntrip.get('host') or '-'}:{ntrip.get('port') or '-'}"
             f" / {ntrip.get('mountpoint') or '-'}"
-            f" · {int(ntrip.get('bytes_received') or 0)} bytes"
-            + (
-                f" · 오류: {ntrip_error_hint}"
-                if ntrip_error_hint else ""
-            )
+            + (f" · {ntrip_error_hint}" if ntrip_error_hint else "")
             + fallback_note
         )
-        if ntrip_error:
-            ntrip_color = "#ff6474"
-        elif ntrip_connected and solution == "RTK_FIXED":
-            ntrip_color = "#4ee0b0"
-        elif ntrip_connected:
-            ntrip_color = "#f8bd58"
-        else:
-            ntrip_color = "#8ea4c4"
         self.ntrip_status.setStyleSheet(
-            "background:#0f1a2c; border:1px solid #243652; "
-            "border-radius:8px; padding:9px 12px; font-weight:700; "
-            f"color:{ntrip_color};"
+            "color:#ff6474; font-weight:700;"
+            if ntrip_error else "color:#7187a6;"
         )
 
         ntrip_signature = (
@@ -1910,7 +1929,6 @@ class MainWindow(QMainWindow):
             )
             self._last_ntrip_status_signature = ntrip_signature
 
-        received = int(ntrip.get("bytes_received") or 0)
         if received > 0 and not self._ntrip_received_corrections:
             self._ntrip_received_corrections = True
             self.log(
@@ -2031,7 +2049,44 @@ class MainWindow(QMainWindow):
         selected_name = route.get("selected_route_name", route.get("active_route_name", "-"))
         active_name = route.get("active_route_name", "-")
         route_error = route.get("load_error")
-        group_ids = route.get("multipath_group_route_ids") or []
+        multipath_group = route.get("multipath_group") or {}
+        group_items = multipath_group.get("routes") or []
+        group_ids = [str(item.get("id") or "") for item in group_items] or (
+            route.get("multipath_group_route_ids") or []
+        )
+        group_names = [
+            str(item.get("name") or item.get("id") or "-")
+            for item in group_items
+        ]
+        active_group_name = str(
+            multipath_group.get("active_route_name") or active_name
+        )
+        reference_group_name = str(
+            multipath_group.get("reference_route_name") or selected_name
+        )
+        if group_names:
+            group_detail = " · ".join(
+                f"{item.get('name') or item.get('id')}"
+                f"(시작 {float(item.get('start_gap_m') or 0):.2f}m / "
+                f"도착 {float(item.get('end_gap_m') or 0):.2f}m)"
+                for item in group_items
+            )
+            self.multipath_group_status.setText(
+                f"기준: {reference_group_name} · 현재 활성: {active_group_name} · "
+                f"같은 그룹 {len(group_items)}개\n{group_detail}"
+            )
+            self.multipath_group_status.setStyleSheet(
+                "background:#0f1a2c; border:1px solid #2b765e; border-radius:8px; "
+                "padding:9px 12px; color:#d9fff1; font-weight:700;"
+            )
+        else:
+            self.multipath_group_status.setText(
+                f"기준: {reference_group_name} · 묶인 경로 없음"
+            )
+            self.multipath_group_status.setStyleSheet(
+                "background:#0f1a2c; border:1px solid #243652; border-radius:8px; "
+                "padding:9px 12px; color:#8fa7c8; font-weight:700;"
+            )
         if self._pending_multipath_request is None:
             self.multipath_status.setText(
                 f"{'ON' if multipath.get('enabled', True) else 'OFF'} · 같은 그룹 {len(group_ids)}개"
@@ -2039,11 +2094,19 @@ class MainWindow(QMainWindow):
                 f" · 이탈 지속 {float(route.get('off_route_duration_s') or 0):.1f}s"
                 f" · 저장 {multipath_config_path}"
             )
+        nav_detail = ""
+        if route.get("heading_error_deg") is not None:
+            nav_detail = (
+                f" · 방향오차 {float(route.get('heading_error_deg') or 0):+.1f}°"
+                f" · 주행속도 {float(route.get('navigation_speed_fraction') or 0) * 100:.0f}%"
+                f" · 조향반전 {'ON' if route.get('navigation_steering_inverted') else 'OFF'}"
+            )
         self.route_status.setText(
             f"선택한 항로: {selected_name} · 활성 항로: {active_name} · "
             f"지점 {route.get('waypoint_index', 0) + 1}/{route.get('waypoint_count', 0)} · "
             f"목표까지 {float(route.get('distance_to_waypoint_m') or 0):.1f} m · "
             f"경로 이탈 {float(route.get('distance_to_route_m') or 0):.1f} m"
+            + nav_detail
             + (f" · 항로 오류: {route_error}" if route_error else "")
         )
         display_gps = dict(gps)
