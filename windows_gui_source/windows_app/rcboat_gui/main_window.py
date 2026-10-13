@@ -1942,6 +1942,8 @@ class MainWindow(QMainWindow):
         active_id = route.get("active_route_id", "")
         selected_id = route.get("selected_route_id", active_id)
         routes = state.get("routes", [])
+        self._latest_routes = [dict(item) for item in routes]
+        self._sync_route_layer_controls(self._latest_routes)
         existing_ids = [self.route_combo.itemData(i) for i in range(self.route_combo.count())]
         incoming_ids = [r.get("id") for r in routes]
         desired_id = self.pending_route_id or (
@@ -1997,7 +1999,19 @@ class MainWindow(QMainWindow):
         display_gps = dict(gps)
         if hil_active and hil.get("lat") is not None and hil.get("lon") is not None:
             display_gps.update(lat=hil.get("lat"), lon=hil.get("lon"), fix=True)
-        self.route_plot.update_data(routes, display_gps, active_id)
+        display_routes = list(routes)
+        recording_waypoints = recording.get("waypoints") or []
+        if recording_active and recording_waypoints:
+            display_routes.append(
+                {
+                    "id": "__recording__",
+                    "name": f"현재 기록 중 · {recording.get('name') or '-'}",
+                    "waypoints": recording_waypoints,
+                    "arrival_radius_m": recording.get("arrival_radius_m"),
+                }
+            )
+        self.route_plot.update_data(display_routes, display_gps, active_id)
+        self._update_route_action_state()
         for event in state.get("events", []):
             stamp = float(event.get("timestamp", 0))
             if stamp > self.last_event_timestamp:
