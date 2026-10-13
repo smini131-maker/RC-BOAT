@@ -138,6 +138,26 @@ class HealthTests(unittest.TestCase):
         self.assertEqual(health["status"], "WARNING")
         self.assertEqual(health["navigation_status"], "GOOD")
 
+    def test_cno_good_warning_bad_thresholds(self) -> None:
+        self.assertEqual(
+            evaluate_gps_health(
+                self.source(cno_avg_dbhz=40.0), connected=True, now=100.1
+            )["status"],
+            "GOOD",
+        )
+        self.assertEqual(
+            evaluate_gps_health(
+                self.source(cno_avg_dbhz=30.0), connected=True, now=100.1
+            )["status"],
+            "WARNING",
+        )
+        self.assertEqual(
+            evaluate_gps_health(
+                self.source(cno_avg_dbhz=29.9), connected=True, now=100.1
+            )["status"],
+            "BAD",
+        )
+
 
     def test_gate_hdop_and_rtk_falls_back_to_gps(self) -> None:
         source = self.source(hdop=4.0)
@@ -290,11 +310,56 @@ class RoutePersistenceTests(unittest.TestCase):
             manager.start_recording("Recorded", minimum_distance_m=0.1, minimum_interval_s=0.1)
             self.assertTrue(manager.record_position((35.0, 129.0), now=1.0))
             self.assertTrue(manager.record_position((35.00001, 129.00001), now=2.0))
+            state = manager.recording_state()
+            self.assertEqual(state["point_count"], 2)
+            self.assertEqual(len(state["waypoints"]), 2)
             route_id = manager.stop_recording(save=True)
             self.assertIsNotNone(route_id)
             self.assertEqual(manager.selected.route_id, route_id)
             self.assertEqual(manager.persisted_selected_route_id, route_id)
             self.assertIn(route_id, [item["id"] for item in manager.public_routes()])
+
+    def test_recorded_route_can_be_deleted_and_selection_falls_back(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "routes.json"
+            payload = {
+                "selected_route_id": "recorded_x",
+                "routes": [
+                    {
+                        "id": "training_a",
+                        "name": "훈련 경로 A",
+                        "waypoints": [{"lat": 35.0, "lon": 129.0}],
+                    },
+                    {
+                        "id": "recorded_x",
+                        "name": "삭제 대상",
+                        "waypoints": [{"lat": 35.1, "lon": 129.1}],
+                    },
+                ],
+            }
+            path.write_text(__import__("json").dumps(payload), encoding="utf-8")
+            manager = RouteManager(path)
+            deleted = manager.delete_recorded_route("recorded_x")
+            self.assertEqual(deleted, "삭제 대상")
+            self.assertEqual(manager.selected.route_id, "training_a")
+            stored = __import__("json").loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(stored["selected_route_id"], "training_a")
+            self.assertNotIn(
+                "recorded_x", [str(item.get("id")) for item in stored["routes"]]
+            )
+
+    def test_training_route_delete_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "routes.json"
+            path.write_text(
+                '{"selected_route_id":"training_a","routes":['
+                '{"id":"training_a","name":"훈련 경로 A","waypoints":[{"lat":35.0,"lon":129.0}]},'
+                '{"id":"recorded_x","name":"기록","waypoints":[{"lat":35.1,"lon":129.1}]}]}',
+                encoding="utf-8",
+            )
+            manager = RouteManager(path)
+            with self.assertRaises(ValueError):
+                manager.delete_recorded_route("training_a")
 
 
 class SafetyRepositoryTests(unittest.TestCase):
