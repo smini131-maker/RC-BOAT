@@ -38,7 +38,6 @@ class ControlValues:
     navigation_full_speed_error_deg: float = 35.0
     navigation_slow_error_deg: float = 100.0
     navigation_min_speed_fraction: float = 0.65
-    navigation_hard_off_route_m: float = 32.0
 
     throttle_reverse_pwm: int = 5800
     throttle_stop_pwm: int = 6450
