@@ -10,6 +10,8 @@
 
 ## 1.6.0 - 2026-10-13
 
+release branch: `release/1.6.0`
+
 - GPS 항로 기록 포인트마다 `timestamp`, `lat`, `lon`, `heading_deg` 저장.
 - 기존 lat/lon-only routes.json과 완전 하위 호환.
 - JSON / CSV / GPX PC 내보내기에서 시간·위도·경도·헤딩 보존.
