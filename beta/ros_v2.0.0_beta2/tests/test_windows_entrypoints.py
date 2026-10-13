@@ -14,6 +14,11 @@ class WindowsEntrypointRegression(unittest.TestCase):
         checker=(ROOT/'CHECK_WINDOWS.cmd').read_text(encoding='ascii')
         self.assertIn('-Action CHECK_WINDOWS',checker)
         self.assertIn('RCBOAT_NO_PAUSE',checker)
+    def test_windows_root_arguments_not_ending_in_backslash(self):
+        for name in ('CHECK_WINDOWS','BUILD_ROS_GUI','UPLOAD_GITHUB','DEPLOY_ROS','INSTALL_ROS','USE_ROS','USE_DAEMON','CHECK_ROS','CHECK_BACKEND'):
+            s=(ROOT/(name+'.cmd')).read_text(encoding='ascii')
+            self.assertIn('-Root "%~dp0."',s,name)
+            self.assertNotIn('-Root "%~dp0"',s,name)
     def test_python_313_support_and_exe_validation(self):
         src=(ROOT/'tools/windows/runner.ps1').read_text(encoding='utf-8')
         for token in ("'3.11'","'3.12'","'3.13'","Resolve-RCBoatPython","CHECK_WINDOWS","RCBOAT_PYTHON","Start-Transcript","Stop-Transcript","subprocess.run"):

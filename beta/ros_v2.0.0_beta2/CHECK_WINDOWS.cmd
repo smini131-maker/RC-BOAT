@@ -14,7 +14,7 @@ if errorlevel 1 (
   set "RESULT=4"
   goto finish
 )
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%" -Action CHECK_WINDOWS -Root "%~dp0"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%" -Action CHECK_WINDOWS -Root "%~dp0."
 set "RESULT=%ERRORLEVEL%"
 :finish
 echo.

@@ -3,16 +3,16 @@ setlocal EnableExtensions DisableDelayedExpansion
 cd /d "%~dp0"
 if not exist "%~dp0tools\windows\runner.ps1" (
   echo [ERROR] Missing tools\windows\runner.ps1
-  pause
+  if not defined RCBOAT_NO_PAUSE pause
   exit /b 3
 )
 where powershell.exe >nul 2>&1
 if errorlevel 1 (
   echo [ERROR] Windows PowerShell is required.
-  pause
+  if not defined RCBOAT_NO_PAUSE pause
   exit /b 4
 )
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\windows\runner.ps1" -Action "CHECK_ROS" -Root "%~dp0" %*
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\windows\runner.ps1" -Action "CHECK_ROS" -Root "%~dp0." %*
 set "RESULT=%ERRORLEVEL%"
 echo.
 if "%RESULT%"=="0" (echo [OK] CHECK_ROS completed.) else (echo [ERROR] CHECK_ROS failed, code %RESULT%. Read logs directory.)
