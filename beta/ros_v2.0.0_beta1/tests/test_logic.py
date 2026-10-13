@@ -35,7 +35,7 @@ class Tests(unittest.TestCase):
         self.assertGreater(meters((35,129),(35.00001,129)),1)
     def _manager(self,t):
         f=pathlib.Path(t)/'routes.json'
-        f.write_text((BASE/'catkin_ws/src/rcboat_ros/config/routes.json').read_text(),encoding='utf-8')
+        f.write_text((BASE/'catkin_ws/src/rcboat_ros/config/routes.json').read_text(encoding='utf-8'),encoding='utf-8')
         return RouteManager(f)
     def test_route_group_endpoints_and_persist(self):
         with tempfile.TemporaryDirectory() as t:
@@ -65,7 +65,7 @@ class Tests(unittest.TestCase):
             self.assertTrue(r.record_point(35,129,heading=278.5,timestamp='2026-10-13T19:20:00.123+09:00'))
             self.assertTrue(r.record_point(35.00003,129,heading=279.0,timestamp='2026-10-13T19:20:03.123+09:00'))
             name=r.record_stop()
-            saved=json.loads(r.filename.read_text())
+            saved=json.loads(r.filename.read_text(encoding='utf-8'))
             pts=next(x for x in saved['routes'] if x['id']==name)['waypoints']
             self.assertEqual(pts[0]['timestamp'],'2026-10-13T19:20:00.123+09:00')
             self.assertEqual(pts[0]['heading_deg'],278.5)
