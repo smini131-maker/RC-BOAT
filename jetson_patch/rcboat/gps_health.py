@@ -17,7 +17,7 @@ class GpsHealthThresholds:
     pdop_warning: float = 4.0
     vdop_good: float = 5.0
     cno_good: float = 40.0
-    cno_warning: float = 35.0
+    cno_warning: float = 30.0
     hacc_good_m: float = 1.5
     hacc_warning_m: float = 3.0
     correction_good_s: float = 5.0
