@@ -19,6 +19,7 @@
 ## 1.5.0 - 2026-10-13
 
 기준 commit: `c5fbf6afaa3e56f96e8441f75e09af867016cb14`
+release branch: `release/1.5.0`
 
 - UBX NAV-PVT polling을 통한 hAcc 수집 및 NAV-PVT/UBX/NMEA 카운터 표시.
 - 자율항법 조향 방향 반전 보정.
@@ -28,6 +29,9 @@
 - Multi-Path 그룹 구성과 활성 경로 표시.
 
 ## 1.4.0 - 2026-10-13
+
+기준 commit: `12d56b221cd4594510d8a4c29893294c92e2477e`
+release branch: `release/1.4.0`
 
 대표 이력: `0fd39ca`, `7481bd5`, `c2c5893`
 
@@ -39,6 +43,7 @@
 ## 1.3.1 - 2026-10-10
 
 기준 commit: `6081faa173ce6c2cc672c17e4fe28c5c03523571`
+release branch: `release/1.3.1`
 
 - RTK/NTRIP 손실 시 유효한 일반 GPS로 자율항법을 계속하는 fallback 추가.
 - GPS 자체가 끊기거나 stale/no-fix/HDOP 불량이면 안전 출력 유지.
@@ -46,6 +51,7 @@
 ## 1.3.0 - 2026-10-06
 
 기준 commit: `7440a3048ab0e9579c8e3e6eaac0823121e007ec`
+release branch: `release/1.3.0`
 
 - Week6 GPS health, GPS CSV logging, NTRIP/RTK 지원.
 - NMEA + UBX 파서와 GPS 진단 telemetry 추가.
@@ -55,6 +61,7 @@
 레거시 별칭: **R12**
 
 기준 commit: `ce94b2a7a88b601b3506e2558b7b986c3b601e72`
+release branch: `release/1.2.0`
 
 - 선택 항로 영구 저장과 저장 결과 피드백 개선.
 - 항로 실행/저장 흐름 안정화.
@@ -64,11 +71,15 @@
 레거시 별칭: **R11**
 
 기준 commit: `570b3f3e0646e411608805c6d03eedc884a3732c`
+release branch: `release/1.1.0`
 
 - Multi-Path 복구 패키지.
 - 기존 daemon / Direct-I2C / Windows GUI 기반 기능 복원.
 
 ## 1.0.0 - 2026-09
+
+기준 commit: `c76f62a`
+release branch: `release/1.0.0`
 
 - Jetson daemon 단일 하드웨어 제어 구조.
 - Windows PySide6 GUI + Paramiko SSH.
