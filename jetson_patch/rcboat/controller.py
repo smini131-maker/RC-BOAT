@@ -798,6 +798,7 @@ class BoatController:
                 "parser_error_count": gps_data.get("parser_error_count"),
                 "nmea_sentence_count": gps_data.get("nmea_sentence_count"),
                 "ubx_message_count": gps_data.get("ubx_message_count"),
+                "nav_pvt_message_count": gps_data.get("nav_pvt_message_count"),
                 "hacc_source": (
                     "UBX-NAV-PVT" if gps_data.get("hacc_m") is not None
                     else "UBX-NAV-PVT 대기"
