@@ -1,15 +1,16 @@
-"""RCBoat ROS2.0-beta.1 Windows application. Only SSH accesses Jetson."""
+"""RC Boat ROS v2.0.0-beta.2 Windows mission control. SSH-only Jetson connection."""
 import csv
 import json
 import math
 import pathlib
+import os
 import sys
 import time
 from PySide6.QtCore import QObject,QThread,Qt,Signal,Slot,QTimer,QPointF
-from PySide6.QtGui import QColor,QPainter,QPen
+from PySide6.QtGui import QColor,QPainter,QPen,QIcon
 from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QLabel,
     QPushButton,QLineEdit,QComboBox,QPlainTextEdit,QTabWidget,QGridLayout,QGroupBox,
-    QMessageBox,QFileDialog,QSlider,QGraphicsScene,QGraphicsView,QGraphicsEllipseItem,QGraphicsPathItem)
+    QMessageBox,QFileDialog,QSlider,QGraphicsScene,QGraphicsView,QGraphicsEllipseItem,QGraphicsPathItem,QFrame,QScrollArea,QSplitter)
 import paramiko
 
 CLIENT='python3 /home/jetson/rcboat_ros_ws/deployment/jetson/bridge_client.py'
@@ -20,7 +21,9 @@ class TrackMap(QGraphicsView):
         self.scene=QGraphicsScene(self);self.setScene(self.scene)
         self.setRenderHint(QPainter.Antialiasing)
         self.setDragMode(QGraphicsView.ScrollHandDrag)
-        self.setMinimumHeight(320)
+        self.setMinimumHeight(340)
+        self.setBackgroundBrush(QColor("#0e192a"))
+        self.setObjectName("routeMap")
     def wheelEvent(self,event):
         self.scale(1.2 if event.angleDelta().y()>0 else 1/1.2,1.2 if event.angleDelta().y()>0 else 1/1.2)
     def draw_routes(self,routes,lat=None,lon=None):
@@ -117,29 +120,125 @@ class Worker(QThread):
             if self.client:self.client.close();self.client=None
     def stop(self):self.running=False;self.wait(6000)
 
+
+APP_STYLE = """
+QMainWindow,QWidget {background:#09111f;color:#edf4ff;font-family:'Malgun Gothic','Segoe UI';font-size:10pt;}
+QLabel {background:transparent;}
+QLabel#appTitle {font-size:22pt;font-weight:800;color:#f7fbff;}
+QLabel#appSubtitle {color:#92abc9;font-size:9pt;}
+QLabel#safetyBadge {background:#102d28;color:#54dbac;border:1px solid #296452;border-radius:8px;padding:8px 12px;font-weight:700;}
+QLabel#betaBadge {background:#152b43;color:#8fd2ff;border:1px solid #315a82;border-radius:8px;padding:8px 12px;font-weight:700;}
+QGroupBox {background:#0e1a2c;border:1px solid #293c57;border-radius:9px;margin-top:13px;padding:13px 10px 9px 10px;font-weight:600;}
+QGroupBox::title {subcontrol-origin:margin;left:12px;padding:0 7px;color:#afc4e0;}
+QLineEdit,QComboBox,QPlainTextEdit {background:#101d31;color:#f0f6ff;border:1px solid #354965;border-radius:6px;padding:8px;selection-background-color:#3479d9;}
+QLineEdit:focus,QComboBox:focus {border:1px solid #6cbcff;}
+QPlainTextEdit {font-family:'Consolas','Malgun Gothic';font-size:9pt;}
+QPushButton {background:#176fe2;color:#fff;border:none;border-radius:7px;padding:9px 13px;font-weight:600;min-height:21px;}
+QPushButton:hover {background:#3386f5;}
+QPushButton:disabled {background:#263248;color:#8190a6;}
+QPushButton#danger {background:#d53d54;font-weight:800;font-size:11pt;}
+QPushButton#danger:hover {background:#f34d65;}
+QPushButton#safe {background:#168363;}
+QPushButton#quiet {background:#223651;color:#e3efff;border:1px solid #385371;}
+QPushButton#quiet:hover {background:#2e4767;}
+QFrame#statusCard {background:#111e32;border:1px solid #293f5a;border-radius:9px;}
+QLabel#cardTitle {color:#9fb5d2;font-size:9pt;}
+QLabel#cardValue {font-size:14pt;font-weight:750;color:#eef6ff;}
+QFrame#readoutCard {background:#132137;border:1px solid #293c55;border-radius:8px;}
+QLabel#readoutTitle {color:#9eb5d2;font-size:9pt;}
+QLabel#readoutValue {color:#f5f9ff;font-size:12pt;font-weight:700;}
+QTabWidget::pane {background:#0e192a;border:1px solid #283a51;border-radius:8px;}
+QTabBar::tab {background:#14233a;color:#bdd0e7;padding:11px 17px;margin-right:2px;border-top-left-radius:7px;border-top-right-radius:7px;}
+QTabBar::tab:selected {background:#294365;color:#76c8fc;}
+QSlider::groove:horizontal {height:7px;background:#2b405d;border-radius:3px;}
+QSlider::handle:horizontal {width:18px;margin:-6px 0;background:#5caaff;border-radius:9px;}
+QGraphicsView#routeMap {border:1px solid #325070;border-radius:8px;}
+QScrollArea {border:0;background:transparent;}
+QScrollBar:vertical {background:#111e30;width:10px;}
+QScrollBar::handle:vertical {background:#375271;border-radius:5px;min-height:24px;}
+"""
+READOUTS={
+ 'mode':'운항 모드','fix':'GPS FIX','rtk_state':'RTK 보정','latitude':'위도','longitude':'경도',
+ 'heading_deg':'진행 방향 (°)','speed_mps':'GPS 속도 (m/s)','hdop':'HDOP','hacc_m':'수평 정확도 (m)',
+ 'cno_dbhz':'신호 (dB-Hz)','course_quality':'진행방향 신뢰도','active_route_id':'현재 항로',
+ 'controller_mode':'항법 알고리즘','lookahead_m':'전방 주시 거리 (m)','cte_correction_deg':'횡오차 보정각 (°)',
+ 'target_heading_deg':'목표 방향 (°)','heading_error_deg':'방향 오차 (°)','cross_track_error_m':'경로 이탈 (m)',
+ 'desired_steering_pwm':'계산 조향 PWM','desired_throttle_pwm':'계산 스로틀 PWM',
+ 'actual_steering_pwm':'적용 조향 PWM','actual_throttle_pwm':'적용 스로틀 PWM'
+}
+
+class StatusCard(QFrame):
+    def __init__(self,name):
+        super().__init__();self.setObjectName('statusCard');self.setMinimumHeight(75)
+        layout=QVBoxLayout(self);layout.setContentsMargins(12,10,12,10);layout.setSpacing(4)
+        title=QLabel(name);title.setObjectName('cardTitle')
+        self.value=QLabel('대기');self.value.setObjectName('cardValue');self.value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        layout.addWidget(title);layout.addWidget(self.value)
+    def setValue(self,value):self.value.setText(str(value))
+
+class ReadoutCard(QFrame):
+    def __init__(self,title):
+        super().__init__();self.setObjectName('readoutCard');self.setMinimumHeight(66)
+        layout=QVBoxLayout(self);layout.setContentsMargins(10,7,10,7);layout.setSpacing(5)
+        label=QLabel(title);label.setObjectName('readoutTitle')
+        self.value=QLabel('—');self.value.setObjectName('readoutValue')
+        self.value.setTextInteractionFlags(Qt.TextSelectableByMouse);self.value.setWordWrap(True)
+        layout.addWidget(label);layout.addWidget(self.value)
+
 class Window(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle('RCBoatControl ROS v2.0.0-beta.2')
-        self.resize(1200,820);self.worker=None;self.telemetry={}
+        self.setWindowTitle('RC 보트 관제센터 | ROS v2.0.0-beta.2')
+        bundle=pathlib.Path(getattr(sys,'_MEIPASS',pathlib.Path(__file__).resolve().parent))
+        asset=bundle/'assets'/'cat_boat_icon.ico'
+        if asset.is_file():self.setWindowIcon(QIcon(str(asset)))
+        self.setStyleSheet(APP_STYLE)
+        self.resize(1450,925);self.setMinimumSize(960,650);self.worker=None;self.telemetry={}
         center=QWidget();self.setCentralWidget(center);body=QVBoxLayout(center)
-        connect=QHBoxLayout();body.addLayout(connect)
+        body.setContentsMargins(19,15,19,13);body.setSpacing(11)
+        header=QHBoxLayout();body.addLayout(header)
+        logo=QLabel();logo.setPixmap(self.windowIcon().pixmap(60,60))
+        logo.setFixedSize(65,64);header.addWidget(logo)
+        titleBox=QVBoxLayout();header.addLayout(titleBox)
+        title=QLabel('RC 보트 관제센터');title.setObjectName('appTitle')
+        subtitle=QLabel('Jetson Nano  ·  ROS GPS Path-Tracking  ·  RTK 관제')
+        subtitle.setObjectName('appSubtitle')
+        titleBox.addWidget(title);titleBox.addWidget(subtitle)
+        header.addStretch(1)
+        beta=QLabel('ROS v2.0.0-beta.2  |  실험 버전')
+        beta.setObjectName('betaBadge');header.addWidget(beta)
+        safe=QLabel('안전 기준  CH0 6000  ·  CH6 6450')
+        safe.setObjectName('safetyBadge');header.addWidget(safe)
+        connectGroup=QGroupBox('Jetson SSH 연결');body.addWidget(connectGroup)
+        connect=QHBoxLayout(connectGroup);connect.setSpacing(9)
         self.host=QLineEdit('10.85.226.215');self.host.setPlaceholderText('Jetson IP')
         self.user=QLineEdit('jetson');self.password=QLineEdit();self.password.setEchoMode(QLineEdit.Password)
         self.password.setPlaceholderText('SSH password (not saved)')
         for title,obj in [('호스트',self.host),('계정',self.user),('비밀번호',self.password)]:connect.addWidget(QLabel(title));connect.addWidget(obj)
-        self.connect_btn=QPushButton('SSH 연결');connect.addWidget(self.connect_btn);self.connect_btn.clicked.connect(self.connect_ssh)
-        self.status=QLabel('Backend: ROS · 연결 대기');body.addWidget(self.status)
+        self.connect_btn=QPushButton('Jetson 연결');connect.addWidget(self.connect_btn);self.connect_btn.clicked.connect(self.connect_ssh)
+        self.status=QLabel('SSH 연결 대기');connect.addWidget(self.status)
         self.node_status=QLabel('ROS Master · GPS · RC · Navigation · Safety · Actuator · NTRIP · Logger: 연결 대기')
+        self.node_status.setWordWrap(True)
+        self.node_status.setStyleSheet('color:#92abc9;font-size:9pt;')
+        cards=QGridLayout();cards.setSpacing(9);body.addLayout(cards)
+        self.cards={k:StatusCard(t) for k,t in [
+            ('ssh','SSH 연결'),('mode','운항 모드'),('gps','GPS'),
+            ('rtk','RTK 보정'),('safety','안전 잠금'),('throttle','스로틀 출력')]}
+        for i,card in enumerate(self.cards.values()):cards.addWidget(card,0,i)
+        tabs=QTabWidget();self.tabs=tabs;body.addWidget(tabs,1)
         body.addWidget(self.node_status)
-        tabs=QTabWidget();body.addWidget(tabs)
-        overview=QWidget();tabs.addTab(overview,'운항·GPS')
-        over=QVBoxLayout(overview);modes=QHBoxLayout();over.addLayout(modes)
-        for mode,label in [('AUTO_SAFE','AUTO SAFE'),('MANUAL','MANUAL'),('REMOTE','REMOTE'),('NAVIGATION','NAVIGATION')]:
-            b=QPushButton(label);modes.addWidget(b);b.clicked.connect(lambda checked=False,m=mode:self.command('set_mode',mode=m,armed=False))
-        estop=QPushButton('E-STOP');estop.setStyleSheet('background:#bd2d38;color:white;font-weight:bold;padding:8px')
+        overview=QWidget();overviewScroll=QScrollArea();overviewScroll.setWidgetResizable(True)
+        overviewScroll.setWidget(overview);tabs.addTab(overviewScroll,'실시간 계기판')
+        over=QVBoxLayout(overview);over.setSpacing(12)
+        hint=QLabel('현재 GPS 데이터 · 목표 조향과 실제 적용 PWM은 서로 다릅니다. GROUND_TEST는 추진이 잠겨 있어야 합니다.')
+        hint.setStyleSheet('color:#98abc4');hint.setWordWrap(True);over.addWidget(hint)
+        modes=QHBoxLayout();over.addLayout(modes);modes.addWidget(QLabel('운항 모드'))
+        for mode,label in [('AUTO_SAFE','자동 대기'),('MANUAL','수동 조종'),('REMOTE','PC 원격'),('NAVIGATION','GPS 항법')]:
+            b=QPushButton(label);b.setObjectName('quiet');modes.addWidget(b);b.clicked.connect(lambda checked=False,m=mode:self.command('set_mode',mode=m,armed=False))
+        modes.addStretch(1)
+        estop=QPushButton('비상 정지');estop.setObjectName('danger')
         modes.addWidget(estop);estop.clicked.connect(lambda:self.command('estop'))
-        reset=QPushButton('비상정지 해제');modes.addWidget(reset);reset.clicked.connect(lambda:self.command('reset_estop'))
+        reset=QPushButton('비상정지 해제');reset.setObjectName('safe');modes.addWidget(reset);reset.clicked.connect(lambda:self.command('reset_estop'))
         rmt=QHBoxLayout();over.addLayout(rmt)
         self.steering_pwm=QSlider(Qt.Horizontal);self.steering_pwm.setRange(4900,7300);self.steering_pwm.setValue(6000)
         self.throttle_pwm=QSlider(Qt.Horizontal);self.throttle_pwm.setRange(5800,7000);self.throttle_pwm.setValue(6450)
@@ -150,17 +249,22 @@ class Window(QMainWindow):
         self.remote_timer=QTimer(self)
         self.remote_timer.timeout.connect(self.remote_heartbeat)
         self.remote_timer.start(300)
-        self.grid=QGridLayout();over.addLayout(self.grid)
+        dash=QSplitter(Qt.Horizontal);over.addWidget(dash,1)
+        valuesGroup=QGroupBox('GPS / 항법 실시간 계기판')
+        self.grid=QGridLayout(valuesGroup);self.grid.setSpacing(8);dash.addWidget(valuesGroup)
         labels=['mode','fix','rtk_state','latitude','longitude','heading_deg','speed_mps','hdop','hacc_m',
                 'cno_dbhz','course_quality','active_route_id','controller_mode','lookahead_m','cte_correction_deg','target_heading_deg','heading_error_deg','cross_track_error_m',
                 'desired_steering_pwm','desired_throttle_pwm','actual_steering_pwm','actual_throttle_pwm']
         self.indicators={}
         for i,key in enumerate(labels):
-            k=QLabel(key);v=QLabel('—');v.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            self.grid.addWidget(k,i//3,2*(i%3));self.grid.addWidget(v,i//3,2*(i%3)+1)
-            self.indicators[key]=v
-        self.map=TrackMap();over.addWidget(self.map)
-        ground=QWidget();tabs.addTab(ground,'GROUND TEST')
+            card=ReadoutCard(READOUTS.get(key,key))
+            self.grid.addWidget(card,i//3,i%3)
+            self.indicators[key]=card.value
+        mapGroup=QGroupBox('항로 · GPS 위치 (좌표도 / 위성지도는 QGIS)')
+        ml=QVBoxLayout(mapGroup);self.map=TrackMap();ml.addWidget(self.map,1)
+        ml.addWidget(QLabel('파랑 LEFT   ·   회색 CENTER   ·   빨강 RIGHT   ·   녹색 현재 위치'))
+        dash.addWidget(mapGroup);dash.setSizes([820,475]);dash.setChildrenCollapsible(False)
+        ground=QWidget();tabs.addTab(ground,'GPS 지상 실험')
         g=QVBoxLayout(ground)
         groundactions=QHBoxLayout();g.addLayout(groundactions)
         for label,action in [('지상 실험 시작','ground_start'),('지상 실험 종료','ground_stop')]:
@@ -217,18 +321,22 @@ class Window(QMainWindow):
         nsave=QPushButton('Jetson에 NTRIP 설정 저장');nl.addWidget(nsave,7,1)
         nsave.clicked.connect(self.configure_ntrip)
         self.ntripview=QPlainTextEdit();self.ntripview.setReadOnly(True);nl.addWidget(self.ntripview,8,0,1,2)
-        logs=QWidget();tabs.addTab(logs,'로그·SSH 터미널');ll=QVBoxLayout(logs)
+        logs=QWidget();tabs.addTab(logs,'로그 · SSH');ll=QVBoxLayout(logs)
         self.eventlog=QPlainTextEdit();self.eventlog.setReadOnly(True);ll.addWidget(self.eventlog)
         term=QHBoxLayout();ll.addLayout(term)
         self.shellcmd=QLineEdit();self.shellcmd.setPlaceholderText('SSH command (serial/I2C를 직접 열지 마세요)')
         term.addWidget(self.shellcmd)
         cmd_btn=QPushButton('SSH 명령 실행');term.addWidget(cmd_btn)
         cmd_btn.clicked.connect(self.send_shell)
-        self.setStyleSheet('QLabel{font-size:12px}QPushButton{padding:5px 9px}')
+
+    def _connection_status(self,message):
+        self.status.setText(message)
+        self.cards['ssh'].setValue('연결됨' if '연결됨' in message else '연결 실패' if '실패' in message else '연결 대기')
+
     def connect_ssh(self):
         if self.worker:self.worker.stop()
         self.worker=Worker(self.host.text().strip(),self.user.text().strip(),self.password.text())
-        self.password.clear();self.worker.connection_state.connect(self.status.setText)
+        self.password.clear();self.worker.connection_state.connect(self._connection_status)
         self.worker.result.connect(self.on_result);self.worker.start()
     def send_remote(self):
         self.command('set_remote_pwm',steering_pwm=self.steering_pwm.value(),throttle_pwm=self.throttle_pwm.value())
@@ -256,7 +364,17 @@ class Window(QMainWindow):
             self.node_status.setText('ROS Node Health: '+' | '.join(k+(': OK' if '/'+k in active else ': MISSING') for k in expected))
             gps=t.get('gps',{});nav=t.get('navigation',{});route=t.get('route',{});act=t.get('actuator',{});saf=t.get('safety',{})
             values={**gps,**nav,**route,**act,**saf}
-            for k,v in self.indicators.items():v.setText(str(values.get(k,'—')))
+            for k,v in self.indicators.items():
+                value=values.get(k,'—')
+                if isinstance(value,float):value=f'{value:.6f}' if k in ('latitude','longitude') else f'{value:.2f}'
+                if isinstance(value,bool):value='정상' if value else '미수신'
+                v.setText(str(value))
+            self.cards['ssh'].setValue('연결됨')
+            self.cards['mode'].setValue(saf.get('mode','대기'))
+            self.cards['gps'].setValue('FIX' if gps.get('fix') else 'NO FIX')
+            self.cards['rtk'].setValue(gps.get('rtk_state','대기'))
+            self.cards['safety'].setValue('잠금' if saf.get('actuator_locked',True) else '잠금 해제')
+            self.cards['throttle'].setValue(act.get('actual_throttle_pwm','—'))
             locked=saf.get('actuator_locked',True)
             self.groundstatus.setText(('GROUND TEST ACTIVE' if saf.get('mode')=='GROUND_TEST' else 'GROUND TEST INACTIVE')+
                 (' · ACTUATOR LOCKED' if locked else ' · ACTUATOR UNLOCKED')+
@@ -328,7 +446,19 @@ def run_gui_smoke():
     window=Window()
     assert 'ROS' in window.windowTitle()
     assert window.centralWidget() is not None
-    assert window.findChild(QTabWidget) is not None
+    tabs=window.findChild(QTabWidget)
+    assert tabs is not None and tabs.count()==5
+    assert len(window.indicators)==len(READOUTS)
+    assert len(window.cards)==6
+    assert window.findChild(QLabel,'appTitle') is not None
+    for i in range(tabs.count()):tabs.setCurrentIndex(i)
+    tabs.setCurrentIndex(0)
+    window.resize(1240,820);window.show();app.processEvents()
+    if '--screenshot' in sys.argv:
+        out=pathlib.Path(sys.argv[sys.argv.index('--screenshot')+1])
+        out.parent.mkdir(parents=True,exist_ok=True)
+        assert window.grab().save(str(out),'PNG')
+        print('GUI_SCREENSHOT_OK:',out)
     window.close()
     print('GUI_SMOKE_OK: widgets created without SSH or hardware')
     return 0
