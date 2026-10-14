@@ -29,7 +29,9 @@ class LinuxDeploy(unittest.TestCase):
             node.write_bytes(b'#!/usr/bin/env python3\r\nprint(1)\r\n')
             self.assertEqual(module.normalize(root),(2,1))
             self.assertNotIn(b'\r',sh.read_bytes())
-            self.assertTrue(node.stat().st_mode & 0o100)
+            # Windows chmod does not expose POSIX executable bits; Linux CI checks these.
+            if __import__('os').name != 'nt':
+                self.assertTrue(node.stat().st_mode & 0o100)
     def test_installer_calls_normalizer(self):
         script=(ROOT/'tools/windows/runner.ps1').read_text(encoding='utf-8')
         self.assertLess(script.index('normalize_line_endings.py'),script.index('install_jetson_ros.sh'))

@@ -12,6 +12,19 @@ permissions:
   contents: read
 
 jobs:
+  linux-deployment-check:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Linux shell syntax, text line endings and executable restoration
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=beta/ros_v2.0.0_beta2
+          for script in "$base"/deployment/jetson/*.sh; do
+            bash -n "$script"
+          done
+          python3 -m unittest discover -s "$base/tests" -p 'test_linux_deployment.py' -v
   windows-build:
     runs-on: windows-latest
     timeout-minutes: 40
