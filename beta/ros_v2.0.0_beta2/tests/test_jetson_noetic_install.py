@@ -7,6 +7,7 @@ class ROSJetsonRegression(unittest.TestCase):
         c=(ROOT/'catkin_ws/src/rcboat_ros/CMakeLists.txt').read_text(encoding='utf-8')
         self.assertEqual(c.count('catkin_python_setup()'),1)
         self.assertLess(c.index('catkin_python_setup()'),c.index('generate_messages('))
+        self.assertLess(c.index('catkin_python_setup()'),c.index('add_message_files('))
         self.assertLess(c.index('generate_messages('),c.index('catkin_package('))
     def test_no_nounset_while_sourcing_noetic(self):
         for p in ['install_jetson_ros.sh','preflight.sh','check_ros.sh']:

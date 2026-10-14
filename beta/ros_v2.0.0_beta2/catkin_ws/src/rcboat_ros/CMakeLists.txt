@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(rcboat_ros)
 find_package(catkin REQUIRED COMPONENTS rospy std_msgs message_generation)
+catkin_python_setup()
 add_message_files(FILES ControlCommand.msg GpsState.msg)
 add_service_files(FILES Execute.srv)
-catkin_python_setup()
 generate_messages(DEPENDENCIES std_msgs)
 catkin_package(CATKIN_DEPENDS rospy std_msgs message_runtime)
 catkin_install_python(PROGRAMS
