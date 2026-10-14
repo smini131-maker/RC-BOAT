@@ -201,7 +201,10 @@ try {
        # OpenSSH scp on Windows accepts backslashes in local paths; quote arguments via PowerShell array.
        Run $SCP @('-r',$src,($Destination+':'+$RemoteRoot+'/'))
      }
-     Write-Host 'Uploaded ROS workspace only. Legacy v1.6.0 directory is unchanged.'
+     # SCP on Windows can preserve CRLF and lose the Linux node executable flag.
+     # Explicit python3 handles CRLF even in the normalizer itself.
+     Run $SSH @($Destination,'python3 /home/jetson/rcboat_ros_ws/deployment/jetson/normalize_line_endings.py')
+     Write-Host 'Uploaded and normalized isolated ROS workspace. Legacy v1.6.0 unchanged.'
    }
    if($Action -eq 'INSTALL_ROS'){
      Write-Host 'Preflight first. Ubuntu 20.04 ROS Noetic must be available on the Jetson.'
