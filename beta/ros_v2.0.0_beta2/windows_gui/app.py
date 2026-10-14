@@ -228,6 +228,7 @@ class Window(QMainWindow):
         tabs=QTabWidget();self.tabs=tabs;body.addWidget(tabs,1)
         body.addWidget(self.node_status)
         overview=QWidget();overviewScroll=QScrollArea();overviewScroll.setWidgetResizable(True)
+        overviewScroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         overviewScroll.setWidget(overview);tabs.addTab(overviewScroll,'실시간 계기판')
         over=QVBoxLayout(overview);over.setSpacing(12)
         hint=QLabel('현재 GPS 데이터 · 목표 조향과 실제 적용 PWM은 서로 다릅니다. GROUND_TEST는 추진이 잠겨 있어야 합니다.')
@@ -258,12 +259,12 @@ class Window(QMainWindow):
         self.indicators={}
         for i,key in enumerate(labels):
             card=ReadoutCard(READOUTS.get(key,key))
-            self.grid.addWidget(card,i//3,i%3)
+            self.grid.addWidget(card,i//2,i%2)
             self.indicators[key]=card.value
         mapGroup=QGroupBox('항로 · GPS 위치 (좌표도 / 위성지도는 QGIS)')
         ml=QVBoxLayout(mapGroup);self.map=TrackMap();ml.addWidget(self.map,1)
         ml.addWidget(QLabel('파랑 LEFT   ·   회색 CENTER   ·   빨강 RIGHT   ·   녹색 현재 위치'))
-        dash.addWidget(mapGroup);dash.setSizes([820,475]);dash.setChildrenCollapsible(False)
+        dash.addWidget(mapGroup);dash.setSizes([615,500]);dash.setChildrenCollapsible(False)
         ground=QWidget();tabs.addTab(ground,'GPS 지상 실험')
         g=QVBoxLayout(ground)
         groundactions=QHBoxLayout();g.addLayout(groundactions)
@@ -297,14 +298,21 @@ class Window(QMainWindow):
         export=QHBoxLayout();rl.addLayout(export)
         for fmt in ('json','csv','gpx'):
             b=QPushButton(fmt.upper()+' 내보내기');export.addWidget(b);b.clicked.connect(lambda checked=False,f=fmt:self.export_routes(f))
-        multipath=QHBoxLayout();rl.addLayout(multipath)
+        multipath=QGridLayout();rl.addLayout(multipath)
         self.multipath_inputs={}
-        for key,default in [('endpoint_tolerance_m','0.75'),('off_route_distance_m','8'),('off_route_hold_s','3'),
-                            ('closer_advantage_m','2'),('switch_cooldown_s','5')]:
-            box=QLineEdit(default);box.setMaximumWidth(72)
-            multipath.addWidget(QLabel(key));multipath.addWidget(box)
+        fields=[
+            ('시작/끝점 허용 오차 (m)','endpoint_tolerance_m','0.75'),
+            ('경로 이탈 거리 (m)','off_route_distance_m','8'),
+            ('이탈 유지 시간 (초)','off_route_hold_s','3'),
+            ('대체 경로 이점 (m)','closer_advantage_m','2'),
+            ('전환 쿨다운 (초)','switch_cooldown_s','5')
+        ]
+        for i,(label,key,default) in enumerate(fields):
+            box=QLineEdit(default);box.setMaximumWidth(108)
+            multipath.addWidget(QLabel(label),i//2,2*(i%2))
+            multipath.addWidget(box,i//2,2*(i%2)+1)
             self.multipath_inputs[key]=box
-        msave=QPushButton('Multi-Path 설정 저장');multipath.addWidget(msave)
+        msave=QPushButton('Multi-Path 설정 저장');multipath.addWidget(msave,3,0,1,4)
         msave.clicked.connect(self.save_multipath)
         self.routesinfo=QPlainTextEdit();rl.addWidget(self.routesinfo)
         nt=QWidget();tabs.addTab(nt,'RTK / NTRIP')
