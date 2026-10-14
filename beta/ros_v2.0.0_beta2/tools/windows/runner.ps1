@@ -80,25 +80,53 @@ try {
    Check ($null -ne $py) 'No supported Python 3.11/3.12/3.13 x64 found. Use CHECK_WINDOWS.cmd for diagnosis.'
    $PythonExe=$py.Exe; $PythonPre=$py.Prefix
    $AppDir = Join-Path $Root 'windows_gui'
-   $Venv = Join-Path $AppDir '.venv'
-   $Exe = Join-Path $Venv 'Scripts\python.exe'
-   Push-Location $AppDir
+   Check (Test-Path -LiteralPath (Join-Path $AppDir 'app.py')) 'windows_gui/app.py not found. Extract the entire ZIP.'
+   # PySide6 has very deep QML paths. Installing inside a nested Downloads ZIP
+   # can exceed the Windows MAX_PATH limit (260 chars). Always use SHORT paths.
+   $BuildHome=Join-Path $env:LOCALAPPDATA 'RCBoatBuild\ros-beta2'
+   $PyTag=(& $PythonExe @($PythonPre + @('-c',"import sys;print(str(sys.version_info.major)+str(sys.version_info.minor))")))
+   Check ($LASTEXITCODE -eq 0) 'Failed to determine Python version.'
+   $Venv=Join-Path $BuildHome ('venv'+$PyTag)
+   $Exe=Join-Path $Venv 'Scripts\python.exe'
+   $Stage=Join-Path $BuildHome 'stage'
+   $Spec=Join-Path $BuildHome 'spec'
+   $Work=Join-Path $BuildHome 'work'
+   $Dist=Join-Path $AppDir 'dist'
+   foreach($folder in @($BuildHome,$Stage,$Spec,$Work,$Dist)){
+     New-Item -ItemType Directory -Force -Path $folder | Out-Null
+   }
+   Write-Host '[INFO] MAX_PATH safe build: virtualenv and PyInstaller work folders use short paths.'
+   Write-Host "[INFO] Short virtualenv: $Venv"
+   if(Test-Path (Join-Path $AppDir '.venv')){
+     Write-Host '[INFO] Old incomplete source .venv ignored; no need to delete it.'
+   }
+   Copy-Item -LiteralPath (Join-Path $AppDir 'app.py') -Destination (Join-Path $Stage 'app.py') -Force
+   $AssetSource=Join-Path $AppDir 'assets'
+   Check (Test-Path -LiteralPath $AssetSource) 'Missing assets folder. Re-extract full source.'
+   $AssetStage=Join-Path $Stage 'assets'
+   New-Item -ItemType Directory -Force -Path $AssetStage | Out-Null
+   Copy-Item -Path (Join-Path $AssetSource '*') -Destination $AssetStage -Force
+   Push-Location $Stage
    try {
      if(-not (Test-Path -LiteralPath $Exe)){
        Run $PythonExe ($PythonPre + @('-m','venv',$Venv))
      }
      Run $Exe @('-m','pip','--version')
-     Run $Exe @('-m','pip','install','-r',(Join-Path $AppDir 'requirements.txt'))
-     # Import verifies dependencies before the potentially long packaging step.
-     Run $Exe @('-c',"import PySide6,paramiko,PyInstaller;print('Python GUI dependencies OK')")
+     Run $Exe @('-m','pip','install','--disable-pip-version-check','-r',(Join-Path $AppDir 'requirements.txt'))
+     Run $Exe @('-c',"import PySide6.QtWidgets,paramiko,PyInstaller;print('GUI dependencies OK')")
      Run $Exe @('-m','unittest','discover','-s',(Join-Path $Root 'tests'),'-v')
      Run $Exe @('app.py','--smoke-test')
-     $Name = 'RCBoatControl_ROS_v2.0.0-beta.2'
-     Run $Exe @('-m','PyInstaller','--noconfirm','--clean','--onefile','--windowed','--name',$Name,'app.py')
-     $Artifact=Join-Path $AppDir ('dist\'+$Name+'.exe')
-     Check (Test-Path -LiteralPath $Artifact) "Build command returned success but EXE is missing: $Artifact"
+     $Name='RCBoatControl_ROS_v2.0.0-beta.2'
+     $Options=@('-m','PyInstaller','--noconfirm','--clean','--onefile','--windowed',
+                '--workpath',$Work,'--distpath',$Dist,'--specpath',$Spec,
+                '--add-data','assets;assets','--name',$Name)
+     if(Test-Path -LiteralPath (Join-Path $AssetStage 'cat_boat_icon.ico')){
+       $Options+=@('--icon',(Join-Path $AssetStage 'cat_boat_icon.ico'))
+     }
+     Run $Exe ($Options + @('app.py'))
+     $Artifact=Join-Path $Dist ($Name+'.exe')
+     Check (Test-Path -LiteralPath $Artifact) "Build succeeded but EXE missing: $Artifact"
      Check ((Get-Item -LiteralPath $Artifact).Length -gt 100000) 'EXE size unexpectedly small'
-     # --windowed EXE must be waited for, otherwise PowerShell can leave an empty LASTEXITCODE.
      $SmokeScript="import os,subprocess,sys; env=dict(os.environ); env['QT_QPA_PLATFORM']='offscreen'; rc=subprocess.run([sys.argv[1],'--smoke-test'],env=env,timeout=120).returncode; sys.exit(rc)"
      Run $Exe @('-c',$SmokeScript,$Artifact)
      Write-Host "BUILT FILE: $Artifact"
