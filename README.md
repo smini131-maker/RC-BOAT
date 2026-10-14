@@ -1,177 +1,133 @@
-# RC-BOAT v1.6.0
+# RC-BOAT ROS Noetic v2.0.0
 
-Jetson Nano 기반 RC 보트를 Windows GUI에서 SSH로 연결해 수동/자동/GPS 항법/HIL/원격 제어하고, GPS·RTK·NTRIP·Multi-Path 상태를 모니터링하는 프로젝트입니다.
+정식 실행 구조는 ROS Noetic뿐입니다. Jetson backend는 `roslaunch rcboat_ros rcboat.launch`, Windows GUI는 ROS gateway TCP(기본 `8765`)로 통신합니다. SSH는 배포·터미널용 보조 채널이며, SSH가 끊겨도 ROS gateway가 살아 있으면 상태 조회와 `GROUND_TEST_STOP`이 동작합니다.
 
-현재 공식 버전 체계는 **Semantic Versioning `MAJOR.MINOR.PATCH`**입니다. 과거 `R11`, `R12`, `R12.1`과 현장 복구용 `R15.1` 표기는 `CHANGELOG.md`에서 SemVer 계보에 대응하는 레거시 별칭으로만 보존합니다. 과거 commit SHA는 복구 기준을 깨지 않기 위해 재작성하지 않습니다.
+기존 1.6.0 소스는 `release/1.6.0` 브랜치와 `release/archive/v1.6.0/`에 보존됩니다. `beta/`는 개발 이력일 뿐 정식 실행 위치가 아닙니다.
 
-## 현재 버전
+## 정식 디렉터리
 
-- Version: **1.6.0**
-- Windows GUI 제목과 Jetson telemetry에 버전 표시
-- 기준 파일: `VERSION`
-- 버전 이력: `CHANGELOG.md`
+- `catkin_ws/src/rcboat_ros`: ROS package, nodes, messages, service, launch, config
+- `windows_gui`: Windows PySide6 GUI
+- `deployment/jetson`: Jetson 설치·점검 도구
+- `systemd/rcboat_ros.service`: 선택적 ROS 자동 시작 unit
+- `tests`: 하드웨어 없이 실행 가능한 회귀 테스트
 
-버전 규칙:
+초기 `routes.json`은 비어 있습니다. LEFT/CENTER/RIGHT 또는 다른 항로가 자동 생성되지 않습니다. 이름은 자유이며 사용자가 GUI에서 직접 추가·수정·삭제합니다. 저장 waypoint에는 번호, 위도, 경도, UTM easting/northing/zone이 모두 들어갑니다.
 
-- **MAJOR**: 프로토콜/아키텍처 호환성을 깨는 변경
-- **MINOR**: 하위 호환 기능 추가
-- **PATCH**: 하위 호환 버그·안전·UI 수정
+## Windows PowerShell — 전송
 
-## 보존된 안전 기준
+저장소 루트에서 다음을 실행합니다.
 
-- Steering CH0: LOW 4900 / CENTER **6000** / HIGH 7300
-- ESC CH6: REVERSE 5800 / STOP **6450** / FORWARD 7000
-- 모든 오류·통신 실패·비상정지: **Steering 6000 / Throttle 6450**
-- Arduino와 GPS는 `/dev/serial/by-id/` 고정 경로 사용
-- PCA9685는 검증된 `DirectLinuxPCA9685` 직접 I2C 방식 유지
-- Blinka / `Jetson.GPIO` 방식으로 변경하지 않음
-- 설치 패치는 기존 `routes.json`, `boat_config.json`, `.ntrip.env`, `hardware.py`, `pca_direct.py`를 보존
-
-## GPS / RTK
-
-- GGA/RMC/GSA/GSV NMEA + UBX NAV-PVT 파서
-- UBX NAV-PVT를 1초 간격으로 poll하여 hAcc와 RTK 상태 수집
-- NAV-PVT / 전체 UBX / NMEA 수신 카운터 표시
-- UTC, PDOP, VDOP, 평균 C/N0, hAcc, fixType, carrSoln, RTK 상태 telemetry
-- GPS 연결·FIX·좌표 freshness·HDOP를 실제 NAVIGATION hard gate로 사용
-- C/N0/PDOP/VDOP/hAcc/위성 수는 품질 진단에 사용하며 단독으로 추진을 반복 차단하지 않음
-- RTK/NTRIP 손실 시 일반 GPS 조건이 정상이면 fallback 운항 가능
-- GPS 자체가 끊기거나 stale/no-fix/HDOP 불량이면 6000/6450 안전 출력
-
-현재 평균 C/N0 표시 기준:
-
-- **GOOD**: ≥30 dB-Hz
-- **WARNING**: 25~29.9 dB-Hz
-- **BAD**: <25 dB-Hz
-
-## 자율 항법
-
-- 실물 러더 링크 방향에 맞춰 NAVIGATION 조향만 반전
-- MANUAL / REMOTE 조향 매핑은 변경하지 않음
-- 방향 오차가 작으면 설정 cruise 속도를 유지
-- 방향 오차 35~100°에서는 부드럽게 감속
-- 100° 이상에서는 최소 cruise delta의 65%로 계속 전진하며 조향
-- 약 150° 이상으로 처음 진입할 때만 0.4초 일시 정지 후 저속 복귀
-- 같은 큰 오차 상태에서 정지/출발 반복을 하지 않음
-
-## GPS 항로 기록 포맷
-
-v1.6.0부터 새로 기록한 각 waypoint에 다음 값이 함께 저장됩니다.
-
-```json
-{
-  "timestamp": "2026-10-13T19:20:00.123+09:00",
-  "lat": 35.00000000,
-  "lon": 129.00000000,
-  "heading_deg": 270.5
-}
+```powershell
+git clone https://github.com/smini131-maker/RC-BOAT.git
+cd RC-BOAT
+git switch main
+powershell -ExecutionPolicy Bypass -File .\tools\windows\runner.ps1 -Action DEPLOY_ROS -Root . -Destination jetson@JETSON_IP
 ```
 
-- `timestamp`: timezone offset이 포함된 실제 기록 시각
-- `lat`: 위도
-- `lon`: 경도
-- `heading_deg`: GPS course/heading, 0~360°. 진행방향이 아직 없으면 `null`
-- 기존 lat/lon-only `routes.json`도 그대로 읽음
-- 새 항로를 저장하면 route-level `recorded_at_start`, `recorded_at_end`, `saved_at`도 기록
-- Windows GUI의 JSON/CSV/GPX 내보내기에서도 시간·좌표·헤딩을 보존
+전송과 설치를 한 번에 하려면:
 
-CSV 형식:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\windows\runner.ps1 -Action INSTALL_ROS -Root . -Destination jetson@JETSON_IP
+```
+
+## Jetson SSH 안 — 빌드·실행
+
+수동 실행(권장 점검 경로):
+
+```bash
+cd /home/jetson/rcboat_ros_ws
+python3 -m pip install --user pyserial smbus2
+source /opt/ros/noetic/setup.bash
+cd catkin_ws
+catkin_make
+source devel/setup.bash
+roslaunch rcboat_ros rcboat.launch
+```
+
+선택적으로 부팅 자동 시작을 설치하려면:
+
+```bash
+cd /home/jetson/rcboat_ros_ws
+bash deployment/jetson/install_jetson_ros.sh
+bash deployment/jetson/check_ros.sh
+```
+
+GUI PC가 Jetson의 TCP `8765`에 접근할 수 있어야 합니다. 신뢰할 수 있는 시험용 LAN에서만 열고, 필요하면 Jetson과 Windows 양쪽 환경변수 `RCBOAT_GATEWAY_TOKEN`에 같은 값을 설정합니다. 포트를 바꾸면 Windows에서 `RCBOAT_GATEWAY_PORT`도 설정합니다.
+
+## Windows GUI 실행·빌드
+
+소스 실행:
+
+```powershell
+cd windows_gui
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python app.py
+```
+
+EXE 빌드:
+
+```powershell
+.\BUILD_ROS_GUI.cmd
+```
+
+결과: `windows_gui\dist\RCBoatControl_ROS_v2.0.0.exe`
+
+GUI 상단 상태는 서로 독립입니다: `SSH connected/disconnected`, `ROS master online/offline`, `ROS gateway online/offline`, `logger idle/recording/stopping/error`, `GPS valid/invalid/stale`, `RTK fix/float/dgps/no_fix/no_data`.
+
+## 항로와 Ground Test 사용 순서
+
+1. 항로 탭의 **수동 항로 추가**에서 이름과 `waypoint 번호, 위도, 경도`를 입력합니다. 기존 항로는 **선택 항로 수정/삭제**로 관리합니다.
+2. 도보 테스트 탭에서 서로 다른 기준 항로 3개를 선택합니다.
+3. 프로펠러를 제거하고 ESC 추진 전원을 분리합니다.
+4. ROS master/gateway, GPS valid, 필요한 경우 RTK 상태를 확인합니다.
+5. **도보 테스트 시작**을 누르고 실제 배를 들고 기준 경로 위를 이동합니다.
+6. 시험 중 항로·설정을 바꾸면 시각, 변경 내용, 당시 항로 snapshot이 별도 로그에 기록됩니다.
+7. **도보 테스트 종료**를 누릅니다. 이 명령은 SSH 상태가 아니라 ROS gateway를 통해 전달됩니다.
+8. 완료된 시험을 선택하고 **선택 결과 다운로드**를 눌러 ZIP을 PC로 가져옵니다.
+
+Jetson 저장 위치:
 
 ```text
-index,timestamp,latitude,longitude,heading_deg
-1,2026-10-13T19:20:00.123+09:00,35.00000000,129.00000000,270.50
+~/rcboat_ros_data/logs/ground_tests/
+  ground_test_YYYYMMDD_HHMMSS/
+    ground_test.csv
+    ground_test.jsonl
+    reference_routes.csv
+    reference_routes.json
+    route_changes.jsonl
+    events.jsonl
+    test_metadata.json
+    export_manifest.json
 ```
 
-## Multi-Path
+- `ground_test.csv`: MATLAB/QGIS용 열 기반 측정·판단·출력 데이터
+- `ground_test.jsonl`: 각 sample의 원본 구조 보존
+- `reference_routes.*`: 시험 시작 시 선택한 기준 항로 3개 전체 좌표/번호/UTM
+- `route_changes.jsonl`: 시험 중 항로·설정 변경 시각과 전후 정보
+- `events.jsonl`: 수동 개입, 모드, 비상정지, 오류, 정지 이벤트. 비정상 종료 후 logger가 다시 시작되면 `LOGGER_RESTART_DETECTED`가 추가됩니다.
+- `test_metadata.json`: 코드 버전, ROS 설정, 서보 보정, 시작/종료 정보
+- `export_manifest.json`: 파일 크기와 SHA-256 검증값
 
-별도 group id를 저장하는 구조가 아닙니다. 선택 기준 항로와 다른 항로의 **시작점과 도착점이 모두 `endpoint_tolerance_m` 안에 있으면 같은 그룹**으로 자동 판단합니다.
+CSV의 빈 값은 장치가 제공하지 않았거나 아직 수신되지 않은 값입니다. GUI는 이를 `unsupported`, `no_data`, `invalid`, `stale`로 구분하며 0으로 대체하지 않습니다.
 
-Windows GUI에는 다음을 표시합니다.
+## RTK/NTRIP 비밀정보
 
-- 기준 경로
-- 현재 활성 경로
-- 같은 Multi-Path 그룹의 경로 이름
-- 각 경로의 시작점/도착점 간격
-- 대체 후보와 이탈 지속시간
-
-## Windows → Jetson 배포
-
-Windows GUI를 종료하고 **프로펠러를 제거하거나 ESC 추진 전원을 분리한 상태**에서 배포합니다.
-
-v1.6.0 배포 도구는 긴 Downloads 하위 경로에서 PowerShell `Expand-Archive`가 `.github` 처리 중 실패하던 문제를 피하기 위해:
-
-1. `%TEMP%\RCBoatDeploy_...`의 짧은 작업 경로 사용
-2. GitHub ZIP 다운로드
-3. Windows 기본 `tar.exe`로 압축 해제
-4. 필요한 `jetson_patch`만 SCP
-5. Jetson 기존 설정/항로/Direct-I2C 드라이버 hash 확인
-6. 설치 후 AUTO_SAFE 6000/6450과 version/GPS telemetry 확인
-
-방식으로 동작합니다.
-
-## Jetson에서 직접 패치 적용
+자격정보를 저장소 파일에 넣지 마십시오. Jetson 로컬 전용 `/home/jetson/rcboat_ros_data/ntrip.env`(권한 `0600`) 또는 환경변수를 사용합니다.
 
 ```bash
-cd /home/jetson/jetson_patch
-chmod +x install_patch.sh
-./install_patch.sh
+install -m 600 /dev/null /home/jetson/rcboat_ros_data/ntrip.env
+nano /home/jetson/rcboat_ros_data/ntrip.env
 ```
 
-설치기는 현재 소스를 `/home/jetson/rcboat/backups/` 아래에 백업하고, Direct-I2C 드라이버를 확인한 뒤 필요한 모듈만 복사합니다. 문법 검사나 서비스 시작이 실패하면 기존 파일을 복원합니다.
+필드: `RCBOAT_NTRIP_ENABLED`, `RCBOAT_NTRIP_HOST`, `RCBOAT_NTRIP_PORT`, `RCBOAT_NTRIP_MOUNTPOINT`, `RCBOAT_NTRIP_USERNAME`, `RCBOAT_NTRIP_PASSWORD`, `RCBOAT_NTRIP_TLS`. 이 파일은 `.gitignore` 대상입니다.
 
-## GPS 연결 확인
+## 실제 보트 시험 전 확인
 
-```bash
-ls -l /dev/serial/by-id/
-readlink -f /dev/serial/by-id/usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00
-systemctl status rcboat.service
-journalctl -u rcboat.service -n 100 --no-pager
-```
-
-GPS serial port는 daemon 한 프로세스만 사용해야 합니다. 서비스 실행 중 별도 `cat`, GPS Python 프로그램, 다른 NTRIP 프로그램으로 같은 포트를 동시에 열지 마십시오.
-
-## NTRIP 설정
-
-실제 caster 주소, 계정, 비밀번호는 저장소에 포함하지 않습니다. GUI 또는 Jetson의 `.ntrip.env`에만 저장합니다.
-
-```bash
-cd /home/jetson/rcboat
-chmod 600 .ntrip.env
-sudo systemctl restart rcboat.service
-journalctl -u rcboat.service -f
-```
-
-Windows GUI는 NTRIP link 상태와 GNSS RTK solution을 별도 카드로 표시합니다.
-
-## GPS CSV 진단 로그
-
-항로 기록과 별도 기능입니다.
-
-```bash
-ls -lh /home/jetson/rcboat/logs/gps/
-tail -n 20 /home/jetson/rcboat/logs/gps/gps_*.csv
-```
-
-## Windows GUI 빌드
-
-Windows 10/11 x64:
-
-```bat
-BUILD_WINDOWS_EXE.bat
-```
-
-기본 PyInstaller 출력은:
-
-```text
-windows_gui_source\windows_app\dist\RCBoatControl.exe
-```
-
-GitHub Actions release artifact 이름은 현재 SemVer 기준 `RCBoatControl_v1.6.0`을 사용합니다.
-
-## 테스트
-
-```bash
-QT_QPA_PLATFORM=offscreen PYTHONPATH=jetson_patch:windows_gui_source/windows_app python3 -m unittest discover -s tests -p "test_*.py"
-```
-
-자동 테스트는 parser, GPS health, NTRIP, route persistence, timestamp/heading metadata, Multi-Path, 안전 gate, GUI route export와 PyInstaller 빌드를 검사합니다. 실제 수상 운항, 서보 방향, RTK FIX 정밀도는 현장에서 최종 확인합니다.
+- 프로펠러 제거 상태에서 조향/스로틀 중립 PWM과 E-STOP을 실측합니다.
+- GPS 장치의 UBX-NAV-PVT UTC, 위치, 속도, COG와 RTK 상태를 실제 장치로 대조합니다.
+- `8765/tcp`는 시험 LAN에서만 허용하고 gateway token 또는 방화벽을 적용합니다.
+- `actual_*_pwm`은 PCA에 전송한 명령이지 물리 위치 센서 피드백이 아닙니다.
+- 지상 도보 시험 통과는 수상 자율운항 안전 승인을 의미하지 않습니다.

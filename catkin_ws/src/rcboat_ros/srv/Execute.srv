@@ -1,0 +1,5 @@
+string action
+string arguments_json
+---
+bool success
+string response_json

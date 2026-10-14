@@ -1,0 +1,24 @@
+name: ROS Noetic v2.0.0 regression
+
+on:
+  push:
+    branches: [main, release/2.0.0]
+  pull_request:
+
+jobs:
+  python-regression:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Run formal release tests
+        shell: bash
+        run: PYTHONPATH=catkin_ws/src/rcboat_ros/src python -m unittest discover -s tests -v
+      - name: Compile Python sources
+        shell: bash
+        run: python -m compileall -q catkin_ws windows_gui

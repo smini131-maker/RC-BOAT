@@ -1,0 +1,4 @@
+PySide6-Essentials>=6.6,<7
+paramiko>=3.4,<5
+keyring>=24,<26
+pyinstaller>=6.5,<7

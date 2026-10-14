@@ -11,5 +11,10 @@ maintenance/runtime/
 maintenance/artifacts/
 .ntrip.env
 ntrip.env
+config/ntrip.local.json
+**/ntrip.local.json
+**/ntrip.env
+.rcboat/
+logs/ground_tests/
 logs/gps/
 gps_*.csv
