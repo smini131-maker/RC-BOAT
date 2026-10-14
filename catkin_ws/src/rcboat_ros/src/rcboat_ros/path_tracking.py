@@ -79,15 +79,26 @@ class RouteManager:
 
     def load(self):
         previous_test_ids=getattr(self,'test_route_ids',[])
+        migrated=False
         if self.filename.exists():
             self.data = json.loads(self.filename.read_text(encoding='utf-8'))
         else:
-            self.data = {'schema_version':2,'selected_route_id':'','routes':[]}
+            self.data = {'schema_version':3,'selected_route_id':'','selected_multipath_id':'',
+                         'multipath_enabled':True,'multipaths':[],'routes':[]}
             _atomic_json(self.filename,self.data)
         if not isinstance(self.data.get('routes'),list):raise ValueError('routes must be a list')
+        for key,value in (('schema_version',3),('selected_multipath_id',''),
+                          ('multipath_enabled',True),('multipaths',[])):
+            if key not in self.data:self.data[key]=value;migrated=True
+        if self.data.get('schema_version') != 3:self.data['schema_version']=3;migrated=True
+        if not isinstance(self.data.get('multipaths'),list):raise ValueError('multipaths must be a list')
         self.routes = {str(r['id']):r for r in self.data['routes'] if len(r.get('waypoints', [])) >= 1}
+        self.multipaths={str(item['id']):item for item in self.data['multipaths'] if item.get('id')}
         self.selected = self.data.get('selected_route_id') or (next(iter(self.routes)) if self.routes else '')
         if self.selected not in self.routes:self.selected=next(iter(self.routes)) if self.routes else ''
+        self.selected_multipath=str(self.data.get('selected_multipath_id') or '')
+        if self.selected_multipath not in self.multipaths:self.selected_multipath=''
+        self.multipath_enabled=bool(self.data.get('multipath_enabled',True))
         self.active = self.selected
         self.test_route_ids=[route_id for route_id in previous_test_ids if route_id in self.routes]
         self.next_index = 0
@@ -102,37 +113,116 @@ class RouteManager:
         self.next_index = 0
         self.progress = {name:0 for name in self.routes}
         self.progress_fraction = 0.0
+        if migrated:_atomic_json(self.filename,self.data)
+
+    def select_multipath(self, multipath_id):
+        multipath_id=str(multipath_id)
+        if multipath_id not in self.multipaths:raise ValueError('multipath does not exist')
+        item=self.multipaths[multipath_id]
+        ids=[route_id for route_id in item.get('route_ids',[]) if route_id in self.routes]
+        if not ids:raise ValueError('multipath has no available subroutes')
+        default=str(item.get('default_route_id') or '')
+        if default not in ids:default=ids[0]
+        self.data['selected_multipath_id']=multipath_id
+        self.data['selected_route_id']=default
+        _atomic_json(self.filename,self.data)
+        self.selected_multipath=multipath_id
+        self.selected=self.active=default
+        self.next_index=0;self.progress={name:0 for name in self.routes};self.progress_fraction=0.0
+
+    def set_multipath_enabled(self, enabled):
+        self.multipath_enabled=bool(enabled)
+        self.data['multipath_enabled']=self.multipath_enabled
+        _atomic_json(self.filename,self.data)
+        self.active=self.selected;self.next_index=0
+
+    def upsert_multipath(self, multipath_id, name, route_ids, default_route_id=''):
+        name=' '.join(str(name).split())
+        if not name:raise ValueError('multipath name is required')
+        ids=[]
+        for value in route_ids:
+            route_id=str(value)
+            if route_id not in ids:ids.append(route_id)
+        if not ids:raise ValueError('select at least one subroute')
+        missing=[route_id for route_id in ids if route_id not in self.routes]
+        if missing:raise ValueError('unknown routes: '+','.join(missing))
+        multipath_id=str(multipath_id or '').strip()
+        if not multipath_id:
+            slug=re.sub(r'[^a-z0-9]+','-',name.lower()).strip('-')[:32] or 'multipath'
+            multipath_id=f'{slug}-{uuid.uuid4().hex[:8]}'
+        default=str(default_route_id or '')
+        if default not in ids:default=ids[0]
+        item={'id':multipath_id,'name':name,'route_ids':ids,'default_route_id':default,
+              'saved_at':dt.datetime.now(dt.timezone.utc).isoformat()}
+        groups=[item if str(group.get('id'))==multipath_id else group for group in self.data['multipaths']]
+        if not any(str(group.get('id'))==multipath_id for group in self.data['multipaths']):groups.append(item)
+        self.data['multipaths']=groups
+        if not self.data.get('selected_multipath_id'):self.data['selected_multipath_id']=multipath_id
+        _atomic_json(self.filename,self.data);self.load()
+        return multipath_id
+
+    def delete_multipath(self, multipath_id):
+        multipath_id=str(multipath_id)
+        groups=[item for item in self.data['multipaths'] if str(item.get('id'))!=multipath_id]
+        if len(groups)==len(self.data['multipaths']):raise ValueError('multipath not found')
+        self.data['multipaths']=groups
+        if str(self.data.get('selected_multipath_id') or '')==multipath_id:self.data['selected_multipath_id']=''
+        _atomic_json(self.filename,self.data);self.load()
+
+    def compatible_route_ids(self, reference_route_id):
+        reference_route_id=str(reference_route_id)
+        if reference_route_id not in self.routes:raise ValueError('reference route does not exist')
+        base=_waypoints(self.routes[reference_route_id]);result=[]
+        for route_id,route in self.routes.items():
+            points=_waypoints(route)
+            if (meters(base[0],points[0])<=self.endpoint_tolerance and
+                    meters(base[-1],points[-1])<=self.endpoint_tolerance):result.append(route_id)
+        return result
 
     def group(self):
         if not self.selected or self.selected not in self.routes:return {}
         base = _waypoints(self.routes[self.selected])
         found = {}
-        candidates=self.test_route_ids if self.test_route_ids else list(self.routes)
+        if self.test_route_ids:
+            candidates=self.test_route_ids
+        elif self.multipath_enabled and self.selected_multipath in self.multipaths:
+            candidates=self.multipaths[self.selected_multipath].get('route_ids',[])
+        else:
+            candidates=[self.selected]
         for name in candidates:
             if name not in self.routes:continue
             route=self.routes[name]
             pts = _waypoints(route)
             d1, d2 = meters(base[0], pts[0]), meters(base[-1], pts[-1])
-            if d1 <= self.endpoint_tolerance and d2 <= self.endpoint_tolerance:
-                found[name] = {'start_gap_m': round(d1,3), 'end_gap_m': round(d2,3)}
+            found[name] = {'start_gap_m': round(d1,3), 'end_gap_m': round(d2,3)}
         return found
 
-    def update(self, position, now=None):
+    def update(self, position, heading=None, now=None):
         now = time.monotonic() if now is None else now
         group = self.group()
         if not group:raise ValueError('no route selected')
         if self.active not in group:
             self.active = self.selected
             self.next_index = self.progress.get(self.active,0)
-        # Multi-Path selection is based only on the nearest waypoint in the
-        # Explicit endpoint-compatible route group. Old waypoints are excluded by the
-        # stored per-route progress floor, so switching never drives backward.
-        distances = {}
+        # Named Multi-Path membership is explicit. Runtime selection uses the nearest
+        # polyline; waypoint progress is kept per subroute so switching does not drive backward.
+        distances = {};route_metrics=[]
         for route_id in group:
             points=_waypoints(self.routes[route_id])
             equivalent=int(math.floor(self.progress_fraction*max(0,len(points)-1)))
             floor=max(0,self.progress.get(route_id,0)-1,equivalent)
-            distances[route_id]=nearest_waypoint(position,points,floor)
+            waypoint_distance,waypoint_index=nearest_waypoint(position,points,floor)
+            route_distance,segment_index,signed_cte=nearest_route(position,points)
+            target_index=min(waypoint_index+1,len(points)-1)
+            target_heading=bearing(position,points[target_index])
+            metric={'route_id':route_id,'route_name':self.routes[route_id].get('name',route_id),
+                    'distance_to_route_m':round(route_distance,4),'nearest_segment_index':segment_index,
+                    'cross_track_error_m':round(signed_cte,4),'target_waypoint_index':target_index,
+                    'target_waypoint_number':target_index+1,'target_lat':points[target_index][0],
+                    'target_lon':points[target_index][1],'target_heading_deg':round(target_heading,4),
+                    'heading_error_deg':None if heading is None else round(angle_error(target_heading,float(heading)),4)}
+            route_metrics.append(metric)
+            distances[route_id]=(route_distance,waypoint_index,waypoint_distance)
         current = distances[self.active][0]
         candidate = min(distances, key=lambda k: distances[k][0]); previous = self.active
         switched = False
@@ -161,11 +251,12 @@ class RouteManager:
         self.event = {'type':'ROUTE_SWITCH','previous_route':previous,'candidate_route':candidate,'new_route':self.active,'monotonic':now} if switched else None
         return {'selected_route_id':self.selected,'active_route_id':self.active,'candidate_route_id':candidate,
                 'group_routes':list(group),'endpoint_gaps':group,
-                'switch_advantage_m':0.0,'selection_metric':'NEAREST_WAYPOINT_NO_PRIORITY',
+                'switch_advantage_m':0.0,'selection_metric':'NEAREST_ROUTE_IN_NAMED_MULTIPATH',
                 'multipath_switch':switched,'previous_route': previous if switched else '',
                 'target_waypoint_index':self.next_index,'target_lat':target[0],'target_lon':target[1],
                 'path_waypoints':[{'lat':a,'lon':b} for a,b in points],
                 'distance_to_waypoint_m':dwp,'cross_track_error_m':cte,'distance_to_route_m':distances[self.active][0],
+                'route_candidates':route_metrics,
                 'route_complete':self.next_index==len(points)-1 and dwp <= float(route.get('arrival_radius_m',1.0))}
 
     def choose_nearest_group_route(self, position):
@@ -231,6 +322,14 @@ class RouteManager:
         new=[r for r in self.data['routes'] if r['id']!=route_id]
         if len(new)==len(self.data['routes']): raise ValueError('route not found')
         self.data['routes']=new
+        groups=[]
+        for group in self.data.get('multipaths',[]):
+            item=dict(group);item['route_ids']=[value for value in item.get('route_ids',[]) if value!=route_id]
+            if item.get('default_route_id')==route_id:item['default_route_id']=item['route_ids'][0] if item['route_ids'] else ''
+            if item['route_ids']:groups.append(item)
+        self.data['multipaths']=groups
+        valid_group_ids={str(item.get('id')) for item in groups}
+        if str(self.data.get('selected_multipath_id') or '') not in valid_group_ids:self.data['selected_multipath_id']=''
         if self.selected==route_id:self.data['selected_route_id']=new[0]['id'] if new else ''
         _atomic_json(self.filename,self.data)
         self.load()
@@ -257,19 +356,9 @@ class RouteManager:
 
     def set_test_route_ids(self, route_ids):
         ids=[str(route_id) for route_id in route_ids]
-        if ids and (len(ids)!=3 or len(set(ids))!=3):raise ValueError('ground test requires exactly 3 distinct routes')
+        if len(ids)!=len(set(ids)):raise ValueError('ground test route IDs must be distinct')
         missing=[route_id for route_id in ids if route_id not in self.routes]
         if missing:raise ValueError('unknown routes: '+','.join(missing))
-        if ids:
-            base=_waypoints(self.routes[ids[0]])
-            incompatible=[]
-            for route_id in ids[1:]:
-                points=_waypoints(self.routes[route_id])
-                if (meters(base[0],points[0])>self.endpoint_tolerance or
-                        meters(base[-1],points[-1])>self.endpoint_tolerance):
-                    incompatible.append(route_id)
-            if incompatible:
-                raise ValueError('routes do not share endpoints within tolerance: '+','.join(incompatible))
         self.test_route_ids=ids
         if ids and self.selected not in ids:self.select(ids[0])
 

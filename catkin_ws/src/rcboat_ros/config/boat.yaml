@@ -1,4 +1,4 @@
-version: '2.0.0'
+version: '2.1.0'
 gui_gateway_bind: '0.0.0.0'
 gui_gateway_port: 8765
 ground_test_log_root: '~/rcboat_ros_data/logs/ground_tests'
@@ -28,7 +28,7 @@ log_rate_hz: 4.0
 endpoint_tolerance_m: 0.75
 closer_advantage_m: 0.0
 # Routes are never generated automatically. Multi-Path considers only routes
-# explicitly saved by the operator; a ground test further fixes exactly 3 IDs.
+# explicitly saved by the operator; a ground test freezes the selected N-route group or one route.
 # Path-tracking selection changes calculation only; no setting-value gate disables it.
 tracking_mode: 'HEADING'
 lookahead_base_m: 2.0

@@ -17,7 +17,7 @@ from rcboat_ros.srv import Execute
 from rcboat_ros.common import pack, unpack
 
 
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 SOCKET = os.path.expanduser("~/rcboat_ros_data/gui_bridge.sock")
 TOPICS = {
     "gps": "/rcboat/gps/status", "ntrip": "/rcboat/ntrip/status", "route": "/rcboat/route/state",
@@ -111,12 +111,31 @@ class Bridge:
         return detail
 
     def ground_start(self, args):
-        ids = [str(value) for value in args.get("route_ids", [])]
+        target_type=str(args.get("target_type") or "multipath")
+        target_id=str(args.get("target_id") or "")
+        route_state=self.cache.get("route",{})
+        if target_type=="multipath":
+            groups={str(item.get("id")):item for item in route_state.get("multipaths",[])}
+            if target_id not in groups:raise ValueError("select a saved multipath")
+            ids=[str(value) for value in groups[target_id].get("route_ids",[])]
+            if not ids:raise ValueError("selected multipath has no subroutes")
+            self.service("/rcboat/route/execute","select_multipath",{"multipath_id":target_id})
+            self.service("/rcboat/route/execute","set_multipath",{"enabled":True,
+                "endpoint_tolerance_m":float(route_state.get("multipath",{}).get("endpoint_tolerance_m",.75))})
+        elif target_type=="single_route":
+            routes={str(item.get("id")):item for item in route_state.get("routes",[])}
+            if target_id not in routes:raise ValueError("select a saved subroute")
+            ids=[target_id]
+            self.service("/rcboat/route/execute","select_route",{"route_id":target_id})
+            self.service("/rcboat/route/execute","set_multipath",{"enabled":False,
+                "endpoint_tolerance_m":float(route_state.get("multipath",{}).get("endpoint_tolerance_m",.75))})
+        else:raise ValueError("target_type must be multipath or single_route")
         self.service("/rcboat/route/execute", "set_test_route_set", {"route_ids": ids})
         try:
             self.service("/rcboat/safety/execute", "set_mode", {"mode": "GROUND_TEST"})
             rospy.sleep(.25)
-            return self.service("/rcboat/logger/execute", "start", {"route_ids": ids})
+            return self.service("/rcboat/logger/execute", "start", {"route_ids": ids,
+                "target_type":target_type,"target_id":target_id})
         except Exception:
             try: self.service("/rcboat/safety/execute", "set_mode", {"mode": "AUTO_SAFE"})
             finally: self.service("/rcboat/route/execute", "set_test_route_set", {"route_ids": []})
@@ -165,7 +184,9 @@ class Bridge:
             "/rcboat/safety/execute" if command in ("set_mode", "estop", "reset_estop", "set_remote_pwm", "heartbeat")
             else "/rcboat/route/execute" if command in ("select_route", "delete_route", "upsert_route", "list_routes",
                                                          "record_start", "record_stop", "record_cancel", "set_multipath",
-                                                         "choose_nearest_group_route", "set_test_route_set")
+                                                         "choose_nearest_group_route", "set_test_route_set",
+                                                         "select_multipath","upsert_multipath","delete_multipath",
+                                                         "compatible_routes")
             else "/rcboat/ntrip/execute" if command == "configure"
             else "/rcboat/navigation/execute" if command in ("set_tracking_mode", "set_auto_cruise_pwm") else None
         )

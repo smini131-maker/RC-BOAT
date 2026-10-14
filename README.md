@@ -1,4 +1,4 @@
-# RC-BOAT ROS Noetic v2.0.0
+# RC-BOAT ROS Noetic v2.1.0
 
 정식 실행 구조는 ROS Noetic뿐입니다. Jetson backend는 `roslaunch rcboat_ros rcboat.launch`, Windows GUI는 ROS gateway TCP(기본 `8765`)로 통신합니다. SSH는 배포·터미널용 보조 채널이며, SSH가 끊겨도 ROS gateway가 살아 있으면 상태 조회와 `GROUND_TEST_STOP`이 동작합니다.
 
@@ -13,6 +13,13 @@
 - `tests`: 하드웨어 없이 실행 가능한 회귀 테스트
 
 초기 `routes.json`은 비어 있습니다. LEFT/CENTER/RIGHT 또는 다른 항로가 자동 생성되지 않습니다. 이름은 자유이며 사용자가 GUI에서 직접 추가·수정·삭제합니다. 저장 waypoint에는 번호, 위도, 경도, UTM easting/northing/zone이 모두 들어갑니다.
+
+항로 구조는 두 단계입니다.
+
+- **소루트**: waypoint 좌표를 가진 실제 항로입니다.
+- **대루트(Multi-Path)**: 사용자가 이름을 붙이고 소루트 1개 이상을 명시적으로 묶은 실행 단위입니다. 예를 들어 `대루트 A = [소루트 1, 소루트 2, 소루트 3, ...]`입니다.
+
+대루트 운항을 켜면 선택한 대루트 안에서 현재 위치에 가장 가까운 소루트를 활성 항로로 판단합니다. 끄면 선택한 소루트 하나만 운항·시험합니다. “공통 출발·도착 자동 체크”는 대루트 편집 시 후보를 체크해 주는 선택적 도우미이며 자동 저장 또는 필수 조건이 아닙니다.
 
 ## Windows PowerShell — 전송
 
@@ -73,20 +80,22 @@ EXE 빌드:
 .\BUILD_ROS_GUI.cmd
 ```
 
-결과: `windows_gui\dist\RCBoatControl_ROS_v2.0.0.exe`
+결과: `windows_gui\dist\RCBoatControl_ROS_v2.1.0.exe`
 
 GUI 상단 상태는 서로 독립입니다: `SSH connected/disconnected`, `ROS master online/offline`, `ROS gateway online/offline`, `logger idle/recording/stopping/error`, `GPS valid/invalid/stale`, `RTK fix/float/dgps/no_fix/no_data`.
 
 ## 항로와 Ground Test 사용 순서
 
-1. 항로 탭의 **수동 항로 추가**에서 이름과 `waypoint 번호, 위도, 경도`를 입력합니다. 기존 항로는 **선택 항로 수정/삭제**로 관리합니다.
-2. 도보 테스트 탭에서 서로 다른 기준 항로 3개를 선택합니다.
-3. 프로펠러를 제거하고 ESC 추진 전원을 분리합니다.
-4. ROS master/gateway, GPS valid, 필요한 경우 RTK 상태를 확인합니다.
-5. **도보 테스트 시작**을 누르고 실제 배를 들고 기준 경로 위를 이동합니다.
-6. 시험 중 항로·설정을 바꾸면 시각, 변경 내용, 당시 항로 snapshot이 별도 로그에 기록됩니다.
-7. **도보 테스트 종료**를 누릅니다. 이 명령은 SSH 상태가 아니라 ROS gateway를 통해 전달됩니다.
-8. 완료된 시험을 선택하고 **선택 결과 다운로드**를 눌러 ZIP을 PC로 가져옵니다.
+1. 항로 탭의 **수동 항로 추가**에서 소루트 이름과 `waypoint 번호, 위도, 경도`를 입력합니다. 기존 소루트는 수정/삭제할 수 있습니다.
+2. 여러 소루트를 함께 사용할 경우 **대루트 추가**에서 이름과 포함할 소루트 N개를 직접 선택합니다. 공통 출발·도착 버튼은 후보 자동 체크용이며 결과를 자유롭게 수정할 수 있습니다.
+3. 실제 운항은 **이 대루트로 운항 시작** 또는 **이 소루트로 단일 운항 시작**을 선택합니다.
+4. 도보 테스트 탭에서 실행 방식을 `대루트` 또는 `소루트(단일)`로 고르고 시험 대상을 선택합니다.
+5. 프로펠러를 제거하고 ESC 추진 전원을 분리합니다.
+6. ROS master/gateway, GPS valid, 필요한 경우 RTK 상태를 확인합니다.
+7. **도보 테스트 시작**을 누르고 실제 배를 들고 기준 경로 위를 이동합니다.
+8. 시험 중 항로·대루트·설정을 바꾸면 시각, 변경 내용, 당시 항로 snapshot이 별도 로그에 기록됩니다.
+9. **도보 테스트 종료**를 누릅니다. 이 명령은 SSH 상태가 아니라 ROS gateway를 통해 전달됩니다.
+10. 완료된 시험을 선택하고 **선택 결과 다운로드**를 눌러 ZIP을 PC로 가져옵니다.
 
 Jetson 저장 위치:
 
@@ -97,19 +106,27 @@ Jetson 저장 위치:
     ground_test.jsonl
     reference_routes.csv
     reference_routes.json
+    route_metrics.csv
+    route_switches.csv
     route_changes.jsonl
     events.jsonl
+    analysis_manifest.json
     test_metadata.json
     export_manifest.json
 ```
 
-- `ground_test.csv`: MATLAB/QGIS용 열 기반 측정·판단·출력 데이터
+- `ground_test.csv`: MATLAB/QGIS용 시간축 측정·판단·출력 데이터. 위치, 헤딩, 실제/목표 속도, 조향각/PWM, 안전 상태가 포함됩니다.
 - `ground_test.jsonl`: 각 sample의 원본 구조 보존
-- `reference_routes.*`: 시험 시작 시 선택한 기준 항로 3개 전체 좌표/번호/UTM
+- `reference_routes.*`: 시험 시작 시 선택한 대루트의 모든 소루트(또는 단일 소루트) 전체 좌표/번호/UTM 고정본
+- `route_metrics.csv`: sample × 소루트 장기형 데이터. 각 후보 항로의 거리, 횡오차, 목표점, 목표 헤딩, 헤딩 오차를 저장합니다.
+- `route_switches.csv`: 활성 소루트 전환 시각과 전환 전후 항로
 - `route_changes.jsonl`: 시험 중 항로·설정 변경 시각과 전후 정보
 - `events.jsonl`: 수동 개입, 모드, 비상정지, 오류, 정지 이벤트. 비정상 종료 후 logger가 다시 시작되면 `LOGGER_RESTART_DETECTED`가 추가됩니다.
 - `test_metadata.json`: 코드 버전, ROS 설정, 서보 보정, 시작/종료 정보
+- `analysis_manifest.json`: 지도, 조향각, 항로별 헤딩 오차, 활성 항로 밴드, 목표/실제 속도 그래프를 재생성하기 위한 데이터 관계 설명
 - `export_manifest.json`: 파일 크기와 SHA-256 검증값
+
+로거는 실시간 그래프 이미지를 계산하지 않고 원본과 기본 파생값을 저장합니다. 따라서 연산 부담을 낮추면서도 MATLAB에서 강의자료 형식의 그래프를 2차 분석으로 재구성할 수 있습니다.
 
 CSV의 빈 값은 장치가 제공하지 않았거나 아직 수신되지 않은 값입니다. GUI는 이를 `unsupported`, `no_data`, `invalid`, `stale`로 구분하며 0으로 대체하지 않습니다.
 

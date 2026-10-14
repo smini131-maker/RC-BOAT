@@ -1,5 +1,8 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "selected_route_id": "",
+  "selected_multipath_id": "",
+  "multipath_enabled": true,
+  "multipaths": [],
   "routes": []
 }

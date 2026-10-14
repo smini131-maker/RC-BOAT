@@ -1,4 +1,4 @@
-# RC-BOAT ROS Noetic v2.0.0 architecture
+# RC-BOAT ROS Noetic v2.1.0 architecture
 
 ```text
 Windows GUI
@@ -16,6 +16,6 @@ navigation desired + RC/manual + E-STOP
 
 `gui_bridge_node` exposes the same newline-delimited JSON protocol on a local UNIX socket and TCP. Therefore ROS control and logger stop do not depend on an SSH session. SSH is not a backend health signal.
 
-Routes are an initially empty user-owned collection. Manual upsert normalizes every waypoint to a 1-based number and calculates WGS84 UTM. Ground test start fixes exactly three distinct route IDs; route changes do not silently replace the recorded start snapshot.
+Routes are an initially empty user-owned collection. A subroute owns waypoints; a named Multi-Path (large route) explicitly owns an ordered list of one or more subroute IDs and a default subroute. Endpoint similarity is only an optional GUI selection helper. With Multi-Path disabled, navigation and ground tests operate on one selected subroute. Ground-test start freezes the complete selected large route or single route; later edits do not replace that snapshot.
 
-The logger subscribes only. It does not own GPS, I2C, serial, or output control. `GROUND_TEST` mode forces safe PWM in both the supervisor and actuator. CSV/JSONL distinguish command write confirmation from unsupported physical feedback.
+The logger subscribes only. It does not own GPS, I2C, serial, or output control. `GROUND_TEST` mode forces safe PWM in both the supervisor and actuator. CSV/JSONL distinguish command write confirmation from unsupported physical feedback. `route_metrics.csv` is a long-format sample-by-subroute table for post-processing heading-error and route-selection graphs.

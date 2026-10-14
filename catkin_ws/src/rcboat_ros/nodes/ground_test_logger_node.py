@@ -15,20 +15,32 @@ from rcboat_ros.common import pack, unpack
 from rcboat_ros.geo import enrich_waypoints
 
 
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 CSV_FIELDS = [
-    "sample_index", "logger_time_utc", "measurement_time_utc", "gps_received_time_utc",
+    "sample_index", "sample_time_epoch_s", "logger_time_utc", "measurement_time_utc", "gps_received_time_utc",
     "output_time_utc", "elapsed_time_s", "latitude", "longitude", "utm_easting_m",
     "utm_northing_m", "utm_zone", "heading_deg", "heading_source", "speed_mps",
     "course_deg", "gps_fix", "rtk_state", "gps_validity", "gps_healthy", "gps_data_age_s",
     "correction_age_s", "satellites", "hdop", "pdop", "vdop", "hacc_m", "cno_dbhz",
-    "course_quality", "gps_quality_used_json", "selected_route_id", "active_route_id",
+    "course_quality", "gps_quality_used_json", "execution_target_type", "execution_target_id",
+    "execution_target_name", "selected_route_id", "active_route_id", "previous_active_route_id",
     "test_route_ids", "target_waypoint_number", "target_waypoint_index", "distance_to_waypoint_m",
     "cross_track_error_m", "multipath_candidate_id", "multipath_switch", "controller_mode",
-    "target_heading_deg", "heading_error_deg", "desired_steering_pwm", "desired_throttle_pwm",
+    "target_heading_deg", "heading_error_deg", "desired_rudder_angle_deg", "final_rudder_angle_deg",
+    "target_speed_mps", "desired_steering_pwm", "desired_throttle_pwm", "route_candidates_json",
     "final_steering_pwm", "final_throttle_pwm", "actual_steering_pwm", "actual_throttle_pwm",
     "output_send_success", "output_status", "operation_mode", "effective_source",
     "output_locked", "manual_intervention", "estop", "navigation_valid", "logger_state",
+]
+
+ROUTE_METRIC_FIELDS = [
+    "sample_index", "logger_time_utc", "elapsed_time_s", "route_id", "route_name", "is_active",
+    "distance_to_route_m", "cross_track_error_m", "nearest_segment_index", "target_waypoint_number",
+    "target_waypoint_index", "target_latitude", "target_longitude", "target_heading_deg", "heading_error_deg",
+]
+ROUTE_SWITCH_FIELDS = [
+    "sample_index", "logger_time_utc", "elapsed_time_s", "previous_route_id", "new_route_id",
+    "candidate_route_id", "selection_metric",
 ]
 
 
@@ -51,6 +63,10 @@ class Logger:
         self.state = "idle"
         self.last_error = ""
         self.test_route_ids = []
+        self.execution_target_type = ""
+        self.execution_target_id = ""
+        self.execution_target_name = ""
+        self.previous_active_route_id = ""
         root = rospy.get_param("/rcboat/ground_test_log_root", "~/rcboat_ros_data/logs/ground_tests")
         self.root = pathlib.Path(os.path.expanduser(root))
         self.root.mkdir(parents=True, exist_ok=True)
@@ -126,7 +142,8 @@ class Logger:
             if request.action == "start":
                 if self.folder:
                     raise RuntimeError("ground test already recording")
-                self.start(args.get("route_ids", []))
+                self.start(args.get("route_ids", []), args.get("target_type", "single_route"),
+                           args.get("target_id", ""))
                 result = {"folder": str(self.folder), "test_id": self.folder.name}
             elif request.action == "stop":
                 if not self.folder:
@@ -149,8 +166,8 @@ class Logger:
         routes = self.cache.get("route", {}).get("routes", [])
         by_id = {str(route.get("id")): route for route in routes}
         ids = [str(value) for value in route_ids]
-        if len(ids) != 3 or len(set(ids)) != 3:
-            raise ValueError("select exactly 3 distinct reference routes")
+        if not ids or len(ids) != len(set(ids)):
+            raise ValueError("select one or more distinct reference routes")
         missing = [value for value in ids if value not in by_id]
         if missing:
             raise ValueError("reference routes not found: " + ", ".join(missing))
@@ -161,7 +178,7 @@ class Logger:
             selected.append(route)
         return selected
 
-    def start(self, route_ids):
+    def start(self, route_ids, target_type="single_route", target_id=""):
         safety = self.cache.get("safety", {})
         actuator = self.cache.get("actuator", {})
         gps = self.cache.get("gps", {})
@@ -174,6 +191,19 @@ class Logger:
         if not gps.get("healthy"):
             raise RuntimeError("valid, current GPS FIX is required")
         routes = self._reference_routes(route_ids)
+        target_type = str(target_type)
+        target_id = str(target_id)
+        route_state = self.cache.get("route", {})
+        if target_type not in {"multipath", "single_route"}:
+            raise ValueError("target_type must be multipath or single_route")
+        if target_type == "multipath":
+            groups = {str(item.get("id")): item for item in route_state.get("multipaths", [])}
+            if target_id not in groups:
+                raise ValueError("selected multipath was not found")
+            target_name = str(groups[target_id].get("name") or target_id)
+        else:
+            target_id = target_id or str(routes[0].get("id"))
+            target_name = str(routes[0].get("name") or target_id)
         stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
         folder = self.root / ("ground_test_" + stamp)
         suffix = 1
@@ -182,13 +212,25 @@ class Logger:
         folder.mkdir(parents=True)
         self.folder = folder; self.count = 0; self.start_clock = time.monotonic()
         self.state = "recording"; self.last_error = ""; self.test_route_ids = [route["id"] for route in routes]
+        self.execution_target_type = target_type; self.execution_target_id = target_id
+        self.execution_target_name = target_name; self.previous_active_route_id = ""
         self.files["csv"] = (folder / "ground_test.csv").open("w", newline="", encoding="utf-8-sig")
         self.writer = csv.DictWriter(self.files["csv"], fieldnames=CSV_FIELDS, extrasaction="ignore")
         self.writer.writeheader(); self.files["csv"].flush()
+        self.files["route_metrics"] = (folder / "route_metrics.csv").open("w", newline="", encoding="utf-8-sig")
+        self.route_metrics_writer = csv.DictWriter(self.files["route_metrics"], fieldnames=ROUTE_METRIC_FIELDS,
+                                                   extrasaction="ignore")
+        self.route_metrics_writer.writeheader(); self.files["route_metrics"].flush()
+        self.files["route_switches"] = (folder / "route_switches.csv").open("w", newline="", encoding="utf-8-sig")
+        self.route_switches_writer = csv.DictWriter(self.files["route_switches"], fieldnames=ROUTE_SWITCH_FIELDS,
+                                                    extrasaction="ignore")
+        self.route_switches_writer.writeheader(); self.files["route_switches"].flush()
         for key, filename in (("jsonl", "ground_test.jsonl"), ("route_changes", "route_changes.jsonl"),
                               ("events", "events.jsonl")):
             self.files[key] = (folder / filename).open("w", encoding="utf-8")
-        json_dump(folder / "reference_routes.json", {"schema_version": 2, "routes": routes})
+        json_dump(folder / "reference_routes.json", {"schema_version": 3,
+                  "execution_target": {"type": target_type, "id": target_id, "name": target_name},
+                  "routes": routes})
         with (folder / "reference_routes.csv").open("w", newline="", encoding="utf-8-sig") as handle:
             fields = ["route_id", "route_name", "waypoint_number", "latitude", "longitude",
                       "utm_easting_m", "utm_northing_m", "utm_zone"]
@@ -200,8 +242,10 @@ class Logger:
                                      "longitude": point["lon"], "utm_easting_m": point["utm_easting_m"],
                                      "utm_northing_m": point["utm_northing_m"], "utm_zone": point["utm_zone"]})
         metadata = {
-            "schema_version": 2, "software_version": VERSION, "ros_distribution": os.getenv("ROS_DISTRO", "noetic"),
+            "schema_version": 3, "software_version": VERSION, "ros_distribution": os.getenv("ROS_DISTRO", "noetic"),
             "started_at_utc": utc_now(), "test_route_ids": self.test_route_ids,
+            "execution_target_type": target_type, "execution_target_id": target_id,
+            "execution_target_name": target_name, "subroute_count": len(routes),
             "configuration": rospy.get_param("/rcboat", {}),
             "servo_calibration": {key: rospy.get_param("/rcboat/" + key, None) for key in
                                   ("steering_low", "steering_center", "steering_high", "throttle_stop",
@@ -209,8 +253,26 @@ class Logger:
             "safety_note": "Actual PWM fields are commanded values; physical feedback is unsupported.",
         }
         json_dump(folder / "test_metadata.json", metadata)
+        json_dump(folder / "analysis_manifest.json", {
+            "schema_version": 1,
+            "purpose": "MATLAB/QGIS and lecture walking-test graph reconstruction",
+            "datasets": {
+                "ground_test.csv": "one row per time sample: position, heading, speed, command and safety state",
+                "route_metrics.csv": "long format: one row per time sample per candidate subroute",
+                "route_switches.csv": "active subroute transition instants",
+                "reference_routes.csv": "all frozen reference waypoints with WGS84 and UTM coordinates",
+            },
+            "recommended_graphs": [
+                "actual GPS path and all reference subroutes",
+                "desired/final rudder angle versus elapsed time",
+                "per-subroute heading error versus elapsed time",
+                "active subroute bands and switch instants",
+                "target and measured speed versus elapsed time",
+            ],
+        })
         self._write_jsonl("events", {"type": "GROUND_TEST_STARTED", "event_time_utc": utc_now(),
-                                     "test_route_ids": self.test_route_ids})
+                                     "test_route_ids": self.test_route_ids,
+                                     "execution_target_type": target_type, "execution_target_id": target_id})
         self.publish_status()
 
     def sample(self):
@@ -232,13 +294,14 @@ class Logger:
         gps = self.cache.get("gps", {}); nav = self.cache.get("nav", {}); route = self.cache.get("route", {})
         ntrip = self.cache.get("ntrip", {})
         self.count += 1
+        sample_utc = utc_now(); elapsed = round(time.monotonic() - self.start_clock, 3)
         quality = {key: gps.get(key) for key in ("hdop", "pdop", "vdop", "hacc_m", "cno_dbhz",
                                                   "gps_data_age_s", "course_quality", "data_validity")}
         row = {
-            "sample_index": self.count, "logger_time_utc": utc_now(),
+            "sample_index": self.count, "sample_time_epoch_s": round(time.time(), 6), "logger_time_utc": sample_utc,
             "measurement_time_utc": gps.get("measurement_time_utc") or gps.get("utc_time"),
             "gps_received_time_utc": gps.get("received_time_utc"), "output_time_utc": actuator.get("output_time_utc"),
-            "elapsed_time_s": round(time.monotonic() - self.start_clock, 3),
+            "elapsed_time_s": elapsed,
             "latitude": gps.get("latitude"), "longitude": gps.get("longitude"),
             "utm_easting_m": gps.get("utm_easting_m"), "utm_northing_m": gps.get("utm_northing_m"),
             "utm_zone": gps.get("utm_zone"), "heading_deg": gps.get("heading_deg"),
@@ -249,7 +312,10 @@ class Logger:
             "satellites": gps.get("satellites"), "hdop": gps.get("hdop"), "pdop": gps.get("pdop"),
             "vdop": gps.get("vdop"), "hacc_m": gps.get("hacc_m"), "cno_dbhz": gps.get("cno_dbhz"),
             "course_quality": gps.get("course_quality"), "gps_quality_used_json": json.dumps(quality, separators=(",", ":")),
+            "execution_target_type": self.execution_target_type, "execution_target_id": self.execution_target_id,
+            "execution_target_name": self.execution_target_name,
             "selected_route_id": route.get("selected_route_id"), "active_route_id": route.get("active_route_id"),
+            "previous_active_route_id": self.previous_active_route_id,
             "test_route_ids": "|".join(self.test_route_ids),
             "target_waypoint_number": (int(route.get("target_waypoint_index")) + 1) if route.get("target_waypoint_index") is not None else None,
             "target_waypoint_index": route.get("target_waypoint_index"),
@@ -257,8 +323,13 @@ class Logger:
             "cross_track_error_m": route.get("cross_track_error_m"),
             "multipath_candidate_id": route.get("candidate_route_id"), "multipath_switch": route.get("multipath_switch"),
             "controller_mode": nav.get("controller_mode"), "target_heading_deg": nav.get("target_heading_deg"),
-            "heading_error_deg": nav.get("heading_error_deg"), "desired_steering_pwm": nav.get("desired_steering_pwm"),
+            "heading_error_deg": nav.get("heading_error_deg"),
+            "desired_rudder_angle_deg": nav.get("desired_rudder_angle_deg"),
+            "final_rudder_angle_deg": self._rudder_angle(safety.get("steering_pwm")),
+            "target_speed_mps": nav.get("target_speed_mps"),
+            "desired_steering_pwm": nav.get("desired_steering_pwm"),
             "desired_throttle_pwm": nav.get("desired_throttle_pwm"),
+            "route_candidates_json": json.dumps(route.get("route_candidates") or [], separators=(",", ":")),
             "final_steering_pwm": safety.get("steering_pwm"), "final_throttle_pwm": safety.get("throttle_pwm"),
             "actual_steering_pwm": actuator.get("actual_steering_pwm"),
             "actual_throttle_pwm": actuator.get("actual_throttle_pwm"),
@@ -269,7 +340,33 @@ class Logger:
             "estop": safety.get("estop"), "navigation_valid": nav.get("valid"), "logger_state": self.state,
         }
         self.writer.writerow(row); self.files["csv"].flush(); self._write_jsonl("jsonl", row)
+        active_route_id = str(route.get("active_route_id") or "")
+        for metric in route.get("route_candidates") or []:
+            metric_row = dict(metric)
+            metric_row.update(sample_index=self.count, logger_time_utc=sample_utc, elapsed_time_s=elapsed,
+                              is_active=str(metric.get("route_id")) == active_route_id,
+                              target_latitude=metric.get("target_lat"), target_longitude=metric.get("target_lon"))
+            self.route_metrics_writer.writerow(metric_row)
+        self.files["route_metrics"].flush()
+        if self.previous_active_route_id and active_route_id != self.previous_active_route_id:
+            self.route_switches_writer.writerow({
+                "sample_index": self.count, "logger_time_utc": sample_utc, "elapsed_time_s": elapsed,
+                "previous_route_id": self.previous_active_route_id, "new_route_id": active_route_id,
+                "candidate_route_id": route.get("candidate_route_id"),
+                "selection_metric": route.get("selection_metric"),
+            })
+            self.files["route_switches"].flush()
+        self.previous_active_route_id = active_route_id
         self.publish_status()
+
+    @staticmethod
+    def _rudder_angle(pwm):
+        if pwm is None:
+            return None
+        value = float(pwm); center = float(rospy.get_param("/rcboat/steering_center", 6000))
+        low = float(rospy.get_param("/rcboat/steering_low", 4900)); high = float(rospy.get_param("/rcboat/steering_high", 7300))
+        span = high - center if value >= center else center - low
+        return round((value - center) * 45.0 / span, 4) if span else None
 
     def close(self, error=""):
         if not self.folder:
@@ -280,7 +377,7 @@ class Logger:
         for handle in list(self.files.values()):
             try: handle.flush(); handle.close()
             except Exception: pass
-        self.files = {}; self.writer = None
+        self.files = {}; self.writer = None; self.route_metrics_writer = None; self.route_switches_writer = None
         metadata_path = folder / "test_metadata.json"
         try:
             metadata = json.loads(metadata_path.read_text(encoding="utf-8"))

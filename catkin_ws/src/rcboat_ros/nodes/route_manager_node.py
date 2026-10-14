@@ -21,6 +21,8 @@ class Node:
                 settings=json.loads(self.settings_file.read_text(encoding='utf-8'))
                 if 'endpoint_tolerance_m' in settings:
                     self.rm.endpoint_tolerance=float(settings['endpoint_tolerance_m'])
+                if 'enabled' in settings:
+                    self.rm.multipath_enabled=bool(settings['enabled'])
             except (ValueError,OSError) as e:rospy.logwarn('invalid multipath settings %s',e)
         self.gps={}
         self.pub=rospy.Publisher('/rcboat/route/state',String,queue_size=10)
@@ -40,6 +42,22 @@ class Node:
             if action=='select_route':
                 self.rm.select(args['route_id']);result={'route_id':args['route_id']}
                 self.changed('selected',route_id=args['route_id'])
+            elif action=='select_multipath':
+                self.rm.select_multipath(args['multipath_id']);result={'multipath_id':args['multipath_id']}
+                self.changed('multipath_selected',multipath_id=args['multipath_id'])
+            elif action=='upsert_multipath':
+                before=self.rm.multipaths.get(str(args.get('multipath_id') or ''))
+                multipath_id=self.rm.upsert_multipath(args.get('multipath_id'),args.get('name'),
+                    args.get('route_ids',[]),args.get('default_route_id',''))
+                result={'multipath_id':multipath_id,'multipath':self.rm.multipaths[multipath_id]}
+                self.changed('multipath_updated' if before else 'multipath_created',multipath_id=multipath_id,
+                             before=before,after=self.rm.multipaths[multipath_id])
+            elif action=='delete_multipath':
+                multipath_id=str(args['multipath_id']);before=self.rm.multipaths.get(multipath_id,{})
+                self.rm.delete_multipath(multipath_id);result={'multipath_id':multipath_id}
+                self.changed('multipath_deleted',multipath_id=multipath_id,before=before)
+            elif action=='compatible_routes':
+                result={'route_ids':self.rm.compatible_route_ids(args['reference_route_id'])}
             elif action=='delete_route':
                 route_id=str(args['route_id']);old=self.rm.routes.get(route_id,{})
                 self.rm.delete(route_id);result={'route_id':route_id,'deleted_name':old.get('name',route_id)}
@@ -63,14 +81,20 @@ class Node:
                 args.get('minimum_distance_m',1.0),args.get('minimum_interval_s',.5),args.get('arrival_radius_m',3.0))
             elif action=='record_stop':result={'route_id':self.rm.record_stop()}
             elif action=='record_cancel':self.rm.record_cancel()
-            elif action=='list_routes':result={'routes':list(self.rm.routes.values()),'selected_route_id':self.rm.selected}
+            elif action=='list_routes':result={'routes':list(self.rm.routes.values()),'multipaths':list(self.rm.multipaths.values()),
+                'selected_route_id':self.rm.selected,'selected_multipath_id':self.rm.selected_multipath,
+                'multipath_enabled':self.rm.multipath_enabled}
             elif action=='set_multipath':
-                updates={'endpoint_tolerance_m':float(args['endpoint_tolerance_m'])}
-                if any(v<=0 or v>1000 for v in updates.values()):raise ValueError('invalid multipath settings')
+                updates={'enabled':bool(args.get('enabled',self.rm.multipath_enabled)),
+                         'endpoint_tolerance_m':float(args['endpoint_tolerance_m'])}
+                if updates['endpoint_tolerance_m']<=0 or updates['endpoint_tolerance_m']>1000:raise ValueError('invalid multipath settings')
                 self.rm.endpoint_tolerance=updates['endpoint_tolerance_m']
+                self.rm.set_multipath_enabled(updates['enabled'])
                 from rcboat_ros.path_tracking import _atomic_json
                 _atomic_json(self.settings_file,updates)
-                result={'multipath':{'endpoint_tolerance_m':self.rm.endpoint_tolerance,'switch_rule':'nearest_in_group'}}
+                result={'multipath':{'enabled':self.rm.multipath_enabled,
+                                     'endpoint_tolerance_m':self.rm.endpoint_tolerance,
+                                     'switch_rule':'nearest_route_in_named_multipath'}}
                 self.changed('multipath_settings',after=updates)
             else:raise ValueError('unknown route action')
             return ExecuteResponse(True,pack(**result))
@@ -90,9 +114,11 @@ class Node:
             recording=self.rm.recording
             data={'selected_route_id':self.rm.selected,'active_route_id':self.rm.active,
                   'group_routes':list(self.rm.group()),'test_route_ids':list(self.rm.test_route_ids),
-                  'routes':list(self.rm.routes.values()),
-                  'multipath':{'enabled':True,'endpoint_tolerance_m':self.rm.endpoint_tolerance,
-                               'switch_rule':'nearest_in_endpoint_group',
+                  'selected_multipath_id':self.rm.selected_multipath,
+                  'execution_target_type':'multipath' if self.rm.multipath_enabled else 'single_route',
+                  'routes':list(self.rm.routes.values()),'multipaths':list(self.rm.multipaths.values()),
+                  'multipath':{'enabled':self.rm.multipath_enabled,'endpoint_tolerance_m':self.rm.endpoint_tolerance,
+                               'switch_rule':'nearest_route_in_named_multipath',
                                'off_route_gate':False,'priority_gate':False,'cooldown_gate':False},
                   'recording':{'active':recording is not None,
                                'name':(recording or {}).get('name',''),
@@ -104,7 +130,8 @@ class Node:
                                'latest_sample':((recording or {}).get('waypoints') or [None])[-1]}}
             if self.gps.get('healthy') and self.rm.selected:
                 try:
-                    data.update(self.rm.update((float(self.gps['latitude']),float(self.gps['longitude']))))
+                    data.update(self.rm.update((float(self.gps['latitude']),float(self.gps['longitude'])),
+                                               self.gps.get('heading_deg')))
                     if self.rm.recording is not None:
                         self.rm.record_point(float(self.gps['latitude']),float(self.gps['longitude']),
                                              self.gps.get('heading_deg'))

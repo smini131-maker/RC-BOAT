@@ -49,6 +49,7 @@ class Navigation:
         while not rospy.is_shutdown():
             out={'valid':False,'desired_steering_pwm':6000,'desired_throttle_pwm':6450,
                  'desired_rudder_angle_deg':0,'controller_mode':self.config['tracking_mode'],
+                 'target_speed_mps':float(self.config['target_speed_mps']),
                  'auto_cruise_pwm':int(self.config['cruise_pwm']),
                  'monotonic':time.monotonic()}
             if self.gps.get('healthy') and 'target_lat' in self.route and self.gps.get('heading_deg') is not None:

@@ -21,6 +21,10 @@ class MockWorker(QThread):
         {"id": "training_b", "name": "훈련 경로 B", "waypoints": [{"lat": 35.07802, "lon": 129.08608}, {"lat": 35.07813, "lon": 129.08623}, {"lat": 35.07826, "lon": 129.08638}]},
         {"id": "training_c", "name": "훈련 경로 C", "waypoints": [{"lat": 35.07798, "lon": 129.08592}, {"lat": 35.07811, "lon": 129.08607}, {"lat": 35.07822, "lon": 129.08622}]},
     ]
+    MULTIPATHS = [
+        {"id": "training_set_a", "name": "훈련 대루트 A",
+         "route_ids": ["training_a", "training_b", "training_c"], "default_route_id": "training_a"},
+    ]
 
     def __init__(self):
         super().__init__()
@@ -38,6 +42,8 @@ class MockWorker(QThread):
         self.failsafe_reason = ""
         self.auto_cruise_pwm = 6650
         self.routes = deepcopy(self.ROUTES)
+        self.multipaths = deepcopy(self.MULTIPATHS)
+        self.selected_multipath_id = "training_set_a"
         self.gps_recording = False
         self.gps_recording_name = ""
         self.gps_recording_points: list[dict[str, float]] = []
@@ -45,7 +51,7 @@ class MockWorker(QThread):
         self.ground_test_samples = 0
         self.multipath = {
             "enabled": True, "endpoint_tolerance_m": 0.75,
-            "switch_rule": "nearest_in_endpoint_group",
+            "switch_rule": "nearest_route_in_named_multipath",
             "off_route_gate": False, "priority_gate": False, "cooldown_gate": False,
         }
         self.recording_minimum_distance_m = 1.0
@@ -137,6 +143,28 @@ class MockWorker(QThread):
                     raise ValueError(f"unknown route: {route_id}")
                 self.selected_route_id = route_id
                 self.active_route_id = route_id
+            elif command == "SELECT_MULTIPATH":
+                multipath_id = str(kwargs["multipath_id"])
+                group = next((item for item in self.multipaths if item["id"] == multipath_id), None)
+                if not group: raise ValueError(f"unknown multipath: {multipath_id}")
+                self.selected_multipath_id = multipath_id
+                self.selected_route_id = self.active_route_id = group.get("default_route_id") or group["route_ids"][0]
+            elif command == "UPSERT_MULTIPATH":
+                multipath_id = str(kwargs.get("multipath_id") or f"multipath_{int(time.time())}")
+                route_ids = list(dict.fromkeys(str(value) for value in kwargs.get("route_ids") or []))
+                known = {route["id"] for route in self.routes}
+                if not route_ids or any(value not in known for value in route_ids):
+                    raise ValueError("select valid subroutes")
+                item = {"id": multipath_id, "name": str(kwargs["name"]), "route_ids": route_ids,
+                        "default_route_id": str(kwargs.get("default_route_id") or route_ids[0])}
+                self.multipaths = [item if group["id"] == multipath_id else group for group in self.multipaths]
+                if not any(group["id"] == multipath_id for group in self.multipaths): self.multipaths.append(item)
+                self.selected_multipath_id = multipath_id
+            elif command == "DELETE_MULTIPATH":
+                multipath_id = str(kwargs["multipath_id"])
+                self.multipaths = [item for item in self.multipaths if item["id"] != multipath_id]
+                if self.selected_multipath_id == multipath_id:
+                    self.selected_multipath_id = self.multipaths[0]["id"] if self.multipaths else ""
             elif command == "UPSERT_ROUTE":
                 route_id = str(kwargs.get("route_id") or f"route_{int(time.time())}")
                 item = {"id": route_id, "name": str(kwargs["name"]),
@@ -147,6 +175,11 @@ class MockWorker(QThread):
                 self.selected_route_id = self.active_route_id = route_id
             elif command == "DELETE_ROUTE":
                 route_id = str(kwargs["route_id"]); self.routes = [route for route in self.routes if route["id"] != route_id]
+                for group in self.multipaths:
+                    group["route_ids"] = [value for value in group["route_ids"] if value != route_id]
+                    if group.get("default_route_id") == route_id:
+                        group["default_route_id"] = group["route_ids"][0] if group["route_ids"] else ""
+                self.multipaths = [group for group in self.multipaths if group["route_ids"]]
                 self.selected_route_id = self.active_route_id = self.routes[0]["id"] if self.routes else ""
             elif command == "START_GPS_RECORDING":
                 name = " ".join(str(kwargs.get("name", "")).strip().split())
@@ -220,6 +253,17 @@ class MockWorker(QThread):
                     raise ValueError("unknown GPS scenario")
                 self.gps_scenario = scenario
             elif command == "GROUND_TEST_START":
+                target_type = str(kwargs.get("target_type") or "")
+                target_id = str(kwargs.get("target_id") or "")
+                if target_type == "multipath":
+                    group = next((item for item in self.multipaths if item["id"] == target_id), None)
+                    if not group: raise ValueError("select a saved multipath")
+                    self.selected_multipath_id = target_id; self.multipath["enabled"] = True
+                    self.selected_route_id = self.active_route_id = group.get("default_route_id") or group["route_ids"][0]
+                elif target_type == "single_route":
+                    if target_id not in {route["id"] for route in self.routes}: raise ValueError("select a saved subroute")
+                    self.multipath["enabled"] = False; self.selected_route_id = self.active_route_id = target_id
+                else: raise ValueError("select a ground-test target")
                 self.ground_test_active = True
                 self.ground_test_samples = 0
                 self.mode = "GROUND_TEST"
@@ -341,8 +385,19 @@ class MockWorker(QThread):
                     "pca": {"frequency_hz": 60, "steering_channel": 0, "throttle_channel": 6, "steering_pwm": self.steering, "throttle_pwm": self.throttle},
                     "gps": self._gps_telemetry(t, lat, lon),
                     "devices": {"arduino": self.arduino_connected, "gps": self.gps_connected, "pca9685": True},
-                    "route": {"selected_route_id": self.selected_route_id, "selected_route_name": selected["name"], "active_route_id": self.active_route_id, "active_route_name": active["name"], "waypoint_index": 0, "waypoint_count": 3, "distance_to_waypoint_m": 5.4, "distance_to_route_m": 1.1, "route_complete": False, "load_error": "", "multipath": dict(self.multipath), "multipath_group_route_ids": [route["id"] for route in self.routes], "alternative_route_id": next((route["id"] for route in self.routes if route["id"] != self.active_route_id), ""), "off_route_duration_s": 0.0},
+                    "route": {"selected_route_id": self.selected_route_id, "selected_route_name": selected["name"],
+                              "selected_multipath_id": self.selected_multipath_id,
+                              "execution_target_type": "multipath" if self.multipath["enabled"] else "single_route",
+                              "active_route_id": self.active_route_id, "active_route_name": active["name"],
+                              "waypoint_index": 0, "waypoint_count": 3, "distance_to_waypoint_m": 5.4,
+                              "distance_to_route_m": 1.1, "route_complete": False, "load_error": "",
+                              "multipath": dict(self.multipath),
+                              "multipath_group_route_ids": next((group["route_ids"] for group in self.multipaths
+                                                                 if group["id"] == self.selected_multipath_id), [self.selected_route_id]),
+                              "route_candidates": [],
+                              "alternative_route_id": next((route["id"] for route in self.routes if route["id"] != self.active_route_id), ""), "off_route_duration_s": 0.0},
                     "routes": self.routes,
+                    "multipaths": self.multipaths,
                     "ground_tests": [{"id": "ground_test_SIMULATION", "sample_count": 120, "complete": True}],
                     "hardware_errors": [],
                     "events": [],

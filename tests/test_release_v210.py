@@ -15,11 +15,12 @@ from rcboat_ros.geo import enrich_waypoints, latlon_to_utm
 from rcboat_ros.path_tracking import RouteManager
 
 
-class ReleaseV200(unittest.TestCase):
+class ReleaseV210(unittest.TestCase):
     def test_release_identity_and_empty_default_routes(self):
-        self.assertEqual((ROOT / "VERSION").read_text().strip(), "2.0.0")
+        self.assertEqual((ROOT / "VERSION").read_text().strip(), "2.1.0")
         routes = json.loads((ROOT / "catkin_ws/src/rcboat_ros/config/routes.json").read_text())
         self.assertEqual(routes["routes"], [])
+        self.assertEqual(routes["multipaths"], [])
         self.assertEqual(routes["selected_route_id"], "")
 
     def test_manual_route_crud_and_utm_persistence(self):
@@ -41,7 +42,7 @@ class ReleaseV200(unittest.TestCase):
             manager.delete(route_id)
             self.assertEqual(manager.routes, {})
 
-    def test_exactly_three_test_routes_and_no_auto_generation(self):
+    def test_named_multipath_supports_n_routes_without_endpoint_constraint(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "routes.json"
             routes = []
@@ -49,12 +50,51 @@ class ReleaseV200(unittest.TestCase):
                 routes.append({"id": name, "name": name, "waypoints": [
                     {"lat": 35.0, "lon": 129.0 + index * 1e-7},
                     {"lat": 35.001, "lon": 129.001 + index * 1e-7}]})
-            path.write_text(json.dumps({"selected_route_id": "A", "routes": routes}))
+            path.write_text(json.dumps({"schema_version": 3, "selected_route_id": "A",
+                                        "selected_multipath_id": "", "multipath_enabled": True,
+                                        "multipaths": [], "routes": routes}))
             manager = RouteManager(path)
-            with self.assertRaises(ValueError): manager.set_test_route_ids(["A", "B"])
-            manager.set_test_route_ids(["A", "B", "C"])
-            self.assertEqual(set(manager.group()), {"A", "B", "C"})
+            multipath_id = manager.upsert_multipath("", "대루트 A", ["A", "B", "C"], "B")
+            manager.select_multipath(multipath_id)
+            self.assertEqual(list(manager.group()), ["A", "B", "C"])
             self.assertNotIn("D", manager.group())
+            manager.set_test_route_ids(["A", "B"])
+            self.assertEqual(list(manager.group()), ["A", "B"])
+            manager.set_test_route_ids([])
+            manager.set_multipath_enabled(False)
+            self.assertEqual(list(manager.group()), ["B"])
+
+    def test_endpoint_compatibility_is_only_an_optional_helper(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "routes.json"
+            routes = [
+                {"id": "near", "name": "near", "waypoints": [{"lat": 35, "lon": 129}, {"lat": 35.001, "lon": 129.001}]},
+                {"id": "far", "name": "far", "waypoints": [{"lat": 36, "lon": 130}, {"lat": 36.001, "lon": 130.001}]},
+            ]
+            path.write_text(json.dumps({"selected_route_id": "near", "routes": routes}))
+            manager = RouteManager(path)
+            self.assertEqual(manager.compatible_route_ids("near"), ["near"])
+            group_id = manager.upsert_multipath("", "mixed", ["near", "far"], "near")
+            manager.select_multipath(group_id)
+            self.assertEqual(set(manager.group()), {"near", "far"})
+
+    def test_route_update_emits_per_subroute_graph_metrics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "routes.json"
+            routes = [
+                {"id": "a", "name": "A", "waypoints": [{"lat": 35, "lon": 129}, {"lat": 35.001, "lon": 129}]},
+                {"id": "b", "name": "B", "waypoints": [{"lat": 35, "lon": 129.001}, {"lat": 35.001, "lon": 129.001}]},
+            ]
+            path.write_text(json.dumps({"selected_route_id": "a", "routes": routes}))
+            manager = RouteManager(path)
+            group_id = manager.upsert_multipath("", "A", ["a", "b"], "a")
+            manager.select_multipath(group_id)
+            state = manager.update((35.0002, 129.0002), heading=10.0)
+            self.assertEqual(len(state["route_candidates"]), 2)
+            for metric in state["route_candidates"]:
+                for key in ("distance_to_route_m", "cross_track_error_m", "target_waypoint_number",
+                            "target_heading_deg", "heading_error_deg"):
+                    self.assertIn(key, metric)
 
     def test_utm_is_plausible_and_not_placeholder_zero(self):
         easting, northing, zone = latlon_to_utm(35.0, 129.0)
@@ -67,11 +107,14 @@ class ReleaseV200(unittest.TestCase):
         source = (ROOT / "catkin_ws/src/rcboat_ros/nodes/ground_test_logger_node.py").read_text(encoding="utf-8")
         for filename in ("ground_test.csv", "ground_test.jsonl", "reference_routes.csv",
                          "reference_routes.json", "route_changes.jsonl", "events.jsonl",
-                         "test_metadata.json", "export_manifest.json"):
+                         "test_metadata.json", "export_manifest.json", "route_metrics.csv",
+                         "route_switches.csv", "analysis_manifest.json"):
             self.assertIn(filename, source)
         for field in ("measurement_time_utc", "output_time_utc", "heading_source", "gps_data_age_s",
                       "correction_age_s", "gps_quality_used_json", "target_waypoint_number",
-                      "output_send_success", "manual_intervention", "output_locked"):
+                      "output_send_success", "manual_intervention", "output_locked",
+                      "desired_rudder_angle_deg", "target_speed_mps", "route_candidates_json",
+                      "execution_target_type"):
             self.assertIn(field, source)
         self.assertIn("already_stopped", source)
         self.assertIn("LOGGER_RESTART_DETECTED", source)
@@ -101,6 +144,15 @@ class ReleaseV200(unittest.TestCase):
         gui = (ROOT / "windows_gui/rcboat_gui/main_window.py").read_text(encoding="utf-8")
         for label in ("SSH 연결", "ROS master", "ROS gateway", "Logger", "GPS", "RTK"):
             self.assertIn(label, gui)
+
+    def test_gui_supports_large_route_and_single_route_targets(self):
+        gui = (ROOT / "windows_gui/rcboat_gui/main_window.py").read_text(encoding="utf-8")
+        bridge = (ROOT / "catkin_ws/src/rcboat_ros/nodes/gui_bridge_node.py").read_text(encoding="utf-8")
+        for token in ("대루트 추가", "UPSERT_MULTIPATH", "DELETE_MULTIPATH", "single_route",
+                      "공통 출발·도착인 항로 자동 체크"):
+            self.assertIn(token, gui)
+        self.assertIn('target_type=="multipath"', bridge)
+        self.assertIn('target_type=="single_route"', bridge)
 
     def test_no_formal_daemon_fallback_or_secret_file(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")

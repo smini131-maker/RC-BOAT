@@ -1,8 +1,8 @@
-name: ROS Noetic v2.0.0 regression
+name: ROS Noetic v2.1.0 regression
 
 on:
   push:
-    branches: [main, release/2.0.0]
+    branches: [main, release/2.1.0]
   pull_request:
 
 jobs:

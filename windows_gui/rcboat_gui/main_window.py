@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import html
 import json
+import math
 import os
 import sys
 from pathlib import Path
@@ -23,6 +24,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -44,7 +47,7 @@ from .ssh_worker import SSHWorker
 from .widgets import MetricCard, RoutePlot, StatusCard, TelemetryGraph
 
 
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.1.0"
 
 
 STYLE = """
@@ -102,6 +105,7 @@ class MainWindow(QMainWindow):
         self.last_hardware_errors: tuple[str, ...] = ()
         self.pending_route_id: str | None = None
         self.pending_route_start_request: str | None = None
+        self.pending_multipath_start_request: str | None = None
         self.current_mode = "MANUAL"
         self._mode_dirty = False
         self._syncing_mode = False
@@ -121,6 +125,7 @@ class MainWindow(QMainWindow):
         self._last_ntrip_status_signature: tuple | None = None
         self._ntrip_received_corrections = False
         self._latest_routes: list[dict] = []
+        self._latest_multipaths: list[dict] = []
         self._route_layer_signature: tuple[tuple[str, str], ...] = ()
         self.route_layer_checks: dict[str, QCheckBox] = {}
         self._remote_keys: set[int] = set()
@@ -292,7 +297,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.setSpacing(10)
 
-        operation_box = QGroupBox("항로 선택 · 운항")
+        operation_box = QGroupBox("소루트 관리 · 단일 소루트 운항")
         operation_layout = QGridLayout(operation_box)
         self.route_combo = QComboBox()
         self.route_combo.setMinimumWidth(240)
@@ -304,7 +309,7 @@ class MainWindow(QMainWindow):
         )
         self.route_select_button.clicked.connect(self.select_route)
 
-        self.route_start_button = QPushButton("이 항로로 운항 시작")
+        self.route_start_button = QPushButton("이 소루트로 단일 운항 시작")
         self.route_start_button.setIcon(
             self.style().standardIcon(QStyle.SP_MediaPlay)
         )
@@ -332,7 +337,7 @@ class MainWindow(QMainWindow):
         )
         reload_button.clicked.connect(lambda: self.command("RELOAD_ROUTES"))
 
-        operation_layout.addWidget(QLabel("주행 항로"), 0, 0)
+        operation_layout.addWidget(QLabel("소루트"), 0, 0)
         operation_layout.addWidget(self.route_combo, 0, 1)
         operation_layout.addWidget(self.route_select_button, 0, 2)
         operation_layout.addWidget(self.route_start_button, 0, 3)
@@ -412,10 +417,30 @@ class MainWindow(QMainWindow):
 
         self.route_plot = RoutePlot()
 
-        multipath_group_box = QGroupBox("Multi-Path 묶음 상태")
+        multipath_group_box = QGroupBox("대루트 (Multi-Path) 관리 · 운항")
         multipath_group_layout = QVBoxLayout(multipath_group_box)
+        multipath_controls = QHBoxLayout()
+        self.multipath_combo = QComboBox(); self.multipath_combo.setMinimumWidth(240)
+        self.multipath_select_button = QPushButton("대루트 선택")
+        self.multipath_select_button.clicked.connect(self.select_multipath)
+        self.multipath_start_button = QPushButton("이 대루트로 운항 시작")
+        self.multipath_start_button.setObjectName("safe")
+        self.multipath_start_button.clicked.connect(self.start_selected_multipath)
+        self.multipath_add_button = QPushButton("대루트 추가")
+        self.multipath_add_button.clicked.connect(lambda: self.edit_multipath(None))
+        self.multipath_edit_button = QPushButton("대루트 수정")
+        self.multipath_edit_button.clicked.connect(lambda: self.edit_multipath(self._selected_multipath_payload()))
+        self.multipath_delete_button = QPushButton("대루트 삭제")
+        self.multipath_delete_button.setObjectName("danger")
+        self.multipath_delete_button.clicked.connect(self.delete_selected_multipath)
+        for widget in (QLabel("대루트"), self.multipath_combo, self.multipath_select_button,
+                       self.multipath_start_button, self.multipath_add_button,
+                       self.multipath_edit_button, self.multipath_delete_button):
+            multipath_controls.addWidget(widget)
+        multipath_controls.addStretch(1)
+        multipath_group_layout.addLayout(multipath_controls)
         self.multipath_group_status = QLabel(
-            "선택 항로 기준으로 시작점·도착점이 허용거리 안에 겹치는 경로를 자동으로 묶습니다."
+            "저장한 소루트를 원하는 개수만큼 직접 묶어 대루트를 만드세요."
         )
         self.multipath_group_status.setWordWrap(True)
         self.multipath_group_status.setStyleSheet(
@@ -423,16 +448,16 @@ class MainWindow(QMainWindow):
             "padding:9px 12px; font-weight:700;"
         )
         multipath_group_hint = QLabel(
-            "현재 활성 경로는 보트 위치와 가장 가까운 그룹 경로로 자동 전환될 수 있습니다."
+            "공통 출발·도착 자동 선택은 편집 도움 기능일 뿐이며, 저장된 대루트 구성은 사용자가 결정합니다."
         )
         multipath_group_hint.setWordWrap(True)
         multipath_group_hint.setObjectName("sectionHint")
         multipath_group_layout.addWidget(self.multipath_group_status)
         multipath_group_layout.addWidget(multipath_group_hint)
 
-        multipath_box = QGroupBox("Multi-Path 기준 (R11 호환)")
+        multipath_box = QGroupBox("대루트 실행 설정")
         multipath_layout = QGridLayout(multipath_box)
-        self.multipath_enabled = QCheckBox("사용")
+        self.multipath_enabled = QCheckBox("대루트 운항 사용")
         self.multipath_enabled.setChecked(True)
         self.multipath_endpoint = self._distance_spin(0.10, 1.00, 0.75, 0.05, " m")
         self.multipath_off_distance = self._distance_spin(0.0, 100.0, 0.0, 0.5, " m")
@@ -454,18 +479,14 @@ class MainWindow(QMainWindow):
         self.multipath_status.setObjectName("sectionHint")
         multipath_layout.addWidget(self.multipath_enabled, 0, 0)
         for column, (label, widget) in enumerate((
-            ("공통 출발·도착 허용", self.multipath_endpoint),
-            ("이탈 거리(무시)", self.multipath_off_distance),
-            ("이탈 지속(무시)", self.multipath_hold),
-            ("경로 우위(무시)", self.multipath_advantage),
-            ("전환 대기(무시)", self.multipath_cooldown),
+            ("자동 편성 도움 허용거리", self.multipath_endpoint),
         ), 1):
             box = QVBoxLayout()
             box.addWidget(QLabel(label))
             box.addWidget(widget)
             multipath_layout.addLayout(box, 0, column)
-        multipath_layout.addWidget(self.multipath_apply, 0, 6)
-        multipath_layout.addWidget(self.multipath_status, 1, 0, 1, 7)
+        multipath_layout.addWidget(self.multipath_apply, 0, 2)
+        multipath_layout.addWidget(self.multipath_status, 1, 0, 1, 3)
         for widget in (
             self.multipath_enabled,
             self.multipath_endpoint,
@@ -752,13 +773,15 @@ class MainWindow(QMainWindow):
         )
         warning.setWordWrap(True)
         warning.setStyleSheet("color:#f8bd58; font-weight:700")
-        route_set_box = QGroupBox("시험할 Multi-Path 기준 항로 3개")
+        route_set_box = QGroupBox("도보 테스트 실행 대상")
         route_set_layout = QHBoxLayout(route_set_box)
-        self.ground_route_combos = []
-        for index in range(3):
-            combo = QComboBox(); combo.setMinimumWidth(200)
-            self.ground_route_combos.append(combo)
-            route_set_layout.addWidget(QLabel(f"기준 {index + 1}")); route_set_layout.addWidget(combo)
+        self.ground_target_type = QComboBox()
+        self.ground_target_type.addItem("대루트 (Multi-Path)", "multipath")
+        self.ground_target_type.addItem("소루트 (단일)", "single_route")
+        self.ground_target_type.currentIndexChanged.connect(self._refresh_ground_targets)
+        self.ground_target_combo = QComboBox(); self.ground_target_combo.setMinimumWidth(260)
+        route_set_layout.addWidget(QLabel("실행 방식")); route_set_layout.addWidget(self.ground_target_type)
+        route_set_layout.addWidget(QLabel("시험 대상")); route_set_layout.addWidget(self.ground_target_combo)
         route_set_layout.addStretch(1)
         controls = QHBoxLayout()
         self.ground_start_button = QPushButton("도보 테스트 시작")
@@ -1232,6 +1255,98 @@ class MainWindow(QMainWindow):
                 return route
         return None
 
+    def _selected_multipath_payload(self) -> dict | None:
+        multipath_id = self.multipath_combo.currentData()
+        for item in self._latest_multipaths:
+            if str(item.get("id") or "") == str(multipath_id or ""):
+                return item
+        return None
+
+    def select_multipath(self) -> None:
+        multipath_id = self.multipath_combo.currentData()
+        if multipath_id:
+            self.command("SELECT_MULTIPATH", multipath_id=multipath_id)
+
+    @staticmethod
+    def _endpoint_gap_m(first: dict, second: dict) -> float:
+        lat1, lon1 = math.radians(float(first["lat"])), math.radians(float(first["lon"]))
+        lat2, lon2 = math.radians(float(second["lat"])), math.radians(float(second["lon"]))
+        dlat, dlon = lat2 - lat1, lon2 - lon1
+        value = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+        return 6371000.0 * 2 * math.atan2(math.sqrt(value), math.sqrt(1 - value))
+
+    def edit_multipath(self, multipath: dict | None) -> None:
+        if not self._latest_routes:
+            QMessageBox.warning(self, "소루트 없음", "먼저 하나 이상의 소루트를 저장하세요.")
+            return
+        dialog = QDialog(self); dialog.setWindowTitle("대루트 수정" if multipath else "대루트 추가")
+        dialog.resize(560, 560); layout = QVBoxLayout(dialog)
+        form = QFormLayout(); name = QLineEdit(str((multipath or {}).get("name") or ""))
+        default_route = QComboBox()
+        for route in self._latest_routes:
+            default_route.addItem(str(route.get("name") or route.get("id")), str(route.get("id")))
+        default_index = default_route.findData(str((multipath or {}).get("default_route_id") or ""))
+        if default_index >= 0: default_route.setCurrentIndex(default_index)
+        form.addRow("대루트 이름", name); form.addRow("기본 소루트", default_route); layout.addLayout(form)
+        layout.addWidget(QLabel("포함할 소루트 (1개 이상, 개수 제한 없음)"))
+        route_list = QListWidget(); selected_ids = {str(value) for value in (multipath or {}).get("route_ids", [])}
+        for route in self._latest_routes:
+            item = QListWidgetItem(str(route.get("name") or route.get("id")))
+            item.setData(Qt.UserRole, str(route.get("id")))
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked if str(route.get("id")) in selected_ids else Qt.Unchecked)
+            route_list.addItem(item)
+        layout.addWidget(route_list, 1)
+        auto_button = QPushButton("기본 소루트와 공통 출발·도착인 항로 자동 체크")
+        def auto_check() -> None:
+            base = next((r for r in self._latest_routes if str(r.get("id")) == str(default_route.currentData())), None)
+            if not base or not base.get("waypoints"): return
+            tolerance = self.multipath_endpoint.value()
+            for index in range(route_list.count()):
+                item = route_list.item(index)
+                route = next((r for r in self._latest_routes if str(r.get("id")) == str(item.data(Qt.UserRole))), None)
+                points = (route or {}).get("waypoints") or []
+                compatible = bool(points) and self._endpoint_gap_m(base["waypoints"][0], points[0]) <= tolerance \
+                    and self._endpoint_gap_m(base["waypoints"][-1], points[-1]) <= tolerance
+                item.setCheckState(Qt.Checked if compatible else Qt.Unchecked)
+        auto_button.clicked.connect(auto_check); layout.addWidget(auto_button)
+        hint = QLabel("자동 체크 후에도 항목을 자유롭게 추가·해제할 수 있습니다. 공통 끝점은 저장 조건이 아닙니다.")
+        hint.setObjectName("sectionHint"); hint.setWordWrap(True); layout.addWidget(hint)
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept); buttons.rejected.connect(dialog.reject); layout.addWidget(buttons)
+        if dialog.exec() != QDialog.Accepted: return
+        route_ids = [str(route_list.item(i).data(Qt.UserRole)) for i in range(route_list.count())
+                     if route_list.item(i).checkState() == Qt.Checked]
+        clean_name = " ".join(name.text().split())
+        if not clean_name or not route_ids:
+            QMessageBox.warning(self, "대루트 입력 오류", "이름과 하나 이상의 소루트를 지정하세요."); return
+        default_id = str(default_route.currentData() or "")
+        if default_id not in route_ids: default_id = route_ids[0]
+        self.command("UPSERT_MULTIPATH", multipath_id=str((multipath or {}).get("id") or ""),
+                     name=clean_name, route_ids=route_ids, default_route_id=default_id)
+
+    def delete_selected_multipath(self) -> None:
+        item = self._selected_multipath_payload()
+        if not item: return
+        if QMessageBox.warning(self, "대루트 삭제", f"'{item.get('name')}' 대루트 묶음을 삭제할까요?\n소루트 자체는 삭제되지 않습니다.",
+                               QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes:
+            self.command("DELETE_MULTIPATH", multipath_id=str(item.get("id")))
+
+    def _refresh_ground_targets(self) -> None:
+        if not hasattr(self, "ground_target_combo"): return
+        source = self._latest_multipaths if self.ground_target_type.currentData() == "multipath" else self._latest_routes
+        incoming = [str(item.get("id") or "") for item in source]
+        existing = [str(self.ground_target_combo.itemData(i) or "") for i in range(self.ground_target_combo.count())]
+        if incoming == existing: return
+        current = self.ground_target_combo.currentData(); self.ground_target_combo.clear()
+        for item in source:
+            label = str(item.get("name") or item.get("id"))
+            if self.ground_target_type.currentData() == "multipath":
+                label += f" · {len(item.get('route_ids') or [])}개 소루트"
+            self.ground_target_combo.addItem(label, str(item.get("id")))
+        index = self.ground_target_combo.findData(current)
+        if index >= 0: self.ground_target_combo.setCurrentIndex(index)
+
     def _update_route_action_state(self) -> None:
         route = self._selected_route_payload()
         has_route = route is not None
@@ -1548,9 +1663,10 @@ class MainWindow(QMainWindow):
         self.command("CANCEL_GPS_RECORDING")
 
     def start_ground_test(self) -> None:
-        route_ids = [str(combo.currentData() or "") for combo in self.ground_route_combos]
-        if len(set(route_ids)) != 3 or any(not route_id for route_id in route_ids):
-            QMessageBox.warning(self, "기준 항로 선택", "서로 다른 기준 항로 3개를 선택하세요.")
+        target_type = str(self.ground_target_type.currentData() or "")
+        target_id = str(self.ground_target_combo.currentData() or "")
+        if not target_id:
+            QMessageBox.warning(self, "시험 대상 선택", "저장된 대루트 또는 소루트를 선택하세요.")
             return
         answer = QMessageBox.warning(
             self,
@@ -1561,7 +1677,7 @@ class MainWindow(QMainWindow):
             QMessageBox.No,
         )
         if answer == QMessageBox.Yes:
-            self.command("GROUND_TEST_START", route_ids=route_ids)
+            self.command("GROUND_TEST_START", target_type=target_type, target_id=target_id)
 
     def download_ground_results(self) -> None:
         categories = self._selected_ground_download_categories()
@@ -1584,11 +1700,27 @@ class MainWindow(QMainWindow):
             return
         if self.current_mode == "REMOTE":
             self._release_remote_controls()
+        self.command("SET_MULTIPATH", enabled=False,
+                     endpoint_tolerance_m=self.multipath_endpoint.value())
         self.pending_route_id = str(route_id)
         request_id = self.command("SELECT_ROUTE", route_id=route_id)
         if request_id is not None:
             self.pending_route_start_request = request_id
             self.log("선택한 항로를 확인한 뒤 GPS 운행을 시작합니다")
+
+    def start_selected_multipath(self) -> None:
+        multipath_id = self.multipath_combo.currentData()
+        if not multipath_id:
+            QMessageBox.warning(self, "대루트 없음", "먼저 운행할 대루트를 선택하세요.")
+            return
+        if self.current_mode == "REMOTE":
+            self._release_remote_controls()
+        self.command("SET_MULTIPATH", enabled=True,
+                     endpoint_tolerance_m=self.multipath_endpoint.value())
+        request_id = self.command("SELECT_MULTIPATH", multipath_id=multipath_id)
+        if request_id is not None:
+            self.pending_multipath_start_request = request_id
+            self.log("대루트 구성을 확인한 뒤 GPS 운행을 시작합니다")
 
     def on_ack(self, ack: dict) -> None:
         if ack.get("ok"):
@@ -1605,6 +1737,13 @@ class MainWindow(QMainWindow):
                 and ack.get("request_id") == self.pending_route_start_request
             ):
                 self.pending_route_start_request = None
+                self._request_mode("NAVIGATION")
+            if (
+                ack.get("command") == "SELECT_MULTIPATH"
+                and self.pending_multipath_start_request is not None
+                and ack.get("request_id") == self.pending_multipath_start_request
+            ):
+                self.pending_multipath_start_request = None
                 self._request_mode("NAVIGATION")
             if ack.get("command") == "SET_AUTO_CRUISE_PWM":
                 self._auto_speed_dirty = False
@@ -1683,6 +1822,9 @@ class MainWindow(QMainWindow):
                 )
                 if ack.get("request_id") == self.pending_route_start_request:
                     self.pending_route_start_request = None
+            if (ack.get("command") == "SELECT_MULTIPATH"
+                    and ack.get("request_id") == self.pending_multipath_start_request):
+                self.pending_multipath_start_request = None
             if ack.get("request_id") == self._pending_mode_request:
                 self._pending_mode_request = None
                 self._pending_mode_target = None
@@ -2234,14 +2376,18 @@ class MainWindow(QMainWindow):
                     self.route_combo.setCurrentIndex(desired_index)
             finally:
                 self._syncing_route = False
-        for combo_index, combo in enumerate(self.ground_route_combos):
-            current = combo.currentData()
-            if [combo.itemData(i) for i in range(combo.count())] != incoming_ids:
-                combo.clear()
-                for item in routes:
-                    combo.addItem(item.get("name", item.get("id", "route")), item.get("id"))
-                target = combo.findData(current)
-                combo.setCurrentIndex(target if target >= 0 else min(combo_index, combo.count() - 1))
+        multipaths = state.get("multipaths") or []
+        self._latest_multipaths = [dict(item) for item in multipaths]
+        incoming_multipath_ids = [str(item.get("id") or "") for item in multipaths]
+        if [str(self.multipath_combo.itemData(i) or "") for i in range(self.multipath_combo.count())] != incoming_multipath_ids:
+            current_multipath = self.multipath_combo.currentData() or route.get("selected_multipath_id")
+            self.multipath_combo.clear()
+            for item in multipaths:
+                self.multipath_combo.addItem(f"{item.get('name', item.get('id'))} · {len(item.get('route_ids') or [])}개",
+                                             item.get("id"))
+            index = self.multipath_combo.findData(current_multipath)
+            if index >= 0: self.multipath_combo.setCurrentIndex(index)
+        self._refresh_ground_targets()
         tests = state.get("ground_tests") or []
         test_ids = [str(item.get("id") or "") for item in tests if item.get("complete")]
         existing_tests = [self.ground_test_combo.itemData(i) for i in range(1, self.ground_test_combo.count())]
@@ -2273,31 +2419,15 @@ class MainWindow(QMainWindow):
         selected_name = route.get("selected_route_name", route.get("active_route_name", "-"))
         active_name = route.get("active_route_name", "-")
         route_error = route.get("load_error")
-        multipath_group = route.get("multipath_group") or {}
-        group_items = multipath_group.get("routes") or []
-        group_ids = [str(item.get("id") or "") for item in group_items] or (
-            route.get("multipath_group_route_ids") or []
-        )
-        group_names = [
-            str(item.get("name") or item.get("id") or "-")
-            for item in group_items
-        ]
-        active_group_name = str(
-            multipath_group.get("active_route_name") or active_name
-        )
-        reference_group_name = str(
-            multipath_group.get("reference_route_name") or selected_name
-        )
-        if group_names:
-            group_detail = " · ".join(
-                f"{item.get('name') or item.get('id')}"
-                f"(시작 {float(item.get('start_gap_m') or 0):.2f}m / "
-                f"도착 {float(item.get('end_gap_m') or 0):.2f}m)"
-                for item in group_items
-            )
+        selected_multipath_id = str(route.get("selected_multipath_id") or "")
+        selected_multipath = next((item for item in multipaths if str(item.get("id")) == selected_multipath_id), None)
+        group_ids = [str(value) for value in (selected_multipath or {}).get("route_ids", [])]
+        names_by_id = {str(item.get("id")): str(item.get("name") or item.get("id")) for item in routes}
+        if selected_multipath:
+            group_detail = " · ".join(names_by_id.get(value, value) for value in group_ids)
             self.multipath_group_status.setText(
-                f"기준: {reference_group_name} · 현재 활성: {active_group_name} · "
-                f"같은 그룹 {len(group_items)}개\n{group_detail}"
+                f"대루트: {selected_multipath.get('name')} · 현재 활성 소루트: {active_name} · "
+                f"구성 {len(group_ids)}개\n{group_detail}"
             )
             self.multipath_group_status.setStyleSheet(
                 "background:#0f1a2c; border:1px solid #2b765e; border-radius:8px; "
@@ -2305,7 +2435,7 @@ class MainWindow(QMainWindow):
             )
         else:
             self.multipath_group_status.setText(
-                f"기준: {reference_group_name} · 묶인 경로 없음"
+                "저장된 대루트를 선택하거나 새로 만드세요. 단일 소루트 운항도 별도로 사용할 수 있습니다."
             )
             self.multipath_group_status.setStyleSheet(
                 "background:#0f1a2c; border:1px solid #243652; border-radius:8px; "
@@ -2313,7 +2443,7 @@ class MainWindow(QMainWindow):
             )
         if self._pending_multipath_request is None:
             self.multipath_status.setText(
-                f"{'ON' if multipath.get('enabled', True) else 'OFF'} · 같은 그룹 {len(group_ids)}개"
+                f"{'대루트 운항' if multipath.get('enabled', True) else '단일 소루트 운항'} · 구성 {len(group_ids)}개"
                 f" · 대체 {route.get('alternative_route_id') or '-'}"
                 f" · 전환: 최근접 경로 즉시"
                 f" · 저장 {multipath_config_path}"
