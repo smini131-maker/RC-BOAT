@@ -62,11 +62,11 @@ jobs:
         working-directory: beta/ros_v2.0.0_beta2/windows_gui
         run: |
           $env:QT_QPA_PLATFORM='offscreen'
-          python app.py --smoke-test
+          python app.py --smoke-test --screenshot smoke/dashboard.png
           if ($LASTEXITCODE -ne 0) { throw 'PySide6 smoke failed' }
       - name: Windows PyInstaller build
         working-directory: beta/ros_v2.0.0_beta2/windows_gui
-        run: python -m PyInstaller --clean --noconfirm --onefile --windowed --name RCBoatControl_ROS_v2.0.0-beta.2 app.py
+        run: python -m PyInstaller --clean --noconfirm --onefile --windowed --add-data 'assets;assets' --icon assets/cat_boat_icon.ico --name RCBoatControl_ROS_v2.0.0-beta.2 app.py
       - name: Test bundled EXE and write SHA256
         shell: pwsh
         run: |
@@ -93,6 +93,7 @@ jobs:
           path: |
             beta/ros_v2.0.0_beta2/windows_gui/dist/RCBoatControl_ROS_v2.0.0-beta.2.exe
             beta/ros_v2.0.0_beta2/windows_gui/dist/SHA256SUMS.txt
+            beta/ros_v2.0.0_beta2/windows_gui/smoke/dashboard.png
 
   windows-python313-local-builder:
     runs-on: windows-latest
@@ -103,16 +104,42 @@ jobs:
         with:
           python-version: '3.13'
           architecture: x64
-      - name: Verify Python 3.13 x64 local Windows scripts
+      - name: Build with Python 3.13 from deep user Downloads-like folder
         shell: pwsh
         run: |
           $env:RCBOAT_NO_PAUSE='1'
           $env:RCBOAT_PYTHON=(Get-Command python.exe).Source
-          Push-Location 'beta/ros_v2.0.0_beta2'
+          $source=(Resolve-Path 'beta/ros_v2.0.0_beta2').Path
+          $deep=Join-Path $env:RUNNER_TEMP 'RCBoat_ROS_v2.0.0-beta.2_WindowsFix_Source'
+          $deep=Join-Path $deep 'RCBoat_ROS_v2.0.0-beta.2_Source'
+          $deep=Join-Path $deep 'user_nested_folder_this_name_is_intentionally_long_for_real_MAX_PATH_regression'
+          New-Item -ItemType Directory -Force -Path $deep | Out-Null
+          Get-ChildItem -LiteralPath $source -Force | ForEach-Object {Copy-Item -LiteralPath $_.FullName -Destination $deep -Recurse -Force}
+          if ($deep.Length -lt 145) {throw "Not a meaningful long-path test: $deep"}
+          Push-Location $deep
           try {
             & cmd.exe /d /c CHECK_WINDOWS.cmd
-            if ($LASTEXITCODE -ne 0) { throw 'Python 3.13 CHECK_WINDOWS.cmd failed' }
+            if ($LASTEXITCODE -ne 0) {throw 'Long-path CHECK_WINDOWS.cmd failed'}
             $env:QT_QPA_PLATFORM='offscreen'
             & cmd.exe /d /c BUILD_ROS_GUI.cmd
-            if ($LASTEXITCODE -ne 0) { throw 'Python 3.13 BUILD_ROS_GUI.cmd failed' }
+            if ($LASTEXITCODE -ne 0) {throw 'Long-path BUILD_ROS_GUI.cmd failed'}
+            $exe=Join-Path $deep 'windows_gui/dist/RCBoatControl_ROS_v2.0.0-beta.2.exe'
+            if (!(Test-Path -LiteralPath $exe)) {throw 'Long-path built EXE missing'}
+            Write-Host "Python 3.13 nested-folder build OK: $exe"
           } finally {Pop-Location}
+
+  source-archive:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package complete beta2 source
+        shell: pwsh
+        run: |
+          $archive='RCBoat_ROS_v2.0.0-beta.2_GUIFix_Source.zip'
+          Compress-Archive -Path 'beta/ros_v2.0.0_beta2/*' -DestinationPath $archive -CompressionLevel Optimal -Force
+          if (!(Test-Path $archive)) {throw 'Source ZIP missing'}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RCBoat_ROS_v2.0.0-beta.2_GUIFix_Source
+          retention-days: 30
+          path: RCBoat_ROS_v2.0.0-beta.2_GUIFix_Source.zip
