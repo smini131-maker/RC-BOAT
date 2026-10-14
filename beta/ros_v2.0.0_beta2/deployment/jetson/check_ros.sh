@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -Eeuo pipefail
+set -Eeo pipefail
 source /opt/ros/noetic/setup.bash
 source /home/jetson/rcboat_ros_ws/catkin_ws/devel/setup.bash
 printf 'Checking ROS master...\n'

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -Eeuo pipefail
+set -Eeo pipefail
 printf 'Jetson: ';uname -m
 printf 'OS: ';source /etc/os-release; echo "$PRETTY_NAME"
 if [[ $(uname -m) != aarch64 || $VERSION_ID != 20.04 ]];then echo 'WARNING: expected Jetson aarch64 Ubuntu 20.04';fi
