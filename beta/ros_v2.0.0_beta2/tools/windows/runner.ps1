@@ -119,7 +119,7 @@ try {
      $Name='RCBoatControl_ROS_v2.0.0-beta.2'
      $Options=@('-m','PyInstaller','--noconfirm','--clean','--onefile','--windowed',
                 '--workpath',$Work,'--distpath',$Dist,'--specpath',$Spec,
-                '--add-data','assets;assets','--name',$Name)
+                '--add-data',($AssetStage+';assets'),'--name',$Name)
      if(Test-Path -LiteralPath (Join-Path $AssetStage 'cat_boat_icon.ico')){
        $Options+=@('--icon',(Join-Path $AssetStage 'cat_boat_icon.ico'))
      }
