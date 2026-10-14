@@ -25,6 +25,22 @@ jobs:
             bash -n "$script"
           done
           python3 -m unittest discover -s "$base/tests" -p 'test_linux_deployment.py' -v
+  linux-catkin-noetic-build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build catkin package with real ROS Noetic environment (Docker)
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="$GITHUB_WORKSPACE/beta/ros_v2.0.0_beta2/catkin_ws"
+          docker run --rm \
+            -v "$workspace:/workspace" \
+            -w /workspace \
+            ros:noetic-ros-base-focal \
+            bash -lc 'set -eo pipefail; source /opt/ros/noetic/setup.bash; catkin_make -DCATKIN_ENABLE_TESTING=OFF'
+          test -f "$workspace/devel/setup.bash"
   windows-build:
     runs-on: windows-latest
     timeout-minutes: 40
