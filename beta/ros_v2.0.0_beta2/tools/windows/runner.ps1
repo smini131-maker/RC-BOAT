@@ -101,6 +101,7 @@ try {
      Write-Host '[INFO] Old incomplete source .venv ignored; no need to delete it.'
    }
    Copy-Item -LiteralPath (Join-Path $AppDir 'app.py') -Destination (Join-Path $Stage 'app.py') -Force
+   Copy-Item -LiteralPath (Join-Path $AppDir 'telemetry_graph.py') -Destination (Join-Path $Stage 'telemetry_graph.py') -Force
    $AssetSource=Join-Path $AppDir 'assets'
    Check (Test-Path -LiteralPath $AssetSource) 'Missing assets folder. Re-extract full source.'
    $AssetStage=Join-Path $Stage 'assets'

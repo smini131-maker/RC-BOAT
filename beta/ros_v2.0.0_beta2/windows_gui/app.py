@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBo
     QPushButton,QLineEdit,QComboBox,QPlainTextEdit,QTabWidget,QGridLayout,QGroupBox,
     QMessageBox,QFileDialog,QSlider,QGraphicsScene,QGraphicsView,QGraphicsEllipseItem,QGraphicsPathItem,QFrame,QScrollArea,QSplitter)
 import paramiko
+from telemetry_graph import TelemetryGraph
 
 CLIENT='python3 /home/jetson/rcboat_ros_ws/deployment/jetson/bridge_client.py'
 
@@ -265,6 +266,10 @@ class Window(QMainWindow):
         ml=QVBoxLayout(mapGroup);self.map=TrackMap();ml.addWidget(self.map,1)
         ml.addWidget(QLabel('파랑 LEFT   ·   회색 CENTER   ·   빨강 RIGHT   ·   녹색 현재 위치'))
         dash.addWidget(mapGroup);dash.setSizes([615,500]);dash.setChildrenCollapsible(False)
+        plots=QHBoxLayout();over.addLayout(plots)
+        self.steer_graph=TelemetryGraph('조향 PWM : 계산(파랑) / 적용(초록)',4900,7300,('#35c9ff','#38d996'))
+        self.throttle_graph=TelemetryGraph('스로틀 PWM : 계산(노랑) / 적용(빨강)',5800,7000,('#f8bd58','#ff6474'))
+        plots.addWidget(self.steer_graph,1);plots.addWidget(self.throttle_graph,1)
         ground=QWidget();tabs.addTab(ground,'GPS 지상 실험')
         g=QVBoxLayout(ground)
         groundactions=QHBoxLayout();g.addLayout(groundactions)
@@ -383,6 +388,8 @@ class Window(QMainWindow):
             self.cards['rtk'].setValue(gps.get('rtk_state','대기'))
             self.cards['safety'].setValue('잠금' if saf.get('actuator_locked',True) else '잠금 해제')
             self.cards['throttle'].setValue(act.get('actual_throttle_pwm','—'))
+            self.steer_graph.append(nav.get('desired_steering_pwm'),act.get('actual_steering_pwm'))
+            self.throttle_graph.append(nav.get('desired_throttle_pwm'),act.get('actual_throttle_pwm'))
             locked=saf.get('actuator_locked',True)
             self.groundstatus.setText(('GROUND TEST ACTIVE' if saf.get('mode')=='GROUND_TEST' else 'GROUND TEST INACTIVE')+
                 (' · ACTUATOR LOCKED' if locked else ' · ACTUATOR UNLOCKED')+
