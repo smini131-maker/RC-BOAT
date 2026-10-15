@@ -113,29 +113,35 @@ class Bridge:
     def ground_start(self, args):
         target_type=str(args.get("target_type") or "multipath")
         target_id=str(args.get("target_id") or "")
+        actuation_enabled=bool(args.get("actuation_enabled",False))
         route_state=self.cache.get("route",{})
+        multipath_state=route_state.get("multipath",{})
+        multipath_settings={
+            "endpoint_tolerance_m":float(multipath_state.get("endpoint_tolerance_m",.75)),
+            "switch_threshold_m":float(multipath_state.get("switch_threshold_m",2.0)),
+        }
         if target_type=="multipath":
             groups={str(item.get("id")):item for item in route_state.get("multipaths",[])}
             if target_id not in groups:raise ValueError("select a saved multipath")
             ids=[str(value) for value in groups[target_id].get("route_ids",[])]
             if not ids:raise ValueError("selected multipath has no subroutes")
             self.service("/rcboat/route/execute","select_multipath",{"multipath_id":target_id})
-            self.service("/rcboat/route/execute","set_multipath",{"enabled":True,
-                "endpoint_tolerance_m":float(route_state.get("multipath",{}).get("endpoint_tolerance_m",.75))})
+            self.service("/rcboat/route/execute","set_multipath",dict(multipath_settings,enabled=True))
         elif target_type=="single_route":
             routes={str(item.get("id")):item for item in route_state.get("routes",[])}
             if target_id not in routes:raise ValueError("select a saved subroute")
             ids=[target_id]
             self.service("/rcboat/route/execute","select_route",{"route_id":target_id})
-            self.service("/rcboat/route/execute","set_multipath",{"enabled":False,
-                "endpoint_tolerance_m":float(route_state.get("multipath",{}).get("endpoint_tolerance_m",.75))})
+            self.service("/rcboat/route/execute","set_multipath",dict(multipath_settings,enabled=False))
         else:raise ValueError("target_type must be multipath or single_route")
         self.service("/rcboat/route/execute", "set_test_route_set", {"route_ids": ids})
         try:
-            self.service("/rcboat/safety/execute", "set_mode", {"mode": "GROUND_TEST"})
+            self.service("/rcboat/safety/execute", "set_mode", {
+                "mode": "GROUND_TEST", "ground_test_actuation_enabled": actuation_enabled})
             rospy.sleep(.25)
             return self.service("/rcboat/logger/execute", "start", {"route_ids": ids,
-                "target_type":target_type,"target_id":target_id})
+                "target_type":target_type,"target_id":target_id,
+                "actuation_enabled":actuation_enabled})
         except Exception:
             try: self.service("/rcboat/safety/execute", "set_mode", {"mode": "AUTO_SAFE"})
             finally: self.service("/rcboat/route/execute", "set_test_route_set", {"route_ids": []})

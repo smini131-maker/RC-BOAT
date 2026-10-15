@@ -26,10 +26,11 @@ command_timeout_s: 0.75
 remote_heartbeat_s: 0.7
 log_rate_hz: 4.0
 endpoint_tolerance_m: 0.75
-closer_advantage_m: 0.0
+multipath_switch_threshold_m: 2.0
 # Routes are never generated automatically. Multi-Path considers only routes
 # explicitly saved by the operator; a ground test freezes the selected N-route group or one route.
-# Path-tracking selection changes calculation only; no setting-value gate disables it.
+# Keep the current Target Path at <= 2 m. At > 2 m select the nearest saved
+# subroute in the named Multi-Path, matching the Week-7 ground-test rule.
 tracking_mode: 'HEADING'
 lookahead_base_m: 2.0
 lookahead_speed_gain_s: 2.5

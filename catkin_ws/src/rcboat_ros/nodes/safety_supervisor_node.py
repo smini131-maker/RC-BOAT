@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""All commands arbitrate here. Ground lock wins even over remote/manual demand."""
+"""All commands arbitrate here; ground-test actuation requires explicit opt-in."""
 import json
 import time
 import rospy
@@ -13,6 +13,7 @@ MODES={'AUTO_SAFE','AUTO','MANUAL','REMOTE','NAVIGATION','GROUND_TEST'}
 class Supervisor:
     def __init__(self):
         self.mode='AUTO_SAFE';self.armed=False;self.estop=False
+        self.ground_test_actuation_enabled=False
         self.gps={};self.rc={};self.nav={};self.remote={};self.remote_stamp=0
         self.auto_gesture_since=None;self.manual_gesture_since=None;self.manual_rearm_since=None;self.manual_rearm_pending=False
         self.cmd=rospy.Publisher('/rcboat/safety/final_command',ControlCommand,queue_size=4)
@@ -28,6 +29,7 @@ class Supervisor:
             if not isinstance(args,dict):raise ValueError('request must be JSON object')
             if req.action=='estop':
                 self.estop=True;self.mode='AUTO_SAFE';self.armed=False
+                self.ground_test_actuation_enabled=False
                 self.events.publish(pack(type='ESTOP',at=time.time()))
             elif req.action=='reset_estop':
                 # Requires physical-safe mode; reset never restores navigation automatically.
@@ -38,6 +40,9 @@ class Supervisor:
                 if mode not in MODES:raise ValueError('unknown mode')
                 if self.estop and mode!='AUTO_SAFE':raise ValueError('E-STOP latched')
                 self.mode=mode
+                self.ground_test_actuation_enabled=(
+                    mode=='GROUND_TEST' and bool(args.get('ground_test_actuation_enabled',False))
+                )
                 self.auto_gesture_since=None;self.manual_gesture_since=None
                 self.manual_rearm_pending=False
                 self.armed=bool(args.get('armed',False)) if mode=='NAVIGATION' else False
@@ -86,7 +91,15 @@ class Supervisor:
         self._gestures(now)
         # GPS hard faults must lock autonomous navigation, not physically safe manual takeover.
         if self.estop:return 'ESTOP',s,t,True
-        if self.mode=='GROUND_TEST':return 'GROUND_TEST',s,t,True
+        if self.mode=='GROUND_TEST':
+            # Full navigation-equivalent output is allowed only for the explicit,
+            # non-persistent ground-test opt-in. E-STOP, GPS and freshness gates still win.
+            if (self.ground_test_actuation_enabled and self.gps.get('healthy') and
+                    self.nav.get('valid') and fresh(float(self.nav.get('monotonic',0)),.75,now)):
+                s=int(clamp(int(self.nav['desired_steering_pwm']),4900,7300))
+                t=int(clamp(int(self.nav['desired_throttle_pwm']),5800,7000))
+                return 'GROUND_TEST_NAVIGATION',s,t,False
+            return 'GROUND_TEST',s,SAFE_THROTTLE,True
         if self.mode=='AUTO':
             return 'AUTO',s,int(rospy.get_param('/rcboat/cruise_pwm',6650)),False
         if self.mode=='MANUAL' and not self.manual_rearm_pending:
@@ -114,6 +127,9 @@ class Supervisor:
             msg.steering_pwm=int(s);msg.throttle_pwm=int(t);msg.actuator_locked=lock
             self.cmd.publish(msg)
             self.state.publish(pack(mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
+                                    ground_test_actuation_enabled=self.ground_test_actuation_enabled,
+                                    throttle_locked=lock,
+                                    steering_test_enabled=self.mode=='GROUND_TEST' and source=='GROUND_TEST_NAVIGATION',
                                     effective_source=source,steering_pwm=s,throttle_pwm=t))
             rate.sleep()
 if __name__=='__main__':rospy.init_node('safety_supervisor_node');Supervisor().run()

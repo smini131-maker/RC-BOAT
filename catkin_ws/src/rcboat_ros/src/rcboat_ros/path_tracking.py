@@ -67,12 +67,12 @@ def _atomic_json(path, obj):
     os.replace(pending, path)
 
 class RouteManager:
-    def __init__(self, filename, endpoint_tolerance=0.75, advantage=0.0):
+    def __init__(self, filename, endpoint_tolerance=0.75, switch_threshold_m=2.0):
         self.filename = Path(filename)
         self.endpoint_tolerance = float(endpoint_tolerance)
-        # Kept as an accepted constructor/settings field for compatibility with
-        # older GUI/config files, but the value no longer gates route switching.
-        self.advantage = 0.0
+        self.switch_threshold_m = float(switch_threshold_m)
+        if self.switch_threshold_m <= 0:
+            raise ValueError('multipath switch threshold must be positive')
         self.recording = None
         self.load()
         self.event = None
@@ -225,14 +225,26 @@ class RouteManager:
             distances[route_id]=(route_distance,waypoint_index,waypoint_distance)
         current = distances[self.active][0]
         candidate = min(distances, key=lambda k: distances[k][0]); previous = self.active
+        candidate_distance = distances[candidate][0]
+        threshold_exceeded = current > self.switch_threshold_m
         switched = False
-        if candidate != self.active and distances[candidate][0] < current:
+        # Week-7 lecture rule: retain the current Target Path while its relative
+        # distance is <= 2 m (configurable). Only after the active-path distance
+        # is strictly greater than the threshold may the nearest explicit
+        # subroute become the new Target Path.
+        if candidate != self.active and threshold_exceeded:
             self.active = candidate
             points=_waypoints(self.routes[candidate])
             equivalent=int(math.ceil(self.progress_fraction*max(0,len(points)-1)))
             self.next_index=max(self.progress.get(candidate,0),equivalent,min(distances[candidate][1]+1,len(points)-1))
             self.progress[candidate]=self.next_index
             switched=True
+        if switched:
+            switch_decision='SWITCH_TO_NEAREST_AFTER_THRESHOLD'
+        elif threshold_exceeded:
+            switch_decision='THRESHOLD_EXCEEDED_ACTIVE_ALREADY_NEAREST'
+        else:
+            switch_decision='KEEP_ACTIVE_WITHIN_THRESHOLD'
         route = self.routes[self.active]
         points = _waypoints(route)
         self.next_index = min(max(self.next_index,self.progress.get(self.active,0)),len(points)-1)
@@ -248,10 +260,19 @@ class RouteManager:
             target=points[self.next_index]
         dwp=meters(position,target)
         cte=nearest_route(position, points)[2]
-        self.event = {'type':'ROUTE_SWITCH','previous_route':previous,'candidate_route':candidate,'new_route':self.active,'monotonic':now} if switched else None
+        self.event = {'type':'ROUTE_SWITCH','previous_route':previous,'candidate_route':candidate,
+                      'new_route':self.active,'previous_target_path_distance_m':round(current,4),
+                      'candidate_route_distance_m':round(candidate_distance,4),
+                      'switch_threshold_m':self.switch_threshold_m,
+                      'switch_decision':switch_decision,'monotonic':now} if switched else None
         return {'selected_route_id':self.selected,'active_route_id':self.active,'candidate_route_id':candidate,
                 'group_routes':list(group),'endpoint_gaps':group,
-                'switch_advantage_m':0.0,'selection_metric':'NEAREST_ROUTE_IN_NAMED_MULTIPATH',
+                'switch_threshold_m':self.switch_threshold_m,
+                'switch_threshold_exceeded':threshold_exceeded,
+                'previous_target_path_distance_m':round(current,4),
+                'candidate_route_distance_m':round(candidate_distance,4),
+                'switch_decision':switch_decision,
+                'selection_metric':'ACTIVE_TARGET_DISTANCE_GT_THRESHOLD_THEN_NEAREST',
                 'multipath_switch':switched,'previous_route': previous if switched else '',
                 'target_waypoint_index':self.next_index,'target_lat':target[0],'target_lon':target[1],
                 'path_waypoints':[{'lat':a,'lon':b} for a,b in points],

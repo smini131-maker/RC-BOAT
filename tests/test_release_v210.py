@@ -96,6 +96,35 @@ class ReleaseV210(unittest.TestCase):
                             "target_heading_deg", "heading_error_deg"):
                     self.assertIn(key, metric)
 
+    def test_week7_target_path_switches_only_above_two_metres(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "routes.json"
+            metres_per_degree_lon = 91188.0
+            routes = [
+                {"id": "center", "name": "Center", "waypoints": [
+                    {"lat": 35.0, "lon": 129.0}, {"lat": 35.001, "lon": 129.0}]},
+                {"id": "right", "name": "Right", "waypoints": [
+                    {"lat": 35.0, "lon": 129.0 + 3.0 / metres_per_degree_lon},
+                    {"lat": 35.001, "lon": 129.0 + 3.0 / metres_per_degree_lon}]},
+            ]
+            path.write_text(json.dumps({"schema_version": 3, "selected_route_id": "center",
+                                        "selected_multipath_id": "group", "multipath_enabled": True,
+                                        "multipaths": [{"id": "group", "name": "A",
+                                                        "route_ids": ["center", "right"],
+                                                        "default_route_id": "center"}],
+                                        "routes": routes}))
+            manager = RouteManager(path, switch_threshold_m=2.0)
+            inside = manager.update((35.0002, 129.0 + 1.8 / metres_per_degree_lon), heading=0.0)
+            self.assertEqual(inside["active_route_id"], "center")
+            self.assertFalse(inside["switch_threshold_exceeded"])
+            self.assertEqual(inside["switch_decision"], "KEEP_ACTIVE_WITHIN_THRESHOLD")
+            outside = manager.update((35.0003, 129.0 + 2.2 / metres_per_degree_lon), heading=0.0)
+            self.assertEqual(outside["active_route_id"], "right")
+            self.assertTrue(outside["switch_threshold_exceeded"])
+            self.assertTrue(outside["multipath_switch"])
+            self.assertEqual(outside["selection_metric"],
+                             "ACTIVE_TARGET_DISTANCE_GT_THRESHOLD_THEN_NEAREST")
+
     def test_utm_is_plausible_and_not_placeholder_zero(self):
         easting, northing, zone = latlon_to_utm(35.0, 129.0)
         self.assertEqual(zone, "52N")
@@ -108,13 +137,15 @@ class ReleaseV210(unittest.TestCase):
         for filename in ("ground_test.csv", "ground_test.jsonl", "reference_routes.csv",
                          "reference_routes.json", "route_changes.jsonl", "events.jsonl",
                          "test_metadata.json", "export_manifest.json", "route_metrics.csv",
-                         "route_switches.csv", "analysis_manifest.json"):
+                         "route_switches.csv", "analysis_manifest.json", "plot_ground_test_week7.m"):
             self.assertIn(filename, source)
         for field in ("measurement_time_utc", "output_time_utc", "heading_source", "gps_data_age_s",
                       "correction_age_s", "gps_quality_used_json", "target_waypoint_number",
                       "output_send_success", "manual_intervention", "output_locked",
                       "desired_rudder_angle_deg", "target_speed_mps", "route_candidates_json",
-                      "execution_target_type"):
+                      "execution_target_type", "target_path_distance_m",
+                      "multipath_switch_threshold_m", "switch_threshold_exceeded",
+                      "switch_decision", "ground_test_actuation_enabled"):
             self.assertIn(field, source)
         self.assertIn("already_stopped", source)
         self.assertIn("LOGGER_RESTART_DETECTED", source)
@@ -144,6 +175,18 @@ class ReleaseV210(unittest.TestCase):
         gui = (ROOT / "windows_gui/rcboat_gui/main_window.py").read_text(encoding="utf-8")
         for label in ("SSH 연결", "ROS master", "ROS gateway", "Logger", "GPS", "RTK"):
             self.assertIn(label, gui)
+
+    def test_ground_test_full_output_requires_explicit_opt_in(self):
+        supervisor = (ROOT / "catkin_ws/src/rcboat_ros/nodes/safety_supervisor_node.py").read_text(encoding="utf-8")
+        actuator = (ROOT / "catkin_ws/src/rcboat_ros/nodes/actuator_node.py").read_text(encoding="utf-8")
+        bridge = (ROOT / "catkin_ws/src/rcboat_ros/nodes/gui_bridge_node.py").read_text(encoding="utf-8")
+        gui = (ROOT / "windows_gui/rcboat_gui/main_window.py").read_text(encoding="utf-8")
+        self.assertIn("ground_test_actuation_enabled", supervisor)
+        self.assertIn("actuation_enabled", bridge)
+        self.assertIn("actuation_enabled", gui)
+        self.assertIn("GROUND_TEST_NAVIGATION", supervisor)
+        self.assertIn("GROUND_TEST_NAVIGATION", actuator)
+        self.assertIn("프로펠러 제거 확인", gui)
 
     def test_gui_supports_large_route_and_single_route_targets(self):
         gui = (ROOT / "windows_gui/rcboat_gui/main_window.py").read_text(encoding="utf-8")

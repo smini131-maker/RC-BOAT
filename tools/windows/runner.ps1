@@ -28,7 +28,7 @@ if($Action -eq 'BUILD_GUI') {
 if($Action -in @('DEPLOY_ROS','INSTALL_ROS')) {
   Need 'scp.exe'
   Remote 'mkdir -p /home/jetson/rcboat_ros_ws'
-  foreach($Name in @('catkin_ws','deployment','systemd')) {
+  foreach($Name in @('catkin_ws','deployment','systemd','matlab')) {
     & scp.exe -r (Join-Path $Root $Name) ($Destination + ':/home/jetson/rcboat_ros_ws/')
     if($LASTEXITCODE -ne 0){throw "SCP failed: $Name"}
   }

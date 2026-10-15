@@ -49,9 +49,11 @@ class MockWorker(QThread):
         self.gps_recording_points: list[dict[str, float]] = []
         self.ground_test_active = False
         self.ground_test_samples = 0
+        self.ground_test_actuation_enabled = False
         self.multipath = {
             "enabled": True, "endpoint_tolerance_m": 0.75,
-            "switch_rule": "nearest_route_in_named_multipath",
+            "switch_threshold_m": 2.0,
+            "switch_rule": "active_target_distance_gt_threshold_then_nearest",
             "off_route_gate": False, "priority_gate": False, "cooldown_gate": False,
         }
         self.recording_minimum_distance_m = 1.0
@@ -120,6 +122,7 @@ class MockWorker(QThread):
             elif command == "SET_MULTIPATH":
                 limits = {
                     "endpoint_tolerance_m": (0.10, 1.00),
+                    "switch_threshold_m": (0.10, 100.0),
                 }
                 if "enabled" in kwargs:
                     self.multipath["enabled"] = bool(kwargs["enabled"])
@@ -266,11 +269,13 @@ class MockWorker(QThread):
                 else: raise ValueError("select a ground-test target")
                 self.ground_test_active = True
                 self.ground_test_samples = 0
+                self.ground_test_actuation_enabled = bool(kwargs.get("actuation_enabled", False))
                 self.mode = "GROUND_TEST"
                 self.operation_state = "GROUND_TEST"
-                self.steering, self.throttle = 6000, 6450
+                self.steering, self.throttle = 6000, self.auto_cruise_pwm if self.ground_test_actuation_enabled else 6450
             elif command == "GROUND_TEST_STOP":
                 self.ground_test_active = False
+                self.ground_test_actuation_enabled = False
                 self.mode = "AUTO"
                 self.operation_state = "AUTO_SAFE"
                 self.steering, self.throttle = 6000, 6450
@@ -354,6 +359,8 @@ class MockWorker(QThread):
                 self.gps_data_samples += 1
             if self.ground_test_active:
                 self.ground_test_samples += 1
+                if self.ground_test_actuation_enabled:
+                    self.steering, self.throttle = 6000 + int(math.sin(t) * 500), self.auto_cruise_pwm
             selected = next(route for route in self.routes if route["id"] == self.selected_route_id)
             active = next(route for route in self.routes if route["id"] == self.active_route_id)
             nav_active = self.operation_state == "NAVIGATION_ACTIVE"
@@ -379,7 +386,9 @@ class MockWorker(QThread):
                     "gps_settings": {"baudrate": 115200, "health_stale_s": 2.0, "navigation_max_hdop": self.gps_max_hdop, "rtk_required_for_navigation": not self.rtk_fallback_to_gps, "rtk_fallback_to_gps": self.rtk_fallback_to_gps, "rtk_correction_max_age_s": 10.0},
                     "ground_test": {"active": self.ground_test_active,
                                     "state": "recording" if self.ground_test_active else "idle",
-                                    "samples": self.ground_test_samples, "actuator_locked": True},
+                                    "samples": self.ground_test_samples,
+                                    "actuator_locked": not self.ground_test_actuation_enabled,
+                                    "actuation_enabled": self.ground_test_actuation_enabled},
                     "mock": True,
                     "rc": {"steering_us": 1640 + int(math.sin(t) * 60) if self.arduino_connected else None, "throttle_us": 1500 if self.arduino_connected else None, "age_s": 0.01 if self.arduino_connected else None},
                     "pca": {"frequency_hz": 60, "steering_channel": 0, "throttle_channel": 6, "steering_pwm": self.steering, "throttle_pwm": self.throttle},
@@ -391,6 +400,9 @@ class MockWorker(QThread):
                               "active_route_id": self.active_route_id, "active_route_name": active["name"],
                               "waypoint_index": 0, "waypoint_count": 3, "distance_to_waypoint_m": 5.4,
                               "distance_to_route_m": 1.1, "route_complete": False, "load_error": "",
+                              "target_path_distance_m": 1.1, "candidate_route_distance_m": 1.1,
+                              "switch_threshold_exceeded": False,
+                              "switch_decision": "KEEP_ACTIVE_WITHIN_THRESHOLD",
                               "multipath": dict(self.multipath),
                               "multipath_group_route_ids": next((group["route_ids"] for group in self.multipaths
                                                                  if group["id"] == self.selected_multipath_id), [self.selected_route_id]),

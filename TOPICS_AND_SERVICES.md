@@ -4,9 +4,9 @@
 |---|---|---|
 | `/rcboat/gps/status` | `std_msgs/String` JSON | Receiver UTC/status, WGS84, UTM, FIX/RTK, quality, data age |
 | `/rcboat/ntrip/status` | `std_msgs/String` JSON | NTRIP connection and correction age; missing is `null` |
-| `/rcboat/route/state` | `std_msgs/String` JSON | User subroutes, named Multi-Paths, selected/active route, target waypoint, per-route candidate metrics |
+| `/rcboat/route/state` | `std_msgs/String` JSON | User subroutes, named Multi-Paths, selected/active route, 2 m switch decision, target waypoint, per-route candidate metrics |
 | `/rcboat/navigation/desired` | `std_msgs/String` JSON | Controller decision, desired rudder/PWM, and target speed |
-| `/rcboat/safety/state` | `std_msgs/String` JSON | Mode, E-STOP, final PWM, output lock |
+| `/rcboat/safety/state` | `std_msgs/String` JSON | Mode, E-STOP, final PWM, output lock, explicit ground-test actuation state |
 | `/rcboat/actuator/status` | `std_msgs/String` JSON | PCA write success, output timestamp, commanded PWM |
 | `/rcboat/ground_test/status` | `std_msgs/String` JSON | `idle/recording/stopping/error`, folder, sample count |
 | `/rcboat/events` | `std_msgs/String` JSON | Mode, manual intervention, E-STOP, error, route/config changes |

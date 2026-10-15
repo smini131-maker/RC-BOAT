@@ -136,6 +136,7 @@ class SSHWorker(QThread):
             return {"action": "set_multipath", "arguments": {
                 "enabled": kwargs.get("enabled", True),
                 "endpoint_tolerance_m": kwargs.get("endpoint_tolerance_m", 0.75),
+                "switch_threshold_m": kwargs.get("switch_threshold_m", 2.0),
             }}
         if command == "SET_AUTO_CRUISE_PWM":
             return {"action": "set_auto_cruise_pwm", "arguments": {"value": kwargs.get("value")}}
@@ -220,7 +221,8 @@ class SSHWorker(QThread):
         group_ids = list(route.get("group_routes") or [])
         multipath = route.get("multipath") or {
             "enabled": True, "endpoint_tolerance_m": route.get("endpoint_tolerance_m", 0.75),
-            "switch_rule": "nearest_route_in_named_multipath",
+            "switch_threshold_m": 2.0,
+            "switch_rule": "active_target_distance_gt_threshold_then_nearest",
             "off_route_gate": False, "priority_gate": False, "cooldown_gate": False,
         }
         logger_state = str(ground.get("state") or ("recording" if ground.get("active") else "idle"))
@@ -272,7 +274,9 @@ class SSHWorker(QThread):
             "ground_test": {"active": bool(ground.get("active")), "state": logger_state,
                             "samples": ground.get("samples", 0), "error": ground.get("error", ""),
                             "folder": ground.get("folder", ""),
-                            "actuator_locked": bool(safety.get("actuator_locked", True))},
+                            "actuator_locked": bool(safety.get("actuator_locked", True)),
+                            "actuation_enabled": bool(ground.get("actuation_enabled",
+                                                                  safety.get("ground_test_actuation_enabled", False)))},
             "route": {"selected_route_id": selected_id, "selected_route_name": selected.get("name", selected_id),
                       "selected_multipath_id": str(route.get("selected_multipath_id") or ""),
                       "execution_target_type": route.get("execution_target_type") or
@@ -288,6 +292,10 @@ class SSHWorker(QThread):
                       "selected_route_persisted": True, "multipath": multipath,
                       "multipath_group_route_ids": group_ids,
                       "alternative_route_id": route.get("candidate_route_id", ""),
+                      "target_path_distance_m": route.get("previous_target_path_distance_m"),
+                      "candidate_route_distance_m": route.get("candidate_route_distance_m"),
+                      "switch_threshold_exceeded": route.get("switch_threshold_exceeded"),
+                      "switch_decision": route.get("switch_decision"),
                       "route_candidates": route.get("route_candidates") or [],
                       "off_route_duration_s": 0.0},
             "routes": routes, "multipaths": multipaths,

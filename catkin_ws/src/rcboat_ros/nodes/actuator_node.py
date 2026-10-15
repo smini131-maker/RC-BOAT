@@ -39,7 +39,14 @@ class Actuator:
             msg=self.last_message
             timeout=float(rospy.get_param('/rcboat/command_timeout_s',.75))
             if msg and 0<=time.monotonic()-self.last_at<=timeout:
-                if msg.actuator_locked or msg.mode=='GROUND_TEST':state='LOCKED'
+                if msg.mode=='GROUND_TEST':
+                    if msg.actuator_locked:
+                        state='GROUND_TEST_LOCKED'
+                    elif (msg.source=='GROUND_TEST_NAVIGATION' and
+                          4900<=msg.steering_pwm<=7300 and 5800<=msg.throttle_pwm<=7000):
+                        s=msg.steering_pwm;t=msg.throttle_pwm;state='GROUND_TEST_NAVIGATION'
+                    else:state='GROUND_TEST_REJECTED'
+                elif msg.actuator_locked:state='LOCKED'
                 elif msg.source in ('AUTO','MANUAL','REMOTE','NAVIGATION'):
                     if 4900<=msg.steering_pwm<=7300 and 5800<=msg.throttle_pwm<=7000:
                         s=msg.steering_pwm;t=msg.throttle_pwm;state=msg.source

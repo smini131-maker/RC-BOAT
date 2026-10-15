@@ -19,7 +19,7 @@
 - **소루트**: waypoint 좌표를 가진 실제 항로입니다.
 - **대루트(Multi-Path)**: 사용자가 이름을 붙이고 소루트 1개 이상을 명시적으로 묶은 실행 단위입니다. 예를 들어 `대루트 A = [소루트 1, 소루트 2, 소루트 3, ...]`입니다.
 
-대루트 운항을 켜면 선택한 대루트 안에서 현재 위치에 가장 가까운 소루트를 활성 항로로 판단합니다. 끄면 선택한 소루트 하나만 운항·시험합니다. “공통 출발·도착 자동 체크”는 대루트 편집 시 후보를 체크해 주는 선택적 도우미이며 자동 저장 또는 필수 조건이 아닙니다.
+대루트 운항을 켜면 현재 Target Path와 보트 위치의 상대거리(경로선까지 최소거리)가 임계값 `2.0 m` 이하일 때 현재 소루트를 유지합니다. 거리가 `2.0 m`를 엄격히 초과할 때만 선택한 대루트 안의 최근접 소루트로 Target Path를 변경합니다. 이는 7주차 강의자료의 `≤ 2 m 유지`, `> 2 m 변경` 조건입니다. 대루트 운항을 끄면 선택한 소루트 하나만 운항·시험합니다. “공통 출발·도착 자동 체크”는 대루트 편집 시 후보를 체크해 주는 선택적 도우미이며 자동 저장 또는 필수 조건이 아닙니다.
 
 ## Windows PowerShell — 전송
 
@@ -90,7 +90,7 @@ GUI 상단 상태는 서로 독립입니다: `SSH connected/disconnected`, `ROS 
 2. 여러 소루트를 함께 사용할 경우 **대루트 추가**에서 이름과 포함할 소루트 N개를 직접 선택합니다. 공통 출발·도착 버튼은 후보 자동 체크용이며 결과를 자유롭게 수정할 수 있습니다.
 3. 실제 운항은 **이 대루트로 운항 시작** 또는 **이 소루트로 단일 운항 시작**을 선택합니다.
 4. 도보 테스트 탭에서 실행 방식을 `대루트` 또는 `소루트(단일)`로 고르고 시험 대상을 선택합니다.
-5. 프로펠러를 제거하고 ESC 추진 전원을 분리합니다.
+5. 프로펠러를 완전히 제거하고 주변 사람을 통제합니다. 계산·기록만 할 때는 출력 활성화를 체크하지 않고 ESC 추진 전원을 분리합니다. 자동주행과 동일한 실제 PWM 검증이 필요할 때만 ESC를 연결하고 GUI의 **프로펠러 제거 확인 · 자동주행 조향/스로틀 PWM 실제 출력**을 매 시험마다 명시적으로 체크합니다.
 6. ROS master/gateway, GPS valid, 필요한 경우 RTK 상태를 확인합니다.
 7. **도보 테스트 시작**을 누르고 실제 배를 들고 기준 경로 위를 이동합니다.
 8. 시험 중 항로·대루트·설정을 바꾸면 시각, 변경 내용, 당시 항로 snapshot이 별도 로그에 기록됩니다.
@@ -111,6 +111,7 @@ Jetson 저장 위치:
     route_changes.jsonl
     events.jsonl
     analysis_manifest.json
+    plot_ground_test_week7.m
     test_metadata.json
     export_manifest.json
 ```
@@ -119,16 +120,28 @@ Jetson 저장 위치:
 - `ground_test.jsonl`: 각 sample의 원본 구조 보존
 - `reference_routes.*`: 시험 시작 시 선택한 대루트의 모든 소루트(또는 단일 소루트) 전체 좌표/번호/UTM 고정본
 - `route_metrics.csv`: sample × 소루트 장기형 데이터. 각 후보 항로의 거리, 횡오차, 목표점, 목표 헤딩, 헤딩 오차를 저장합니다.
-- `route_switches.csv`: 활성 소루트 전환 시각과 전환 전후 항로
+- `route_switches.csv`: 활성 소루트 전환 시각, 전환 전후 항로, 현재 Target Path 거리, 후보 거리, 2m 임계값과 전환 판정
 - `route_changes.jsonl`: 시험 중 항로·설정 변경 시각과 전후 정보
 - `events.jsonl`: 수동 개입, 모드, 비상정지, 오류, 정지 이벤트. 비정상 종료 후 logger가 다시 시작되면 `LOGGER_RESTART_DETECTED`가 추가됩니다.
 - `test_metadata.json`: 코드 버전, ROS 설정, 서보 보정, 시작/종료 정보
 - `analysis_manifest.json`: 지도, 조향각, 항로별 헤딩 오차, 활성 항로 밴드, 목표/실제 속도 그래프를 재생성하기 위한 데이터 관계 설명
+- `plot_ground_test_week7.m`: 다운로드한 시험 폴더에서 강의자료 형식 PNG 그래프를 생성하는 MATLAB 스크립트
 - `export_manifest.json`: 파일 크기와 SHA-256 검증값
 
 항로 탭의 **선택 항로 PC 저장**은 JSON/CSV/GPX로 내보내며, 각 waypoint의 번호·위도·경도·UTM easting/northing/zone(및 있으면 헤딩·기록 시각)을 포함합니다. 반면 **정지 후 항로 저장**은 Jetson ROS 항로 저장소에만 저장하므로, PC 사본이 필요하면 이어서 **선택 항로 PC 저장**을 사용하십시오.
 
 로거는 실시간 그래프 이미지를 계산하지 않고 원본과 기본 파생값을 저장합니다. 따라서 연산 부담을 낮추면서도 MATLAB에서 강의자료 형식의 그래프를 2차 분석으로 재구성할 수 있습니다.
+
+7주차 지상검증 그래프는 `ground_test.csv`의 `final_steering_pwm`, `final_throttle_pwm`, `desired_rudder_angle_deg`, `target_path_distance_m`, `multipath_switch_threshold_m`, `active_route_id`와 `route_metrics.csv`의 소루트별 `heading_error_deg`를 사용해 재구성합니다. 실제 출력 체크를 켠 시험에서는 자동주행과 같은 조향·스로틀 명령이 PCA9685로 전달됩니다. 체크하지 않은 시험은 `6000/6450` 중립을 유지합니다. 어느 경우든 `actual_*_pwm`은 물리 센서 피드백이 아니라 PCA9685에 전송한 명령 확인값입니다.
+
+MATLAB에서 다운로드한 시험 ZIP을 푼 뒤 다음을 실행하면 강의자료 형식의 경로/전환 및 제어응답 PNG가 생성됩니다.
+
+```matlab
+addpath('matlab')
+plot_ground_test_week7('C:\path\to\ground_test_YYYYMMDD_HHMMSS')
+```
+
+생성 파일은 `week7_path_and_switch.png`, `week7_control_response.png`입니다. 강의자료의 L/R thrust는 듀얼 추진기 예시이므로, 현재 단일 스로틀+러더 구조에서는 최종 스로틀 PWM과 러더 서보 PWM/각도로 대응해 표시합니다.
 
 CSV의 빈 값은 장치가 제공하지 않았거나 아직 수신되지 않은 값입니다. GUI는 이를 `unsupported`, `no_data`, `invalid`, `stale`로 구분하며 0으로 대체하지 않습니다.
 
@@ -145,7 +158,7 @@ nano /home/jetson/rcboat_ros_data/ntrip.env
 
 ## 실제 보트 시험 전 확인
 
-- 프로펠러 제거 상태에서 조향/스로틀 중립 PWM과 E-STOP을 실측합니다.
+- 프로펠러 제거 상태에서 중립 시험과 실제 출력 선택 시험을 분리하고, 실제 출력 시험 전에 E-STOP을 실측합니다.
 - GPS 장치의 UBX-NAV-PVT UTC, 위치, 속도, COG와 RTK 상태를 실제 장치로 대조합니다.
 - `8765/tcp`는 시험 LAN에서만 허용하고 gateway token 또는 방화벽을 적용합니다.
 - `actual_*_pwm`은 PCA에 전송한 명령이지 물리 위치 센서 피드백이 아닙니다.

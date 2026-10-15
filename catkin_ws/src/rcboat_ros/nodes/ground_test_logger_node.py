@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import pathlib
+import shutil
 import time
 
 import rospy
@@ -25,12 +26,15 @@ CSV_FIELDS = [
     "course_quality", "gps_quality_used_json", "execution_target_type", "execution_target_id",
     "execution_target_name", "selected_route_id", "active_route_id", "previous_active_route_id",
     "test_route_ids", "target_waypoint_number", "target_waypoint_index", "distance_to_waypoint_m",
-    "cross_track_error_m", "multipath_candidate_id", "multipath_switch", "controller_mode",
+    "cross_track_error_m", "target_path_distance_m", "candidate_route_distance_m",
+    "multipath_switch_threshold_m", "switch_threshold_exceeded", "switch_decision",
+    "multipath_candidate_id", "multipath_switch", "controller_mode",
     "target_heading_deg", "heading_error_deg", "desired_rudder_angle_deg", "final_rudder_angle_deg",
     "target_speed_mps", "desired_steering_pwm", "desired_throttle_pwm", "route_candidates_json",
     "final_steering_pwm", "final_throttle_pwm", "actual_steering_pwm", "actual_throttle_pwm",
     "output_send_success", "output_status", "operation_mode", "effective_source",
-    "output_locked", "manual_intervention", "estop", "navigation_valid", "logger_state",
+    "output_locked", "ground_test_actuation_enabled", "throttle_locked", "steering_test_enabled",
+    "manual_intervention", "estop", "navigation_valid", "logger_state",
 ]
 
 ROUTE_METRIC_FIELDS = [
@@ -40,7 +44,8 @@ ROUTE_METRIC_FIELDS = [
 ]
 ROUTE_SWITCH_FIELDS = [
     "sample_index", "logger_time_utc", "elapsed_time_s", "previous_route_id", "new_route_id",
-    "candidate_route_id", "selection_metric",
+    "candidate_route_id", "previous_target_path_distance_m", "candidate_route_distance_m",
+    "switch_threshold_m", "switch_decision", "selection_metric",
 ]
 
 
@@ -67,6 +72,7 @@ class Logger:
         self.execution_target_id = ""
         self.execution_target_name = ""
         self.previous_active_route_id = ""
+        self.actuation_enabled = False
         root = rospy.get_param("/rcboat/ground_test_log_root", "~/rcboat_ros_data/logs/ground_tests")
         self.root = pathlib.Path(os.path.expanduser(root))
         self.root.mkdir(parents=True, exist_ok=True)
@@ -118,7 +124,8 @@ class Logger:
     def publish_status(self):
         self.pub.publish(pack(state=self.state, active=self.state == "recording",
                               folder=str(self.folder or ""), samples=self.count, error=self.last_error,
-                              test_route_ids=self.test_route_ids))
+                              test_route_ids=self.test_route_ids,
+                              actuation_enabled=self.actuation_enabled))
 
     def _write_jsonl(self, key, value):
         handle = self.files.get(key)
@@ -143,7 +150,7 @@ class Logger:
                 if self.folder:
                     raise RuntimeError("ground test already recording")
                 self.start(args.get("route_ids", []), args.get("target_type", "single_route"),
-                           args.get("target_id", ""))
+                           args.get("target_id", ""), bool(args.get("actuation_enabled", False)))
                 result = {"folder": str(self.folder), "test_id": self.folder.name}
             elif request.action == "stop":
                 if not self.folder:
@@ -178,16 +185,24 @@ class Logger:
             selected.append(route)
         return selected
 
-    def start(self, route_ids, target_type="single_route", target_id=""):
+    def start(self, route_ids, target_type="single_route", target_id="", actuation_enabled=False):
         safety = self.cache.get("safety", {})
         actuator = self.cache.get("actuator", {})
         gps = self.cache.get("gps", {})
         if safety.get("mode") != "GROUND_TEST" or safety.get("actuator_locked") is not True:
-            raise RuntimeError("GROUND_TEST safety lock must activate first")
-        if not (actuator.get("command_applied") is True and actuator.get("actual_steering_pwm") == 6000
-                and actuator.get("actual_throttle_pwm") == 6450
-                and 0 <= time.monotonic() - float(actuator.get("monotonic") or 0) <= 1.0):
-            raise RuntimeError("neutral actuator command confirmation is missing")
+            if not (actuation_enabled and safety.get("mode") == "GROUND_TEST" and
+                    safety.get("ground_test_actuation_enabled") is True):
+                raise RuntimeError("GROUND_TEST output mode did not activate")
+        if bool(safety.get("ground_test_actuation_enabled")) != bool(actuation_enabled):
+            raise RuntimeError("ground-test actuation acknowledgement mismatch")
+        output_fresh = 0 <= time.monotonic() - float(actuator.get("monotonic") or 0) <= 1.0
+        steering = actuator.get("actual_steering_pwm"); throttle = actuator.get("actual_throttle_pwm")
+        if not (actuator.get("command_applied") is True and output_fresh and
+                steering is not None and throttle is not None and
+                4900 <= int(steering) <= 7300 and 5800 <= int(throttle) <= 7000):
+            raise RuntimeError("actuator command confirmation is missing")
+        if not actuation_enabled and (int(steering) != 6000 or int(throttle) != 6450):
+            raise RuntimeError("neutral output confirmation is missing")
         if not gps.get("healthy"):
             raise RuntimeError("valid, current GPS FIX is required")
         routes = self._reference_routes(route_ids)
@@ -214,6 +229,7 @@ class Logger:
         self.state = "recording"; self.last_error = ""; self.test_route_ids = [route["id"] for route in routes]
         self.execution_target_type = target_type; self.execution_target_id = target_id
         self.execution_target_name = target_name; self.previous_active_route_id = ""
+        self.actuation_enabled = bool(actuation_enabled)
         self.files["csv"] = (folder / "ground_test.csv").open("w", newline="", encoding="utf-8-sig")
         self.writer = csv.DictWriter(self.files["csv"], fieldnames=CSV_FIELDS, extrasaction="ignore")
         self.writer.writeheader(); self.files["csv"].flush()
@@ -246,11 +262,12 @@ class Logger:
             "started_at_utc": utc_now(), "test_route_ids": self.test_route_ids,
             "execution_target_type": target_type, "execution_target_id": target_id,
             "execution_target_name": target_name, "subroute_count": len(routes),
+            "ground_test_actuation_enabled": self.actuation_enabled,
             "configuration": rospy.get_param("/rcboat", {}),
             "servo_calibration": {key: rospy.get_param("/rcboat/" + key, None) for key in
                                   ("steering_low", "steering_center", "steering_high", "throttle_stop",
                                    "throttle_forward_max", "throttle_reverse_max", "pca_frequency")},
-            "safety_note": "Actual PWM fields are commanded values; physical feedback is unsupported.",
+            "safety_note": "Actuation requires explicit GUI confirmation and removed propellers. Actual PWM fields are commanded values; physical feedback is unsupported.",
         }
         json_dump(folder / "test_metadata.json", metadata)
         json_dump(folder / "analysis_manifest.json", {
@@ -266,28 +283,38 @@ class Logger:
                 "actual GPS path and all reference subroutes",
                 "desired/final rudder angle versus elapsed time",
                 "per-subroute heading error versus elapsed time",
+                "current Target Path distance versus the 2 m switch threshold",
                 "active subroute bands and switch instants",
                 "target and measured speed versus elapsed time",
+                "desired/final steering and throttle PWM versus elapsed time",
             ],
         })
+        analysis_script = pathlib.Path(__file__).resolve().parents[4] / "matlab" / "plot_ground_test_week7.m"
+        if analysis_script.exists():
+            shutil.copy2(str(analysis_script), str(folder / analysis_script.name))
         self._write_jsonl("events", {"type": "GROUND_TEST_STARTED", "event_time_utc": utc_now(),
                                      "test_route_ids": self.test_route_ids,
-                                     "execution_target_type": target_type, "execution_target_id": target_id})
+                                     "execution_target_type": target_type, "execution_target_id": target_id,
+                                     "actuation_enabled": self.actuation_enabled})
         self.publish_status()
 
     def sample(self):
         if not self.folder:
             return
         safety = self.cache.get("safety", {}); actuator = self.cache.get("actuator", {})
-        if safety.get("mode") != "GROUND_TEST" or safety.get("actuator_locked") is not True:
-            self.last_error = "safety mode or output lock lost"
+        if safety.get("mode") != "GROUND_TEST" or bool(safety.get("ground_test_actuation_enabled")) != self.actuation_enabled:
+            self.last_error = "ground-test safety mode or actuation acknowledgement lost"
             self._write_jsonl("events", {"type": "LOGGER_FORCED_STOP", "event_time_utc": utc_now(),
                                          "error": self.last_error})
             self.close(error=self.last_error); return
-        if not (actuator.get("command_applied") is True and actuator.get("actual_steering_pwm") == 6000
-                and actuator.get("actual_throttle_pwm") == 6450
-                and 0 <= time.monotonic() - float(actuator.get("monotonic") or 0) <= 1.0):
-            self.last_error = "neutral actuator confirmation lost or stale"
+        steering = actuator.get("actual_steering_pwm"); throttle = actuator.get("actual_throttle_pwm")
+        confirmed = (actuator.get("command_applied") is True and steering is not None and throttle is not None and
+                     4900 <= int(steering) <= 7300 and 5800 <= int(throttle) <= 7000 and
+                     0 <= time.monotonic() - float(actuator.get("monotonic") or 0) <= 1.0)
+        if confirmed and not self.actuation_enabled:
+            confirmed = int(steering) == 6000 and int(throttle) == 6450
+        if not confirmed:
+            self.last_error = "actuator confirmation lost, invalid or stale"
             self._write_jsonl("events", {"type": "OUTPUT_ERROR", "event_time_utc": utc_now(),
                                          "error": self.last_error})
             self.close(error=self.last_error); return
@@ -321,6 +348,11 @@ class Logger:
             "target_waypoint_index": route.get("target_waypoint_index"),
             "distance_to_waypoint_m": route.get("distance_to_waypoint_m"),
             "cross_track_error_m": route.get("cross_track_error_m"),
+            "target_path_distance_m": route.get("previous_target_path_distance_m"),
+            "candidate_route_distance_m": route.get("candidate_route_distance_m"),
+            "multipath_switch_threshold_m": route.get("switch_threshold_m"),
+            "switch_threshold_exceeded": route.get("switch_threshold_exceeded"),
+            "switch_decision": route.get("switch_decision"),
             "multipath_candidate_id": route.get("candidate_route_id"), "multipath_switch": route.get("multipath_switch"),
             "controller_mode": nav.get("controller_mode"), "target_heading_deg": nav.get("target_heading_deg"),
             "heading_error_deg": nav.get("heading_error_deg"),
@@ -336,6 +368,9 @@ class Logger:
             "output_send_success": actuator.get("command_applied"), "output_status": actuator.get("status") or "no_data",
             "operation_mode": safety.get("mode"), "effective_source": safety.get("effective_source"),
             "output_locked": safety.get("actuator_locked"),
+            "ground_test_actuation_enabled": safety.get("ground_test_actuation_enabled"),
+            "throttle_locked": safety.get("throttle_locked"),
+            "steering_test_enabled": safety.get("steering_test_enabled"),
             "manual_intervention": safety.get("effective_source") in {"MANUAL", "REMOTE"},
             "estop": safety.get("estop"), "navigation_valid": nav.get("valid"), "logger_state": self.state,
         }
@@ -353,6 +388,10 @@ class Logger:
                 "sample_index": self.count, "logger_time_utc": sample_utc, "elapsed_time_s": elapsed,
                 "previous_route_id": self.previous_active_route_id, "new_route_id": active_route_id,
                 "candidate_route_id": route.get("candidate_route_id"),
+                "previous_target_path_distance_m": route.get("previous_target_path_distance_m"),
+                "candidate_route_distance_m": route.get("candidate_route_distance_m"),
+                "switch_threshold_m": route.get("switch_threshold_m"),
+                "switch_decision": route.get("switch_decision"),
                 "selection_metric": route.get("selection_metric"),
             })
             self.files["route_switches"].flush()
@@ -388,7 +427,7 @@ class Logger:
             self.state = "error" if error else "idle"; self.last_error = error
         except Exception as exc:
             self.state = "error"; self.last_error = str(exc)
-        self.folder = None; self.publish_status()
+        self.folder = None; self.actuation_enabled = False; self.publish_status()
 
     def run(self):
         rate = rospy.Rate(rospy.get_param("/rcboat/log_rate_hz", 4.0))

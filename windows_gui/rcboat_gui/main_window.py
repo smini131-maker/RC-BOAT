@@ -460,12 +460,11 @@ class MainWindow(QMainWindow):
         self.multipath_enabled = QCheckBox("대루트 운항 사용")
         self.multipath_enabled.setChecked(True)
         self.multipath_endpoint = self._distance_spin(0.10, 1.00, 0.75, 0.05, " m")
-        self.multipath_off_distance = self._distance_spin(0.0, 100.0, 0.0, 0.5, " m")
+        self.multipath_switch_threshold = self._distance_spin(0.1, 100.0, 2.0, 0.1, " m")
         self.multipath_hold = self._distance_spin(0.0, 30.0, 0.0, 0.5, " s")
         self.multipath_advantage = self._distance_spin(0.0, 50.0, 0.0, 0.5, " m")
         self.multipath_cooldown = self._distance_spin(0.0, 60.0, 0.0, 0.5, " s")
         for ignored in (
-            self.multipath_off_distance,
             self.multipath_hold,
             self.multipath_advantage,
             self.multipath_cooldown,
@@ -480,17 +479,18 @@ class MainWindow(QMainWindow):
         multipath_layout.addWidget(self.multipath_enabled, 0, 0)
         for column, (label, widget) in enumerate((
             ("자동 편성 도움 허용거리", self.multipath_endpoint),
+            ("Target Path 전환 임계값", self.multipath_switch_threshold),
         ), 1):
             box = QVBoxLayout()
             box.addWidget(QLabel(label))
             box.addWidget(widget)
             multipath_layout.addLayout(box, 0, column)
-        multipath_layout.addWidget(self.multipath_apply, 0, 2)
-        multipath_layout.addWidget(self.multipath_status, 1, 0, 1, 3)
+        multipath_layout.addWidget(self.multipath_apply, 0, 3)
+        multipath_layout.addWidget(self.multipath_status, 1, 0, 1, 4)
         for widget in (
             self.multipath_enabled,
             self.multipath_endpoint,
-            self.multipath_off_distance,
+            self.multipath_switch_threshold,
             self.multipath_hold,
             self.multipath_advantage,
             self.multipath_cooldown,
@@ -768,8 +768,8 @@ class MainWindow(QMainWindow):
     def _ground_test_tab(self) -> QWidget:
         page = QWidget(); layout = QVBoxLayout(page)
         warning = QLabel(
-            "실물 GPS를 들고 저장 항로를 따라 걸으며 Multi-Path 전환과 조향 계산값을 기록합니다. "
-            "시작 전에 프로펠러를 분리하고 ESC 추진 전원을 차단하세요."
+            "실물 GPS를 들고 저장 항로를 따라 걸으며 Multi-Path 전환과 자동주행 출력을 기록합니다. "
+            "실제 출력 시험은 반드시 프로펠러를 완전히 분리하고 주변을 통제한 상태에서만 사용하세요."
         )
         warning.setWordWrap(True)
         warning.setStyleSheet("color:#f8bd58; font-weight:700")
@@ -783,6 +783,8 @@ class MainWindow(QMainWindow):
         route_set_layout.addWidget(QLabel("실행 방식")); route_set_layout.addWidget(self.ground_target_type)
         route_set_layout.addWidget(QLabel("시험 대상")); route_set_layout.addWidget(self.ground_target_combo)
         route_set_layout.addStretch(1)
+        self.ground_actuation_enabled = QCheckBox("프로펠러 제거 확인 · 자동주행 조향/스로틀 PWM 실제 출력")
+        self.ground_actuation_enabled.setStyleSheet("color:#ffb36b; font-weight:700")
         controls = QHBoxLayout()
         self.ground_start_button = QPushButton("도보 테스트 시작")
         self.ground_start_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
@@ -794,7 +796,7 @@ class MainWindow(QMainWindow):
         self.ground_download_button = QPushButton("선택 결과 다운로드")
         self.ground_download_button.setIcon(self.style().standardIcon(QStyle.SP_DialogSaveButton))
         self.ground_download_button.clicked.connect(self.download_ground_results)
-        self.ground_status = QLabel("도보 테스트 대기 · 실제 출력 6000 / 6450 잠금")
+        self.ground_status = QLabel("도보 테스트 대기 · 출력 활성화는 매 시험마다 확인 필요")
         controls.addWidget(self.ground_start_button)
         controls.addWidget(self.ground_stop_button)
         controls.addWidget(self.ground_download_button)
@@ -828,6 +830,7 @@ class MainWindow(QMainWindow):
             checkbox.toggled.connect(self._update_ground_download_hint)
         layout.addWidget(warning)
         layout.addWidget(route_set_box)
+        layout.addWidget(self.ground_actuation_enabled)
         layout.addLayout(controls)
         layout.addWidget(download_group)
         layout.addWidget(self.ground_download_hint)
@@ -1664,6 +1667,7 @@ class MainWindow(QMainWindow):
             "SET_MULTIPATH",
             enabled=self.multipath_enabled.isChecked(),
             endpoint_tolerance_m=self.multipath_endpoint.value(),
+            switch_threshold_m=self.multipath_switch_threshold.value(),
         )
         if request_id is not None:
             self._pending_multipath_request = request_id
@@ -1686,13 +1690,21 @@ class MainWindow(QMainWindow):
         answer = QMessageBox.warning(
             self,
             "도보 테스트 안전 확인",
-            "프로펠러를 분리하고 ESC 추진 전원을 차단했습니까?\n"
-            "도보 테스트에서는 계산값을 기록하지만 실제 출력은 조향 6000, 스로틀 6450으로 잠급니다.",
+            ("프로펠러를 완전히 분리하고 주변 사람을 통제했습니까?\n"
+             "체크된 상태에서는 자동주행과 같은 조향·스로틀 PWM이 실제 하드웨어로 출력됩니다.\n"
+             "E-STOP을 즉시 사용할 수 있는 상태에서만 시작하세요."
+             if self.ground_actuation_enabled.isChecked() else
+             "출력 활성화가 선택되지 않았습니다. 조향 6000, 스로틀 6450 중립 잠금으로 기록만 진행합니다."),
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
         if answer == QMessageBox.Yes:
-            self.command("GROUND_TEST_START", target_type=target_type, target_id=target_id)
+            actuation_enabled = self.ground_actuation_enabled.isChecked()
+            self.command("GROUND_TEST_START", target_type=target_type, target_id=target_id,
+                         actuation_enabled=actuation_enabled)
+            # The hazardous opt-in is deliberately non-persistent and must be
+            # confirmed again for every new ground test.
+            self.ground_actuation_enabled.setChecked(False)
 
     def download_ground_results(self) -> None:
         categories = self._selected_ground_download_categories()
@@ -1716,7 +1728,8 @@ class MainWindow(QMainWindow):
         if self.current_mode == "REMOTE":
             self._release_remote_controls()
         self.command("SET_MULTIPATH", enabled=False,
-                     endpoint_tolerance_m=self.multipath_endpoint.value())
+                     endpoint_tolerance_m=self.multipath_endpoint.value(),
+                     switch_threshold_m=self.multipath_switch_threshold.value())
         self.pending_route_id = str(route_id)
         request_id = self.command("SELECT_ROUTE", route_id=route_id)
         if request_id is not None:
@@ -1731,7 +1744,8 @@ class MainWindow(QMainWindow):
         if self.current_mode == "REMOTE":
             self._release_remote_controls()
         self.command("SET_MULTIPATH", enabled=True,
-                     endpoint_tolerance_m=self.multipath_endpoint.value())
+                     endpoint_tolerance_m=self.multipath_endpoint.value(),
+                     switch_threshold_m=self.multipath_switch_threshold.value())
         request_id = self.command("SELECT_MULTIPATH", multipath_id=multipath_id)
         if request_id is not None:
             self.pending_multipath_start_request = request_id
@@ -2338,15 +2352,16 @@ class MainWindow(QMainWindow):
         self.route_record_cancel.setEnabled(recording_active)
         ground = state.get("ground_test") or {}
         ground_active = bool(ground.get("active"))
-        ground_locked = bool(ground.get("actuator_locked", True))
+        ground_actuation = bool(ground.get("actuation_enabled"))
         self.ground_status.setText(
             f"도보 테스트 중 · {int(ground.get('samples') or 0)} samples · "
-            f"실제 출력 6000 / 6450 {'잠금' if ground_locked else '잠금 오류'}"
-            if ground_active else "도보 테스트 대기 · 실제 출력 6000 / 6450 잠금"
+            f"{'자동주행 조향/스로틀 실제 출력' if ground_actuation else '중립 출력 잠금'}"
+            if ground_active else "도보 테스트 대기 · 출력 활성화는 매 시험마다 확인 필요"
         )
         self.ground_start_button.setEnabled(not ground_active)
         self.ground_stop_button.setEnabled(ground_active)
         self.ground_download_button.setEnabled(not ground_active)
+        self.ground_actuation_enabled.setEnabled(not ground_active)
 
         route = state.get("route") or {}
         multipath = route.get("multipath") or {}
@@ -2362,7 +2377,7 @@ class MainWindow(QMainWindow):
             try:
                 self.multipath_enabled.setChecked(bool(multipath.get("enabled", True)))
                 self.multipath_endpoint.setValue(float(multipath.get("endpoint_tolerance_m", 0.75)))
-                self.multipath_off_distance.setValue(0.0)
+                self.multipath_switch_threshold.setValue(float(multipath.get("switch_threshold_m", 2.0)))
                 self.multipath_hold.setValue(0.0)
                 self.multipath_advantage.setValue(0.0)
                 self.multipath_cooldown.setValue(0.0)
@@ -2460,7 +2475,7 @@ class MainWindow(QMainWindow):
             self.multipath_status.setText(
                 f"{'대루트 운항' if multipath.get('enabled', True) else '단일 소루트 운항'} · 구성 {len(group_ids)}개"
                 f" · 대체 {route.get('alternative_route_id') or '-'}"
-                f" · 전환: 최근접 경로 즉시"
+                f" · 전환: 현재 Target Path 거리 > {float(multipath.get('switch_threshold_m', 2.0)):.1f}m이면 최근접 경로"
                 f" · 저장 {multipath_config_path}"
             )
         nav_detail = ""
