@@ -14,20 +14,50 @@ from rcboat_ros.srv import Execute,ExecuteResponse
 import json
 import pathlib
 
+NTRIP_ENV_PATH = pathlib.Path(os.path.expanduser('~/rcboat_ros_data/ntrip.env'))
+
+
+def load_local_env(path):
+    """Read the Jetson-only EnvironmentFile without exporting its secret."""
+    values = {}
+    try:
+        lines = path.read_text(encoding='utf-8').splitlines()
+    except FileNotFoundError:
+        return values
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        key, value = line.split('=', 1)
+        key = key.strip()
+        if not key.startswith('RCBOAT_NTRIP_'):
+            continue
+        value = value.strip()
+        try:
+            values[key] = str(json.loads(value))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            values[key] = value.strip('"\'')
+    return values
+
+
 class Ntrip:
     def __init__(self):
+        local = load_local_env(NTRIP_ENV_PATH)
+        setting = lambda key, default='': os.getenv(key, local.get(key, default))
         self.gps={}
         self.received=0
         self.connected=False
         self.last_error=''
         self.last_correction=0
-        self.enabled=os.getenv('RCBOAT_NTRIP_ENABLED','false').lower()=='true'
-        self.host=os.getenv('RCBOAT_NTRIP_HOST','')
-        self.port=int(os.getenv('RCBOAT_NTRIP_PORT','2101'))
-        self.mount=os.getenv('RCBOAT_NTRIP_MOUNTPOINT','').lstrip('/')
-        self.user=os.getenv('RCBOAT_NTRIP_USERNAME','')
-        self.password=os.getenv('RCBOAT_NTRIP_PASSWORD','')
-        self.tls=os.getenv('RCBOAT_NTRIP_TLS','false').lower()=='true'
+        # Environment variables win, while the local file also works with a
+        # direct `roslaunch` that is not started by systemd.
+        self.enabled=setting('RCBOAT_NTRIP_ENABLED','false').lower()=='true'
+        self.host=setting('RCBOAT_NTRIP_HOST')
+        self.port=int(setting('RCBOAT_NTRIP_PORT','2101'))
+        self.mount=setting('RCBOAT_NTRIP_MOUNTPOINT').lstrip('/')
+        self.user=setting('RCBOAT_NTRIP_USERNAME')
+        self.password=setting('RCBOAT_NTRIP_PASSWORD')
+        self.tls=setting('RCBOAT_NTRIP_TLS','false').lower()=='true'
         self.reconnect=False
         rospy.Service('/rcboat/ntrip/execute',Execute,self.execute)
         self.pub=rospy.Publisher('/rcboat/gps/rtcm',UInt8MultiArray,queue_size=10)
@@ -46,7 +76,8 @@ class Ntrip:
                     if key=='port':val=int(val)
                     setattr(self,attribute,val)
             self.reconnect=True
-            path=pathlib.Path(os.path.expanduser('~/rcboat_ros_data/ntrip.env'))
+            path=NTRIP_ENV_PATH
+            path.parent.mkdir(parents=True,exist_ok=True)
             values={'RCBOAT_NTRIP_ENABLED':str(self.enabled).lower(),'RCBOAT_NTRIP_HOST':self.host,
                     'RCBOAT_NTRIP_PORT':str(self.port),'RCBOAT_NTRIP_MOUNTPOINT':self.mount,
                     'RCBOAT_NTRIP_USERNAME':self.user,'RCBOAT_NTRIP_PASSWORD':self.password,
@@ -54,11 +85,12 @@ class Ntrip:
             # EnvironmentFile uses KEY=VALUE syntax; quote values so spaces and delimiters are preserved.
             payload=''.join(k+'='+json.dumps(str(v))+'\n' for k,v in values.items())
             tmp=path.with_suffix('.tmp');tmp.write_text(payload,encoding='utf-8');tmp.chmod(0o600)
-            tmp.replace(path)
+            tmp.replace(path);path.chmod(0o600)
             self.events.publish(pack(type='CONFIG_CHANGE',change_type='ntrip',
                                      after={'enabled':self.enabled,'host':self.host,'port':self.port,
                                             'mountpoint':self.mount,'tls':self.tls,'credentials':'redacted'}))
-            return ExecuteResponse(True,pack(enabled=self.enabled,host=self.host,mountpoint=self.mount,tls=self.tls))
+            return ExecuteResponse(True,pack(enabled=self.enabled,host=self.host,mountpoint=self.mount,
+                                             tls=self.tls,credentials_saved=bool(self.user and self.password)))
         except Exception as exc:return ExecuteResponse(False,pack(error=str(exc)))
     def position(self,msg):
         from rcboat_ros.common import unpack
@@ -79,7 +111,9 @@ class Ntrip:
             if not self.enabled or not self.host or not self.mount:
                 self.status.publish(pack(enabled=self.enabled,connected=False,host=self.host,port=self.port,
                     mountpoint=self.mount,tls=self.tls,bytes_received=self.received,
-                    correction_age=None,last_correction_age_s=None,last_error='NTRIP disabled or unconfigured'))
+                    correction_age=None,last_correction_age_s=None,
+                    credentials_saved=bool(self.user and self.password),
+                    last_error='NTRIP disabled or unconfigured'))
                 rospy.sleep(2);continue
             try:
                 sock=socket.create_connection((self.host,self.port),timeout=8)
@@ -110,14 +144,16 @@ class Ntrip:
                     self.received+=len(chunk);self.last_correction=time.monotonic()
                     self.status.publish(pack(enabled=True,connected=True,host=self.host,port=self.port,
                         mountpoint=self.mount,tls=self.tls,bytes_received=self.received,
-                        correction_age=0.0,last_correction_age_s=0.0,last_error=''))
+                        correction_age=0.0,last_correction_age_s=0.0,
+                        credentials_saved=bool(self.user and self.password),last_error=''))
                 sock.close()
             except Exception as e:
                 self.connected=False;self.last_error=str(e)
                 age=time.monotonic()-self.last_correction if self.last_correction else None
                 self.status.publish(pack(enabled=True,connected=False,host=self.host,port=self.port,
                     mountpoint=self.mount,tls=self.tls,bytes_received=self.received,
-                    correction_age=age,last_correction_age_s=age,last_error=self.last_error))
+                    correction_age=age,last_correction_age_s=age,
+                    credentials_saved=bool(self.user and self.password),last_error=self.last_error))
                 rospy.logwarn('NTRIP connection error: %s',e)
                 rospy.sleep(4)
 if __name__=='__main__':

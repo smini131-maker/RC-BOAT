@@ -17,7 +17,7 @@ from rcboat_ros.path_tracking import RouteManager
 
 class ReleaseV210(unittest.TestCase):
     def test_release_identity_and_empty_default_routes(self):
-        self.assertEqual((ROOT / "VERSION").read_text().strip(), "2.1.1")
+        self.assertEqual((ROOT / "VERSION").read_text().strip(), "2.1.2")
         routes = json.loads((ROOT / "catkin_ws/src/rcboat_ros/config/routes.json").read_text())
         self.assertEqual(routes["routes"], [])
         self.assertEqual(routes["multipaths"], [])
@@ -205,6 +205,16 @@ class ReleaseV210(unittest.TestCase):
         ignores = (ROOT / ".gitignore").read_text(encoding="utf-8")
         self.assertIn("**/ntrip.local.json", ignores)
         self.assertIn("**/ntrip.env", ignores)
+
+    def test_ntrip_secret_is_jetson_local_and_direct_roslaunch_can_load_it(self):
+        node = (ROOT / "catkin_ws/src/rcboat_ros/nodes/ntrip_node.py").read_text(encoding="utf-8")
+        setup = (ROOT / "deployment/jetson/configure_ntrip_local.py").read_text(encoding="utf-8")
+        self.assertIn("~/rcboat_ros_data/ntrip.env", node)
+        self.assertIn("load_local_env(NTRIP_ENV_PATH)", node)
+        self.assertIn("credentials_saved", node)
+        self.assertIn("getpass.getpass", setup)
+        self.assertIn("chmod(0o600)", setup)
+        self.assertNotIn("RCBOAT_NTRIP_PASSWORD=example", node + setup)
 
     def test_all_formal_python_sources_compile(self):
         for base in (ROOT / "catkin_ws", ROOT / "windows_gui"):

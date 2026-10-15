@@ -1,4 +1,4 @@
-# RC-BOAT ROS Noetic v2.1.1
+# RC-BOAT ROS Noetic v2.1.2
 
 정식 실행 구조는 ROS Noetic뿐입니다. Jetson backend는 `roslaunch rcboat_ros rcboat.launch`, Windows GUI는 ROS gateway TCP(기본 `8765`)로 통신합니다. SSH는 배포·터미널용 보조 채널이며, SSH가 끊겨도 ROS gateway가 살아 있으면 상태 조회와 `GROUND_TEST_STOP`이 동작합니다.
 
@@ -82,7 +82,7 @@ EXE 빌드:
 .\build.bat
 ```
 
-결과: `windows_gui\dist\RCBoatControl_ROS_v2.1.1.exe`
+결과: `windows_gui\dist\RCBoatControl_ROS_v2.1.2.exe`
 
 GUI 상단 상태는 서로 독립입니다: `SSH connected/disconnected`, `ROS master online/offline`, `ROS gateway online/offline`, `logger idle/recording/stopping/error`, `GPS valid/invalid/stale`, `RTK fix/float/dgps/no_fix/no_data`.
 
@@ -149,14 +149,26 @@ CSV의 빈 값은 장치가 제공하지 않았거나 아직 수신되지 않은
 
 ## RTK/NTRIP 비밀정보
 
-자격정보를 저장소 파일에 넣지 마십시오. Jetson 로컬 전용 `/home/jetson/rcboat_ros_data/ntrip.env`(권한 `0600`) 또는 환경변수를 사용합니다.
+자격정보를 저장소 파일에 넣지 마십시오. Jetson 로컬 전용 `/home/jetson/rcboat_ros_data/ntrip.env`(권한 `0600`) 또는 환경변수를 사용합니다. 이 파일은 Git 배포와 GUI ZIP에 포함되지 않으며, 재배포 후에도 보존됩니다. `ntrip_node`가 파일을 직접 읽으므로 systemd와 직접 `roslaunch` 실행 모두 같은 설정을 사용합니다.
 
 ```bash
-install -m 600 /dev/null /home/jetson/rcboat_ros_data/ntrip.env
-nano /home/jetson/rcboat_ros_data/ntrip.env
+cd /home/jetson/rcboat_ros_ws
+python3 deployment/jetson/configure_ntrip_local.py
 ```
 
-필드: `RCBOAT_NTRIP_ENABLED`, `RCBOAT_NTRIP_HOST`, `RCBOAT_NTRIP_PORT`, `RCBOAT_NTRIP_MOUNTPOINT`, `RCBOAT_NTRIP_USERNAME`, `RCBOAT_NTRIP_PASSWORD`, `RCBOAT_NTRIP_TLS`. 이 파일은 `.gitignore` 대상입니다.
+화면 안내에 따라 Host, Port, Mount Point, Username을 입력하고 Password는 숨김 입력합니다. 기존 파일이 있으면 비밀번호 입력에서 Enter만 눌러 저장된 비밀번호를 유지합니다. 즉시 적용하려면 ROS 실행 방식에 맞춰 다음 중 하나만 수행합니다.
+
+```bash
+# rcboat_ros.service로 실행 중일 때
+sudo systemctl restart rcboat_ros.service
+
+# 터미널에서 roslaunch로 직접 실행 중일 때: Ctrl+C 후 다시 실행
+source /opt/ros/noetic/setup.bash
+source /home/jetson/rcboat_ros_ws/catkin_ws/devel/setup.bash
+roslaunch rcboat_ros rcboat.launch
+```
+
+GUI에서 비밀번호를 한 번 입력하고 `설정 저장 · 연결`을 눌러도 같은 로컬 파일에 저장됩니다. 이후 비밀번호 칸은 비워 두면 기존 비밀번호를 유지합니다. 필드: `RCBOAT_NTRIP_ENABLED`, `RCBOAT_NTRIP_HOST`, `RCBOAT_NTRIP_PORT`, `RCBOAT_NTRIP_MOUNTPOINT`, `RCBOAT_NTRIP_USERNAME`, `RCBOAT_NTRIP_PASSWORD`, `RCBOAT_NTRIP_TLS`. 이 파일은 `.gitignore` 대상입니다.
 
 ## 실제 보트 시험 전 확인
 

@@ -47,7 +47,7 @@ from .ssh_worker import SSHWorker
 from .widgets import MetricCard, RoutePlot, StatusCard, TelemetryGraph
 
 
-APP_VERSION = "2.1.1"
+APP_VERSION = "2.1.2"
 
 
 STYLE = """
@@ -593,7 +593,7 @@ class MainWindow(QMainWindow):
         self.ntrip_username.setPlaceholderText("발급 ID · 이 PC에 기억")
         self.ntrip_password = QLineEdit()
         self.ntrip_password.setEchoMode(QLineEdit.Password)
-        self.ntrip_password.setPlaceholderText("비밀번호 변경 시에만 입력")
+        self.ntrip_password.setPlaceholderText("Jetson 로컬 저장 · 변경 시에만 입력")
         self.ntrip_tls = QCheckBox("TLS")
 
         self.ntrip_apply = QPushButton("설정 저장 · 연결")
@@ -2210,6 +2210,11 @@ class MainWindow(QMainWindow):
 
         ntrip_enabled = bool(ntrip.get("enabled"))
         ntrip_connected = bool(ntrip.get("connected"))
+        credentials_saved = bool(ntrip.get("credentials_saved"))
+        self.ntrip_password.setPlaceholderText(
+            "Jetson에 저장됨 · 변경 시에만 입력"
+            if credentials_saved else "Jetson에 저장할 비밀번호 입력"
+        )
         if not ntrip_enabled:
             link_state = "비활성"
         elif ntrip_connected:

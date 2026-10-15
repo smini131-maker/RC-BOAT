@@ -68,6 +68,7 @@ class MockWorker(QThread):
             "enabled": False, "connected": False, "host": "", "port": 2101,
             "mountpoint": "", "tls": False, "last_correction_age_s": None,
             "bytes_received": 0, "reconnect_count": 0, "last_error": "",
+            "credentials_saved": False,
         }
 
     def stop(self) -> None:
@@ -244,6 +245,8 @@ class MockWorker(QThread):
                     "last_correction_age_s": 0.2 if kwargs.get("enabled") else None,
                     "last_error": "",
                 })
+                if kwargs.get("password"):
+                    self.ntrip["credentials_saved"] = True
             elif command == "DISABLE_NTRIP":
                 self.ntrip["enabled"] = False
                 self.ntrip["connected"] = False

@@ -11,6 +11,9 @@ cd "$ROOT"
 chmod +x catkin_ws/src/rcboat_ros/nodes/*.py deployment/jetson/*.sh deployment/jetson/*.py
 sudo systemctl stop rcboat_ros.service >/dev/null 2>&1 || true
 mkdir -p /home/jetson/rcboat_ros_data/logs/ground_tests /home/jetson/rcboat_ros_data/gps_logs
+if [[ -f /home/jetson/rcboat_ros_data/ntrip.env ]]; then
+  chmod 600 /home/jetson/rcboat_ros_data/ntrip.env
+fi
 if [[ ! -f /home/jetson/rcboat_ros_data/routes.json ]]; then
   cp "$ROOT/catkin_ws/src/rcboat_ros/config/routes.json" /home/jetson/rcboat_ros_data/routes.json
 fi
@@ -23,4 +26,4 @@ sudo systemctl is-active --quiet rcboat_ros.service || {
   echo 'rcboat_ros.service failed. Inspect: journalctl -u rcboat_ros.service -n 100 --no-pager' >&2
   exit 4
 }
-echo 'RCBoat ROS Noetic v2.1.1 installed and running.'
+echo 'RCBoat ROS Noetic v2.1.2 installed and running.'
