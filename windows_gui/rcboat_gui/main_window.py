@@ -47,7 +47,7 @@ from .ssh_worker import SSHWorker
 from .widgets import MetricCard, RoutePlot, StatusCard, TelemetryGraph
 
 
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.1.1"
 
 
 STYLE = """
@@ -802,29 +802,6 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.ground_download_button)
         controls.addStretch(1)
         controls.addWidget(self.ground_status)
-        marker_group = QGroupBox("시험 구간 마커")
-        marker_layout = QHBoxLayout(marker_group)
-        marker_help = QLabel("배를 의도적으로 꺾기 직전에 외란 시작, 다시 정상 보행으로 돌아온 직후 외란 종료")
-        marker_help.setWordWrap(True); marker_help.setObjectName("sectionHint")
-        self.ground_normal_marker_button = QPushButton("정상주행 표시")
-        self.ground_disturbance_start_button = QPushButton("외란 시작")
-        self.ground_disturbance_start_button.setStyleSheet("color:#ffb36b; font-weight:700")
-        self.ground_disturbance_end_button = QPushButton("외란 종료")
-        for button in (self.ground_normal_marker_button, self.ground_disturbance_start_button,
-                       self.ground_disturbance_end_button):
-            button.setEnabled(False)
-        self.ground_normal_marker_button.clicked.connect(
-            lambda: self.command("GROUND_TEST_MARK", marker_type="NORMAL_OPERATION"))
-        self.ground_disturbance_start_button.clicked.connect(
-            lambda: self.command("GROUND_TEST_MARK", marker_type="DISTURBANCE_START"))
-        self.ground_disturbance_end_button.clicked.connect(
-            lambda: self.command("GROUND_TEST_MARK", marker_type="DISTURBANCE_END"))
-        self.ground_marker_status = QLabel("마커 대기")
-        marker_layout.addWidget(marker_help, 1)
-        marker_layout.addWidget(self.ground_normal_marker_button)
-        marker_layout.addWidget(self.ground_disturbance_start_button)
-        marker_layout.addWidget(self.ground_disturbance_end_button)
-        marker_layout.addWidget(self.ground_marker_status)
         download_group = QGroupBox("완료된 시험 ZIP 가져오기")
         download_grid = QGridLayout(download_group)
         self.ground_test_combo = QComboBox(); self.ground_test_combo.addItem("최신 완료 시험", "")
@@ -855,7 +832,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(route_set_box)
         layout.addWidget(self.ground_actuation_enabled)
         layout.addLayout(controls)
-        layout.addWidget(marker_group)
         layout.addWidget(download_group)
         layout.addWidget(self.ground_download_hint)
         layout.addStretch(1)
@@ -1069,10 +1045,6 @@ class MainWindow(QMainWindow):
             self.ground_download_button,
         ):
             widget.setEnabled(connected)
-        if not connected:
-            for button in (self.ground_normal_marker_button, self.ground_disturbance_start_button,
-                           self.ground_disturbance_end_button):
-                button.setEnabled(False)
         for widget in getattr(self, "simulation_controls", []):
             widget.setEnabled(connected and self.is_simulation)
         self._update_route_action_state()
@@ -2381,8 +2353,6 @@ class MainWindow(QMainWindow):
         ground = state.get("ground_test") or {}
         ground_active = bool(ground.get("active"))
         ground_actuation = bool(ground.get("actuation_enabled"))
-        disturbance_active = bool(ground.get("disturbance_active"))
-        marker_count = int(ground.get("marker_count") or 0)
         self.ground_status.setText(
             f"도보 테스트 중 · {int(ground.get('samples') or 0)} samples · "
             f"{'자동주행 조향/스로틀 실제 출력' if ground_actuation else '중립 출력 잠금'}"
@@ -2392,14 +2362,6 @@ class MainWindow(QMainWindow):
         self.ground_stop_button.setEnabled(ground_active)
         self.ground_download_button.setEnabled(not ground_active)
         self.ground_actuation_enabled.setEnabled(not ground_active)
-        self.ground_normal_marker_button.setEnabled(ground_active and not disturbance_active)
-        self.ground_disturbance_start_button.setEnabled(ground_active and not disturbance_active)
-        self.ground_disturbance_end_button.setEnabled(ground_active and disturbance_active)
-        if ground_active:
-            phase_text = "외란 구간 기록 중" if disturbance_active else "정상주행 구간"
-            self.ground_marker_status.setText(f"{phase_text} · 마커 {marker_count}개")
-        else:
-            self.ground_marker_status.setText("마커 대기")
 
         route = state.get("route") or {}
         multipath = route.get("multipath") or {}

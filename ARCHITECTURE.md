@@ -1,4 +1,4 @@
-# RC-BOAT ROS Noetic v2.1.0 architecture
+# RC-BOAT ROS Noetic v2.1.1 architecture
 
 ```text
 Windows GUI

@@ -1,8 +1,10 @@
-# RC-BOAT ROS Noetic v2.1.0
+# RC-BOAT ROS Noetic v2.1.1
 
 정식 실행 구조는 ROS Noetic뿐입니다. Jetson backend는 `roslaunch rcboat_ros rcboat.launch`, Windows GUI는 ROS gateway TCP(기본 `8765`)로 통신합니다. SSH는 배포·터미널용 보조 채널이며, SSH가 끊겨도 ROS gateway가 살아 있으면 상태 조회와 `GROUND_TEST_STOP`이 동작합니다.
 
 기존 1.6.0 소스는 `release/1.6.0` 브랜치와 `release/archive/v1.6.0/`에 보존됩니다. `beta/`는 개발 이력일 뿐 정식 실행 위치가 아닙니다.
+
+버전은 `MAJOR.MINOR.PATCH` 형식을 사용합니다. 호환성이 깨지는 구조 변경은 MAJOR, 기능 추가는 MINOR, 수정·정리는 PATCH를 올립니다. GUI 제목, ROS 응답, `VERSION`, EXE와 배포 ZIP 파일명은 항상 같은 버전으로 맞춥니다.
 
 ## 정식 디렉터리
 
@@ -80,7 +82,7 @@ EXE 빌드:
 .\build.bat
 ```
 
-결과: `windows_gui\dist\RCBoatControl_ROS_v2.1.0.exe`
+결과: `windows_gui\dist\RCBoatControl_ROS_v2.1.1.exe`
 
 GUI 상단 상태는 서로 독립입니다: `SSH connected/disconnected`, `ROS master online/offline`, `ROS gateway online/offline`, `logger idle/recording/stopping/error`, `GPS valid/invalid/stale`, `RTK fix/float/dgps/no_fix/no_data`.
 
@@ -93,10 +95,9 @@ GUI 상단 상태는 서로 독립입니다: `SSH connected/disconnected`, `ROS 
 5. 프로펠러를 완전히 제거하고 주변 사람을 통제합니다. 계산·기록만 할 때는 출력 활성화를 체크하지 않고 ESC 추진 전원을 분리합니다. 자동주행과 동일한 실제 PWM 검증이 필요할 때만 ESC를 연결하고 GUI의 **프로펠러 제거 확인 · 자동주행 조향/스로틀 PWM 실제 출력**을 매 시험마다 명시적으로 체크합니다.
 6. ROS master/gateway, GPS valid, 필요한 경우 RTK 상태를 확인합니다.
 7. **도보 테스트 시작**을 누르고 실제 배를 들고 기준 경로 위를 이동합니다.
-8. 평상시에는 **정상주행 표시**, 배를 의도적으로 꺾기 직전에는 **외란 시작**, 정상 보행으로 돌아온 직후에는 **외란 종료**를 누릅니다. 마커 시각과 당시 GPS·Target Path·거리·제어 출력이 함께 저장됩니다.
-9. 시험 중 항로·대루트·설정을 바꾸면 시각, 변경 내용, 당시 항로 snapshot이 별도 로그에 기록됩니다.
-10. **도보 테스트 종료**를 누릅니다. 이 명령은 SSH 상태가 아니라 ROS gateway를 통해 전달됩니다.
-11. 완료된 시험을 선택하고 **선택 결과 다운로드**를 눌러 ZIP을 PC로 가져옵니다.
+8. 시험 중 항로·대루트·설정을 바꾸면 시각, 변경 내용, 당시 항로 snapshot이 별도 로그에 기록됩니다.
+9. **도보 테스트 종료**를 누릅니다. 이 명령은 SSH 상태가 아니라 ROS gateway를 통해 전달됩니다.
+10. 완료된 시험을 선택하고 **선택 결과 다운로드**를 눌러 ZIP을 PC로 가져옵니다.
 
 Jetson 저장 위치:
 
@@ -109,7 +110,6 @@ Jetson 저장 위치:
     reference_routes.json
     route_metrics.csv
     route_switches.csv
-    test_markers.csv
     route_changes.jsonl
     events.jsonl
     analysis_manifest.json
@@ -123,9 +123,8 @@ Jetson 저장 위치:
 - `reference_routes.*`: 시험 시작 시 선택한 대루트의 모든 소루트(또는 단일 소루트) 전체 좌표/번호/UTM 고정본
 - `route_metrics.csv`: sample × 소루트 장기형 데이터. 각 후보 항로의 거리, 횡오차, 목표점, 목표 헤딩, 헤딩 오차를 저장합니다.
 - `route_switches.csv`: 활성 소루트 전환 시각, 전환 전후 항로, 현재 Target Path 거리, 후보 거리, 2m 임계값과 전환 판정
-- `test_markers.csv`: 정상주행/외란 시작/외란 종료 버튼 시각과 당시 GPS, 활성 항로, Target Path 거리, 조향·스로틀 snapshot
 - `route_changes.jsonl`: 시험 중 항로·설정 변경 시각과 전후 정보
-- `events.jsonl`: 시험 마커, 수동 개입, 모드, 비상정지, 오류, 정지 이벤트. 비정상 종료 후 logger가 다시 시작되면 `LOGGER_RESTART_DETECTED`가 추가됩니다.
+- `events.jsonl`: 수동 개입, 모드, 비상정지, 오류, 정지 이벤트. 비정상 종료 후 logger가 다시 시작되면 `LOGGER_RESTART_DETECTED`가 추가됩니다.
 - `test_metadata.json`: 코드 버전, ROS 설정, 서보 보정, 시작/종료 정보
 - `analysis_manifest.json`: 지도, 조향각, 항로별 헤딩 오차, 활성 항로 밴드, 목표/실제 속도 그래프를 재생성하기 위한 데이터 관계 설명
 - `plot_ground_test_week7.m`: 다운로드한 시험 폴더에서 강의자료 형식 PNG 그래프를 생성하는 MATLAB 스크립트
@@ -144,7 +143,7 @@ addpath('matlab')
 plot_ground_test_week7('C:\path\to\ground_test_YYYYMMDD_HHMMSS')
 ```
 
-생성 파일은 `week7_path_and_switch.png`, `week7_control_response.png`입니다. `test_markers.csv`가 있으면 모든 시간 그래프에 외란 구간을 음영으로 표시하고 시작/종료/정상주행 마커선을 추가합니다. 강의자료의 L/R thrust는 듀얼 추진기 예시이므로, 현재 단일 스로틀+러더 구조에서는 최종 스로틀 PWM과 러더 서보 PWM/각도로 대응해 표시합니다.
+생성 파일은 `week7_path_and_switch.png`, `week7_control_response.png`입니다. 강의자료의 L/R thrust는 듀얼 추진기 예시이므로, 현재 단일 스로틀+러더 구조에서는 최종 스로틀 PWM과 러더 서보 PWM/각도로 대응해 표시합니다.
 
 CSV의 빈 값은 장치가 제공하지 않았거나 아직 수신되지 않은 값입니다. GUI는 이를 `unsupported`, `no_data`, `invalid`, `stale`로 구분하며 0으로 대체하지 않습니다.
 

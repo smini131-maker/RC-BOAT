@@ -122,7 +122,7 @@ class SSHWorker(QThread):
             "CANCEL_GPS_RECORDING": "record_cancel", "CONFIGURE_NTRIP": "configure",
             "SET_GPS_SETTINGS": "set_gps_settings", "START_GPS_LOGGING": "gps_log_start",
             "STOP_GPS_LOGGING": "gps_log_stop", "GROUND_TEST_START": "ground_start",
-            "GROUND_TEST_MARK": "ground_mark", "GROUND_TEST_STOP": "ground_stop",
+            "GROUND_TEST_STOP": "ground_stop",
         }
         if command == "SET_MODE":
             mode = str(kwargs.get("mode", "AUTO")).upper()
@@ -227,7 +227,7 @@ class SSHWorker(QThread):
         }
         logger_state = str(ground.get("state") or ("recording" if ground.get("active") else "idle"))
         return {
-            "type": "telemetry", "software_version": response.get("version", "2.1.0"),
+            "type": "telemetry", "software_version": response.get("version", "2.1.1"),
             "backend": {"name": str(response.get("backend") or "ROS Noetic"),
                         "ready": bool(response.get("gateway_online", True)), "node_count": len(nodes),
                         "master_online": bool(response.get("master_online")),
@@ -276,10 +276,7 @@ class SSHWorker(QThread):
                             "folder": ground.get("folder", ""),
                             "actuator_locked": bool(safety.get("actuator_locked", True)),
                             "actuation_enabled": bool(ground.get("actuation_enabled",
-                                                                  safety.get("ground_test_actuation_enabled", False))),
-                            "test_phase": str(ground.get("test_phase") or "normal"),
-                            "disturbance_active": bool(ground.get("disturbance_active", False)),
-                            "marker_count": int(ground.get("marker_count") or 0)},
+                                                                  safety.get("ground_test_actuation_enabled", False)))},
             "route": {"selected_route_id": selected_id, "selected_route_name": selected.get("name", selected_id),
                       "selected_multipath_id": str(route.get("selected_multipath_id") or ""),
                       "execution_target_type": route.get("execution_target_type") or
@@ -406,7 +403,7 @@ class SSHWorker(QThread):
                         self._backend_error = ""
                     except Exception as exc:
                         message = str(exc)
-                        offline = {"success": True, "version": "2.1.0", "backend": "ROS Noetic",
+                        offline = {"success": True, "version": "2.1.1", "backend": "ROS Noetic",
                                    "master_online": False, "gateway_online": False, "telemetry": {}, "nodes": []}
                         self.telemetry.emit(self._normalize(offline, self._client is not None))
                         if message != self._backend_error or now - self._backend_error_at >= 15.0:

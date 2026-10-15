@@ -9,7 +9,6 @@ testFolder = string(testFolder);
 sampleFile = fullfile(testFolder, "ground_test.csv");
 referenceFile = fullfile(testFolder, "reference_routes.csv");
 metricFile = fullfile(testFolder, "route_metrics.csv");
-markerFile = fullfile(testFolder, "test_markers.csv");
 assert(isfile(sampleFile), "Missing ground_test.csv: %s", sampleFile);
 assert(isfile(referenceFile), "Missing reference_routes.csv: %s", referenceFile);
 assert(isfile(metricFile), "Missing route_metrics.csv: %s", metricFile);
@@ -17,10 +16,6 @@ assert(isfile(metricFile), "Missing route_metrics.csv: %s", metricFile);
 samples = readtable(sampleFile, "VariableNamingRule", "preserve");
 references = readtable(referenceFile, "VariableNamingRule", "preserve");
 metrics = readtable(metricFile, "VariableNamingRule", "preserve");
-markers = table();
-if isfile(markerFile)
-    markers = readtable(markerFile, "VariableNamingRule", "preserve");
-end
 assert(height(samples) > 0, "ground_test.csv contains no samples");
 
 t = samples.elapsed_time_s;
@@ -61,7 +56,6 @@ else
 end
 scatter(t(switchRows), samples.target_path_distance_m(switchRows), 55, "filled", ...
     "MarkerFaceColor", [0.85 0.2 0.1], "DisplayName", "Target Path switch");
-addGroundTestMarkers(markers);
 xlabel("Time (s)"); ylabel("Distance (m)");
 title("Target Path Distance: <=2 m Keep, >2 m Switch"); legend("Location", "best");
 
@@ -77,7 +71,6 @@ for index = 1:numel(metricRouteIds)
         "DisplayName", routeName + " heading error");
 end
 yline(0, "r--", "Desired 0 deg", "LineWidth", 1.2, "HandleVisibility", "off");
-addGroundTestMarkers(markers);
 xlabel("Time (s)"); ylabel("Heading angular error (deg)");
 title("Per-Subroute Heading Angular Error"); legend("Location", "best");
 
@@ -89,7 +82,6 @@ for index = 1:numel(routeIds)
     stairs(t, double(rows) * index, "LineWidth", 1.5, ...
         "Color", colors(index, :), "DisplayName", routeIds(index));
 end
-addGroundTestMarkers(markers);
 xlabel("Time (s)"); ylabel("Active Target Path index");
 title("Active Target Path and Switch Instants"); legend("Location", "best");
 
@@ -107,7 +99,6 @@ plot(t, samples.desired_steering_pwm, "Color", [0.45 0.45 0.45], ...
     "LineStyle", "--", "LineWidth", 1.2, "DisplayName", "Desired steering PWM");
 plot(t, samples.final_steering_pwm, "b-", "LineWidth", 1.8, ...
     "DisplayName", "Final steering PWM");
-addGroundTestMarkers(markers);
 xlabel("Time (s)"); ylabel("Steering PWM");
 title("Rudder Servo Command"); legend("Location", "best");
 
@@ -117,7 +108,6 @@ plot(t, samples.desired_throttle_pwm, "Color", [0.45 0.45 0.45], ...
     "LineStyle", "--", "LineWidth", 1.2, "DisplayName", "Desired throttle PWM");
 plot(t, samples.final_throttle_pwm, "Color", [0.85 0.25 0.1], ...
     "LineWidth", 1.8, "DisplayName", "Final throttle PWM");
-addGroundTestMarkers(markers);
 xlabel("Time (s)"); ylabel("Throttle PWM");
 title("Propulsion Command (Lecture L/R Thrust Equivalent)");
 legend("Location", "best");
@@ -129,7 +119,6 @@ plot(t, samples.desired_rudder_angle_deg, "k--", "LineWidth", 1.2, ...
 plot(t, samples.final_rudder_angle_deg, "m-", "LineWidth", 1.8, ...
     "DisplayName", "Final rudder angle");
 yline(0, "r:", "HandleVisibility", "off"); xlabel("Time (s)"); ylabel("Rudder angle (deg)");
-addGroundTestMarkers(markers);
 title("Rudder Direction and Response"); legend("Location", "best");
 
 nexttile;
@@ -138,7 +127,6 @@ plot(t, samples.speed_mps, "Color", [0.1 0.65 0.9], "LineWidth", 1.8, ...
     "DisplayName", "GPS speed");
 plot(t, samples.target_speed_mps, "Color", [0.7 0.2 0.9], ...
     "LineStyle", "--", "LineWidth", 1.5, "DisplayName", "Desired speed");
-addGroundTestMarkers(markers);
 xlabel("Time (s)"); ylabel("Speed (m/s)");
 title("Actual and Desired Speed"); legend("Location", "best");
 
@@ -147,47 +135,4 @@ exportgraphics(gcf, controlOutput, "Resolution", 300);
 outputFiles(end + 1) = controlOutput;
 
 fprintf("Created:\n%s\n", strjoin(outputFiles, newline));
-end
-
-function addGroundTestMarkers(markers)
-% Shade deliberate disturbance intervals and draw operator marker instants.
-if isempty(markers) || ~all(ismember(["elapsed_time_s", "marker_type"], ...
-        string(markers.Properties.VariableNames)))
-    return;
-end
-ax = gca;
-markerTimes = double(markers.elapsed_time_s);
-markerTypes = upper(string(markers.marker_type));
-valid = isfinite(markerTimes) & strlength(markerTypes) > 0;
-markerTimes = markerTimes(valid); markerTypes = markerTypes(valid);
-if isempty(markerTimes)
-    return;
-end
-yl = ylim(ax); xl = xlim(ax);
-startRows = find(markerTypes == "DISTURBANCE_START");
-for index = 1:numel(startRows)
-    startRow = startRows(index); startTime = markerTimes(startRow);
-    endRow = find(markerTypes == "DISTURBANCE_END" & markerTimes >= startTime, 1);
-    if isempty(endRow)
-        endTime = xl(2);
-    else
-        endTime = markerTimes(endRow);
-    end
-    area = patch(ax, [startTime endTime endTime startTime], ...
-        [yl(1) yl(1) yl(2) yl(2)], [1.0 0.35 0.2], ...
-        "FaceAlpha", 0.10, "EdgeColor", "none", "HandleVisibility", "off");
-    uistack(area, "bottom");
-end
-for index = 1:numel(markerTimes)
-    if markerTypes(index) == "DISTURBANCE_START"
-        color = [0.9 0.15 0.1]; label = "Disturbance start";
-    elseif markerTypes(index) == "DISTURBANCE_END"
-        color = [0.15 0.35 0.9]; label = "Disturbance end";
-    else
-        color = [0.1 0.65 0.25]; label = "Normal marker";
-    end
-    xline(ax, markerTimes(index), "--", label, "Color", color, ...
-        "LabelVerticalAlignment", "bottom", "HandleVisibility", "off");
-end
-ylim(ax, yl);
 end

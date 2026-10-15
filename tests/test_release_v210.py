@@ -17,7 +17,7 @@ from rcboat_ros.path_tracking import RouteManager
 
 class ReleaseV210(unittest.TestCase):
     def test_release_identity_and_empty_default_routes(self):
-        self.assertEqual((ROOT / "VERSION").read_text().strip(), "2.1.0")
+        self.assertEqual((ROOT / "VERSION").read_text().strip(), "2.1.1")
         routes = json.loads((ROOT / "catkin_ws/src/rcboat_ros/config/routes.json").read_text())
         self.assertEqual(routes["routes"], [])
         self.assertEqual(routes["multipaths"], [])
@@ -137,8 +137,7 @@ class ReleaseV210(unittest.TestCase):
         for filename in ("ground_test.csv", "ground_test.jsonl", "reference_routes.csv",
                          "reference_routes.json", "route_changes.jsonl", "events.jsonl",
                          "test_metadata.json", "export_manifest.json", "route_metrics.csv",
-                         "route_switches.csv", "test_markers.csv", "analysis_manifest.json",
-                         "plot_ground_test_week7.m"):
+                         "route_switches.csv", "analysis_manifest.json", "plot_ground_test_week7.m"):
             self.assertIn(filename, source)
         for field in ("measurement_time_utc", "output_time_utc", "heading_source", "gps_data_age_s",
                       "correction_age_s", "gps_quality_used_json", "target_waypoint_number",
@@ -146,8 +145,7 @@ class ReleaseV210(unittest.TestCase):
                       "desired_rudder_angle_deg", "target_speed_mps", "route_candidates_json",
                       "execution_target_type", "target_path_distance_m",
                       "multipath_switch_threshold_m", "switch_threshold_exceeded",
-                      "switch_decision", "ground_test_actuation_enabled", "test_phase",
-                      "disturbance_active", "DISTURBANCE_START", "DISTURBANCE_END"):
+                      "switch_decision", "ground_test_actuation_enabled"):
             self.assertIn(field, source)
         self.assertIn("already_stopped", source)
         self.assertIn("LOGGER_RESTART_DETECTED", source)
@@ -157,7 +155,6 @@ class ReleaseV210(unittest.TestCase):
         worker = (ROOT / "windows_gui/rcboat_gui/ssh_worker.py").read_text(encoding="utf-8")
         self.assertIn("tcp_server.bind", gateway)
         self.assertIn('command == "ground_stop"', gateway)
-        self.assertIn('command == "ground_mark"', gateway)
         self.assertIn("download_ground_test", gateway)
         self.assertIn("socket.create_connection((self.host, self.gateway_port)", worker)
         self.assertNotIn("SSH session not active", worker)
@@ -190,20 +187,6 @@ class ReleaseV210(unittest.TestCase):
         self.assertIn("GROUND_TEST_NAVIGATION", supervisor)
         self.assertIn("GROUND_TEST_NAVIGATION", actuator)
         self.assertIn("프로펠러 제거 확인", gui)
-
-    def test_ground_test_disturbance_markers_flow_end_to_end(self):
-        logger = (ROOT / "catkin_ws/src/rcboat_ros/nodes/ground_test_logger_node.py").read_text(encoding="utf-8")
-        gateway = (ROOT / "catkin_ws/src/rcboat_ros/nodes/gui_bridge_node.py").read_text(encoding="utf-8")
-        worker = (ROOT / "windows_gui/rcboat_gui/ssh_worker.py").read_text(encoding="utf-8")
-        gui = (ROOT / "windows_gui/rcboat_gui/main_window.py").read_text(encoding="utf-8")
-        matlab = (ROOT / "matlab/plot_ground_test_week7.m").read_text(encoding="utf-8")
-        for marker in ("NORMAL_OPERATION", "DISTURBANCE_START", "DISTURBANCE_END"):
-            self.assertIn(marker, logger)
-            self.assertIn(marker, gui)
-        self.assertIn("GROUND_TEST_MARK", worker)
-        self.assertIn("ground_mark", gateway)
-        self.assertIn("test_markers.csv", matlab)
-        self.assertIn("addGroundTestMarkers", matlab)
 
     def test_gui_supports_large_route_and_single_route_targets(self):
         gui = (ROOT / "windows_gui/rcboat_gui/main_window.py").read_text(encoding="utf-8")

@@ -16,7 +16,7 @@ from rcboat_ros.common import pack, unpack
 from rcboat_ros.geo import enrich_waypoints
 
 
-VERSION = "2.1.0"
+VERSION = "2.1.1"
 CSV_FIELDS = [
     "sample_index", "sample_time_epoch_s", "logger_time_utc", "measurement_time_utc", "gps_received_time_utc",
     "output_time_utc", "elapsed_time_s", "latitude", "longitude", "utm_easting_m",
@@ -34,8 +34,7 @@ CSV_FIELDS = [
     "final_steering_pwm", "final_throttle_pwm", "actual_steering_pwm", "actual_throttle_pwm",
     "output_send_success", "output_status", "operation_mode", "effective_source",
     "output_locked", "ground_test_actuation_enabled", "throttle_locked", "steering_test_enabled",
-    "test_phase", "disturbance_active", "manual_intervention", "estop",
-    "navigation_valid", "logger_state",
+    "manual_intervention", "estop", "navigation_valid", "logger_state",
 ]
 
 ROUTE_METRIC_FIELDS = [
@@ -48,17 +47,6 @@ ROUTE_SWITCH_FIELDS = [
     "candidate_route_id", "previous_target_path_distance_m", "candidate_route_distance_m",
     "switch_threshold_m", "switch_decision", "selection_metric",
 ]
-MARKER_FIELDS = [
-    "marker_index", "marker_time_utc", "elapsed_time_s", "sample_index", "marker_type",
-    "phase_before", "phase_after", "note", "latitude", "longitude", "utm_easting_m",
-    "utm_northing_m", "utm_zone", "measurement_time_utc", "gps_received_time_utc",
-    "gps_data_age_s", "correction_age_s", "gps_validity", "rtk_state", "heading_deg",
-    "speed_mps", "selected_route_id",
-    "active_route_id", "target_path_distance_m", "candidate_route_id",
-    "candidate_route_distance_m", "switch_threshold_m", "final_steering_pwm",
-    "final_throttle_pwm",
-]
-MARKER_TYPES = {"NORMAL_OPERATION", "DISTURBANCE_START", "DISTURBANCE_END"}
 
 
 def utc_now():
@@ -85,9 +73,6 @@ class Logger:
         self.execution_target_name = ""
         self.previous_active_route_id = ""
         self.actuation_enabled = False
-        self.test_phase = "normal"
-        self.disturbance_active = False
-        self.marker_count = 0
         root = rospy.get_param("/rcboat/ground_test_log_root", "~/rcboat_ros_data/logs/ground_tests")
         self.root = pathlib.Path(os.path.expanduser(root))
         self.root.mkdir(parents=True, exist_ok=True)
@@ -140,10 +125,7 @@ class Logger:
         self.pub.publish(pack(state=self.state, active=self.state == "recording",
                               folder=str(self.folder or ""), samples=self.count, error=self.last_error,
                               test_route_ids=self.test_route_ids,
-                              actuation_enabled=self.actuation_enabled,
-                              test_phase=self.test_phase,
-                              disturbance_active=self.disturbance_active,
-                              marker_count=self.marker_count))
+                              actuation_enabled=self.actuation_enabled))
 
     def _write_jsonl(self, key, value):
         handle = self.files.get(key)
@@ -177,19 +159,14 @@ class Logger:
                     folder = str(self.folder); count = self.count
                     self.close()
                     result = {"folder": folder, "samples": count, "state": self.state}
-            elif request.action == "mark":
-                result = self.mark(args.get("marker_type"), args.get("note", ""))
             elif request.action == "status":
                 result = {"state": self.state, "active": bool(self.folder), "folder": str(self.folder or ""),
-                          "samples": self.count, "error": self.last_error,
-                          "test_phase": self.test_phase, "marker_count": self.marker_count}
+                          "samples": self.count, "error": self.last_error}
             else:
                 raise ValueError("unknown logger action")
             return ExecuteResponse(True, pack(**result))
         except Exception as exc:
-            self.last_error = str(exc)
-            self.state = "recording" if self.folder else "error"
-            self.publish_status()
+            self.last_error = str(exc); self.state = "error"; self.publish_status()
             return ExecuteResponse(False, pack(error=str(exc), state=self.state))
 
     def _reference_routes(self, route_ids):
@@ -253,7 +230,6 @@ class Logger:
         self.execution_target_type = target_type; self.execution_target_id = target_id
         self.execution_target_name = target_name; self.previous_active_route_id = ""
         self.actuation_enabled = bool(actuation_enabled)
-        self.test_phase = "normal"; self.disturbance_active = False; self.marker_count = 0
         self.files["csv"] = (folder / "ground_test.csv").open("w", newline="", encoding="utf-8-sig")
         self.writer = csv.DictWriter(self.files["csv"], fieldnames=CSV_FIELDS, extrasaction="ignore")
         self.writer.writeheader(); self.files["csv"].flush()
@@ -265,10 +241,6 @@ class Logger:
         self.route_switches_writer = csv.DictWriter(self.files["route_switches"], fieldnames=ROUTE_SWITCH_FIELDS,
                                                     extrasaction="ignore")
         self.route_switches_writer.writeheader(); self.files["route_switches"].flush()
-        self.files["markers"] = (folder / "test_markers.csv").open("w", newline="", encoding="utf-8-sig")
-        self.markers_writer = csv.DictWriter(self.files["markers"], fieldnames=MARKER_FIELDS,
-                                             extrasaction="ignore")
-        self.markers_writer.writeheader(); self.files["markers"].flush()
         for key, filename in (("jsonl", "ground_test.jsonl"), ("route_changes", "route_changes.jsonl"),
                               ("events", "events.jsonl")):
             self.files[key] = (folder / filename).open("w", encoding="utf-8")
@@ -306,7 +278,6 @@ class Logger:
                 "route_metrics.csv": "long format: one row per time sample per candidate subroute",
                 "route_switches.csv": "active subroute transition instants",
                 "reference_routes.csv": "all frozen reference waypoints with WGS84 and UTM coordinates",
-                "test_markers.csv": "operator-marked normal and disturbance boundaries with state snapshots",
             },
             "recommended_graphs": [
                 "actual GPS path and all reference subroutes",
@@ -314,7 +285,6 @@ class Logger:
                 "per-subroute heading error versus elapsed time",
                 "current Target Path distance versus the 2 m switch threshold",
                 "active subroute bands and switch instants",
-                "operator-marked disturbance intervals over every time-series graph",
                 "target and measured speed versus elapsed time",
                 "desired/final steering and throttle PWM versus elapsed time",
             ],
@@ -326,59 +296,7 @@ class Logger:
                                      "test_route_ids": self.test_route_ids,
                                      "execution_target_type": target_type, "execution_target_id": target_id,
                                      "actuation_enabled": self.actuation_enabled})
-        self._record_marker("NORMAL_OPERATION", "automatic marker at test start")
         self.publish_status()
-
-    def mark(self, marker_type, note=""):
-        if not self.folder:
-            raise RuntimeError("ground test is not recording")
-        marker_type = str(marker_type or "").upper()
-        if marker_type not in MARKER_TYPES:
-            raise ValueError("unknown ground-test marker type")
-        if marker_type == "DISTURBANCE_START" and self.disturbance_active:
-            raise RuntimeError("disturbance is already active")
-        if marker_type == "DISTURBANCE_END" and not self.disturbance_active:
-            raise RuntimeError("disturbance is not active")
-        return self._record_marker(marker_type, str(note or "")[:200])
-
-    def _record_marker(self, marker_type, note=""):
-        phase_before = self.test_phase
-        if marker_type == "DISTURBANCE_START":
-            self.test_phase = "disturbance"; self.disturbance_active = True
-        elif marker_type in {"DISTURBANCE_END", "NORMAL_OPERATION"}:
-            self.test_phase = "normal"; self.disturbance_active = False
-        self.marker_count += 1
-        gps = self.cache.get("gps", {}); route = self.cache.get("route", {})
-        ntrip = self.cache.get("ntrip", {})
-        safety = self.cache.get("safety", {})
-        marker = {
-            "marker_index": self.marker_count, "marker_time_utc": utc_now(),
-            "elapsed_time_s": round(time.monotonic() - self.start_clock, 3),
-            "sample_index": self.count, "marker_type": marker_type,
-            "phase_before": phase_before, "phase_after": self.test_phase, "note": note,
-            "latitude": gps.get("latitude"), "longitude": gps.get("longitude"),
-            "utm_easting_m": gps.get("utm_easting_m"), "utm_northing_m": gps.get("utm_northing_m"),
-            "utm_zone": gps.get("utm_zone"),
-            "measurement_time_utc": gps.get("measurement_time_utc") or gps.get("utc_time"),
-            "gps_received_time_utc": gps.get("received_time_utc"),
-            "gps_data_age_s": gps.get("gps_data_age_s"),
-            "correction_age_s": ntrip.get("last_correction_age_s"),
-            "gps_validity": gps.get("data_validity"), "rtk_state": gps.get("rtk_state"),
-            "heading_deg": gps.get("heading_deg"),
-            "speed_mps": gps.get("speed_mps"), "selected_route_id": route.get("selected_route_id"),
-            "active_route_id": route.get("active_route_id"),
-            "target_path_distance_m": route.get("previous_target_path_distance_m"),
-            "candidate_route_id": route.get("candidate_route_id"),
-            "candidate_route_distance_m": route.get("candidate_route_distance_m"),
-            "switch_threshold_m": route.get("switch_threshold_m", (route.get("multipath") or {}).get("switch_threshold_m")),
-            "final_steering_pwm": safety.get("steering_pwm"),
-            "final_throttle_pwm": safety.get("throttle_pwm"),
-        }
-        self.markers_writer.writerow(marker); self.files["markers"].flush()
-        self._write_jsonl("events", dict(marker, type="GROUND_TEST_MARKER",
-                                           event_time_utc=marker["marker_time_utc"]))
-        self.publish_status()
-        return marker
 
     def sample(self):
         if not self.folder:
@@ -453,7 +371,6 @@ class Logger:
             "ground_test_actuation_enabled": safety.get("ground_test_actuation_enabled"),
             "throttle_locked": safety.get("throttle_locked"),
             "steering_test_enabled": safety.get("steering_test_enabled"),
-            "test_phase": self.test_phase, "disturbance_active": self.disturbance_active,
             "manual_intervention": safety.get("effective_source") in {"MANUAL", "REMOTE"},
             "estop": safety.get("estop"), "navigation_valid": nav.get("valid"), "logger_state": self.state,
         }
@@ -494,28 +411,23 @@ class Logger:
         if not self.folder:
             return
         folder = self.folder; self.state = "stopping"; self.publish_status()
-        if self.disturbance_active:
-            self._record_marker("DISTURBANCE_END", "automatic marker at test stop")
         self._write_jsonl("events", {"type": "GROUND_TEST_STOPPED", "event_time_utc": utc_now(),
                                      "samples": self.count, "error": error or None})
         for handle in list(self.files.values()):
             try: handle.flush(); handle.close()
             except Exception: pass
-        self.files = {}; self.writer = None; self.route_metrics_writer = None
-        self.route_switches_writer = None; self.markers_writer = None
+        self.files = {}; self.writer = None; self.route_metrics_writer = None; self.route_switches_writer = None
         metadata_path = folder / "test_metadata.json"
         try:
             metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
             metadata.update(stopped_at_utc=utc_now(), sample_count=self.count,
-                            marker_count=self.marker_count,
                             final_state="error" if error else "complete", error=error or None)
             json_dump(metadata_path, metadata)
             self._manifest(folder)
             self.state = "error" if error else "idle"; self.last_error = error
         except Exception as exc:
             self.state = "error"; self.last_error = str(exc)
-        self.folder = None; self.actuation_enabled = False
-        self.test_phase = "normal"; self.disturbance_active = False; self.publish_status()
+        self.folder = None; self.actuation_enabled = False; self.publish_status()
 
     def run(self):
         rate = rospy.Rate(rospy.get_param("/rcboat/log_rate_hz", 4.0))

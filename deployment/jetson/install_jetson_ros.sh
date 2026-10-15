@@ -23,4 +23,4 @@ sudo systemctl is-active --quiet rcboat_ros.service || {
   echo 'rcboat_ros.service failed. Inspect: journalctl -u rcboat_ros.service -n 100 --no-pager' >&2
   exit 4
 }
-echo 'RCBoat ROS Noetic v2.1.0 installed and running.'
+echo 'RCBoat ROS Noetic v2.1.1 installed and running.'
