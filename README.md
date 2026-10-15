@@ -77,7 +77,7 @@ python app.py
 EXE 빌드:
 
 ```powershell
-.\BUILD_ROS_GUI.cmd
+.\build.bat
 ```
 
 결과: `windows_gui\dist\RCBoatControl_ROS_v2.1.0.exe`
@@ -125,6 +125,8 @@ Jetson 저장 위치:
 - `test_metadata.json`: 코드 버전, ROS 설정, 서보 보정, 시작/종료 정보
 - `analysis_manifest.json`: 지도, 조향각, 항로별 헤딩 오차, 활성 항로 밴드, 목표/실제 속도 그래프를 재생성하기 위한 데이터 관계 설명
 - `export_manifest.json`: 파일 크기와 SHA-256 검증값
+
+항로 탭의 **선택 항로 PC 저장**은 JSON/CSV/GPX로 내보내며, 각 waypoint의 번호·위도·경도·UTM easting/northing/zone(및 있으면 헤딩·기록 시각)을 포함합니다. 반면 **정지 후 항로 저장**은 Jetson ROS 항로 저장소에만 저장하므로, PC 사본이 필요하면 이어서 **선택 항로 PC 저장**을 사용하십시오.
 
 로거는 실시간 그래프 이미지를 계산하지 않고 원본과 기본 파생값을 저장합니다. 따라서 연산 부담을 낮추면서도 MATLAB에서 강의자료 형식의 그래프를 2차 분석으로 재구성할 수 있습니다.
 

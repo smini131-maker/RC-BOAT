@@ -1466,31 +1466,41 @@ class MainWindow(QMainWindow):
 
         waypoints = [
             {
+                "waypoint_number": int(point.get("waypoint_number") or index),
                 "timestamp": str(point.get("timestamp") or ""),
                 "lat": float(point["lat"]),
                 "lon": float(point["lon"]),
+                "utm_easting_m": point.get("utm_easting_m"),
+                "utm_northing_m": point.get("utm_northing_m"),
+                "utm_zone": str(point.get("utm_zone") or ""),
                 "heading_deg": (
                     None
                     if point.get("heading_deg") is None
                     else float(point["heading_deg"]) % 360.0
                 ),
             }
-            for point in route.get("waypoints", [])
+            for index, point in enumerate(route.get("waypoints", []), 1)
             if point.get("lat") is not None and point.get("lon") is not None
         ]
 
         try:
             if path.suffix.lower() == ".csv":
-                lines = ["index,timestamp,latitude,longitude,heading_deg"]
-                for index, point in enumerate(waypoints, 1):
+                lines = [
+                    "waypoint_number,timestamp,latitude,longitude,utm_easting_m,"
+                    "utm_northing_m,utm_zone,heading_deg"
+                ]
+                for point in waypoints:
                     heading = (
                         ""
                         if point["heading_deg"] is None
                         else f"{float(point['heading_deg']):.2f}"
                     )
+                    easting = "" if point["utm_easting_m"] is None else f"{float(point['utm_easting_m']):.3f}"
+                    northing = "" if point["utm_northing_m"] is None else f"{float(point['utm_northing_m']):.3f}"
                     lines.append(
-                        f"{index},{point['timestamp']},"
-                        f"{point['lat']:.8f},{point['lon']:.8f},{heading}"
+                        f"{point['waypoint_number']},{point['timestamp']},"
+                        f"{point['lat']:.8f},{point['lon']:.8f},{easting},{northing},"
+                        f"{point['utm_zone']},{heading}"
                     )
                 path.write_text("\n".join(lines) + "\n", encoding="utf-8-sig")
             elif path.suffix.lower() == ".gpx":
@@ -1504,12 +1514,17 @@ class MainWindow(QMainWindow):
                         track_lines.append(
                             f"        <time>{html.escape(point['timestamp'])}</time>"
                         )
+                    extensions = [
+                        f"<rcboat:waypoint_number>{point['waypoint_number']}</rcboat:waypoint_number>",
+                        f"<rcboat:utm_easting_m>{point['utm_easting_m']}</rcboat:utm_easting_m>",
+                        f"<rcboat:utm_northing_m>{point['utm_northing_m']}</rcboat:utm_northing_m>",
+                        f"<rcboat:utm_zone>{html.escape(point['utm_zone'])}</rcboat:utm_zone>",
+                    ]
                     if point["heading_deg"] is not None:
-                        track_lines.append(
-                            "        <extensions>"
+                        extensions.append(
                             f"<rcboat:heading_deg>{float(point['heading_deg']):.2f}</rcboat:heading_deg>"
-                            "</extensions>"
                         )
+                    track_lines.append("        <extensions>" + "".join(extensions) + "</extensions>")
                     track_lines.append("      </trkpt>")
                 track_points = "\n".join(track_lines)
                 gpx = (
