@@ -158,6 +158,13 @@ class Bridge:
         if errors: raise RuntimeError("; ".join(errors))
         return result
 
+    def ground_mark(self, args):
+        marker_type=str(args.get("marker_type") or "").upper()
+        if marker_type not in {"NORMAL_OPERATION","DISTURBANCE_START","DISTURBANCE_END"}:
+            raise ValueError("invalid ground-test marker")
+        return self.service("/rcboat/logger/execute", "mark", {
+            "marker_type":marker_type, "note":str(args.get("note") or "")})
+
     def dispatch(self, payload):
         if self.token and payload.get("token") != self.token:
             return {"success": False, "error": "gateway authentication failed"}
@@ -181,6 +188,7 @@ class Bridge:
         if command == "list_ground_tests": return {"success": True, "response": {"ground_tests": self.tests()}}
         if command == "download_ground_test": return {"success": True, "response": self.download_test(args.get("test_id"))}
         if command == "ground_start": return {"success": True, "response": self.ground_start(args)}
+        if command == "ground_mark": return {"success": True, "response": self.ground_mark(args)}
         if command == "ground_stop": return {"success": True, "response": self.ground_stop()}
         if command == "set_gps_settings":
             if "navigation_max_hdop" in args: rospy.set_param("/rcboat/max_hdop", float(args["navigation_max_hdop"]))

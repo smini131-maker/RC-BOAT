@@ -122,7 +122,7 @@ class SSHWorker(QThread):
             "CANCEL_GPS_RECORDING": "record_cancel", "CONFIGURE_NTRIP": "configure",
             "SET_GPS_SETTINGS": "set_gps_settings", "START_GPS_LOGGING": "gps_log_start",
             "STOP_GPS_LOGGING": "gps_log_stop", "GROUND_TEST_START": "ground_start",
-            "GROUND_TEST_STOP": "ground_stop",
+            "GROUND_TEST_MARK": "ground_mark", "GROUND_TEST_STOP": "ground_stop",
         }
         if command == "SET_MODE":
             mode = str(kwargs.get("mode", "AUTO")).upper()
@@ -276,7 +276,10 @@ class SSHWorker(QThread):
                             "folder": ground.get("folder", ""),
                             "actuator_locked": bool(safety.get("actuator_locked", True)),
                             "actuation_enabled": bool(ground.get("actuation_enabled",
-                                                                  safety.get("ground_test_actuation_enabled", False)))},
+                                                                  safety.get("ground_test_actuation_enabled", False))),
+                            "test_phase": str(ground.get("test_phase") or "normal"),
+                            "disturbance_active": bool(ground.get("disturbance_active", False)),
+                            "marker_count": int(ground.get("marker_count") or 0)},
             "route": {"selected_route_id": selected_id, "selected_route_name": selected.get("name", selected_id),
                       "selected_multipath_id": str(route.get("selected_multipath_id") or ""),
                       "execution_target_type": route.get("execution_target_type") or

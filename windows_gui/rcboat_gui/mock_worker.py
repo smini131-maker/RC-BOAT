@@ -50,6 +50,8 @@ class MockWorker(QThread):
         self.ground_test_active = False
         self.ground_test_samples = 0
         self.ground_test_actuation_enabled = False
+        self.ground_test_phase = "normal"
+        self.ground_test_marker_count = 0
         self.multipath = {
             "enabled": True, "endpoint_tolerance_m": 0.75,
             "switch_threshold_m": 2.0,
@@ -270,12 +272,27 @@ class MockWorker(QThread):
                 self.ground_test_active = True
                 self.ground_test_samples = 0
                 self.ground_test_actuation_enabled = bool(kwargs.get("actuation_enabled", False))
+                self.ground_test_phase = "normal"
+                self.ground_test_marker_count = 1
                 self.mode = "GROUND_TEST"
                 self.operation_state = "GROUND_TEST"
                 self.steering, self.throttle = 6000, self.auto_cruise_pwm if self.ground_test_actuation_enabled else 6450
+            elif command == "GROUND_TEST_MARK":
+                if not self.ground_test_active: raise ValueError("ground test is not recording")
+                marker_type = str(kwargs.get("marker_type") or "").upper()
+                if marker_type == "DISTURBANCE_START":
+                    if self.ground_test_phase == "disturbance": raise ValueError("disturbance is already active")
+                    self.ground_test_phase = "disturbance"
+                elif marker_type in {"DISTURBANCE_END", "NORMAL_OPERATION"}:
+                    if marker_type == "DISTURBANCE_END" and self.ground_test_phase != "disturbance":
+                        raise ValueError("disturbance is not active")
+                    self.ground_test_phase = "normal"
+                else: raise ValueError("unknown ground-test marker type")
+                self.ground_test_marker_count += 1
             elif command == "GROUND_TEST_STOP":
                 self.ground_test_active = False
                 self.ground_test_actuation_enabled = False
+                self.ground_test_phase = "normal"
                 self.mode = "AUTO"
                 self.operation_state = "AUTO_SAFE"
                 self.steering, self.throttle = 6000, 6450
@@ -388,7 +405,10 @@ class MockWorker(QThread):
                                     "state": "recording" if self.ground_test_active else "idle",
                                     "samples": self.ground_test_samples,
                                     "actuator_locked": not self.ground_test_actuation_enabled,
-                                    "actuation_enabled": self.ground_test_actuation_enabled},
+                                    "actuation_enabled": self.ground_test_actuation_enabled,
+                                    "test_phase": self.ground_test_phase,
+                                    "disturbance_active": self.ground_test_phase == "disturbance",
+                                    "marker_count": self.ground_test_marker_count},
                     "mock": True,
                     "rc": {"steering_us": 1640 + int(math.sin(t) * 60) if self.arduino_connected else None, "throttle_us": 1500 if self.arduino_connected else None, "age_s": 0.01 if self.arduino_connected else None},
                     "pca": {"frequency_hz": 60, "steering_channel": 0, "throttle_channel": 6, "steering_pwm": self.steering, "throttle_pwm": self.throttle},
