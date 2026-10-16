@@ -13,5 +13,5 @@ rem Keep unrelated SDK DLLs (for example Poppler's ICU build) out of the Qt bund
 rem Qt deliberately uses the Windows system ICU shim; PATH-first collection can
 rem otherwise package an ABI-incompatible icuuc.dll and break QtGui at startup.
 set "PATH=%BUILD_HOME%\venv\Scripts;%SystemRoot%\System32;%SystemRoot%;%SystemRoot%\System32\Wbem;%SystemRoot%\System32\WindowsPowerShell\v1.0"
-python -m PyInstaller --noconfirm --clean --onefile --windowed --name "RCBoatControl_ROS_v2.1.2" --icon "%CD%\assets\cat_boat_icon.ico" --add-data "%CD%\assets;assets" --paths "%CD%" --workpath "%BUILD_HOME%\work" --specpath "%BUILD_HOME%\spec" --distpath "dist" "%CD%\app.py"
+python -m PyInstaller --noconfirm --clean --onefile --windowed --name "RCBoatControl_ROS_v2.1.3" --icon "%CD%\assets\cat_boat_icon.ico" --add-data "%CD%\assets;assets" --paths "%CD%" --workpath "%BUILD_HOME%\work" --specpath "%BUILD_HOME%\spec" --distpath "dist" "%CD%\app.py"
 exit /b %ERRORLEVEL%

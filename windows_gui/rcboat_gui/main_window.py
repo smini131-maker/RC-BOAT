@@ -47,7 +47,7 @@ from .ssh_worker import SSHWorker
 from .widgets import MetricCard, RoutePlot, StatusCard, TelemetryGraph
 
 
-APP_VERSION = "2.1.2"
+APP_VERSION = "2.1.3"
 
 
 STYLE = """
@@ -2333,6 +2333,12 @@ class MainWindow(QMainWindow):
         point_count = int(recording.get("point_count") or 0)
         if recording_active:
             save_note = "저장 가능" if point_count >= 2 else "저장하려면 최소 2개 지점 필요"
+            capture_note = {
+                "waiting_for_healthy_gps": "유효한 GPS 대기 중",
+                "point_saved": "새 지점 저장됨",
+                "waiting_for_distance_or_interval": "다음 거리·시간 조건 대기 중",
+                "capture_error": "GPS 지점 처리 오류",
+            }.get(str(recording.get("capture_status") or ""), "기록 준비 중")
             latest_sample = recording.get("latest_sample") or {}
             latest_detail = ""
             if latest_sample:
@@ -2348,7 +2354,7 @@ class MainWindow(QMainWindow):
                 )
             self.route_record_status.setText(
                 f"기록 중 · {recording.get('name', '-')} · {point_count}개 지점"
-                f" · {save_note}{latest_detail}"
+                f" · {capture_note} · {save_note}{latest_detail}"
             )
         else:
             self.route_record_status.setText("기록 대기")

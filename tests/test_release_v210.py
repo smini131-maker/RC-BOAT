@@ -17,7 +17,7 @@ from rcboat_ros.path_tracking import RouteManager
 
 class ReleaseV210(unittest.TestCase):
     def test_release_identity_and_empty_default_routes(self):
-        self.assertEqual((ROOT / "VERSION").read_text().strip(), "2.1.2")
+        self.assertEqual((ROOT / "VERSION").read_text().strip(), "2.1.3")
         routes = json.loads((ROOT / "catkin_ws/src/rcboat_ros/config/routes.json").read_text())
         self.assertEqual(routes["routes"], [])
         self.assertEqual(routes["multipaths"], [])
@@ -41,6 +41,29 @@ class ReleaseV210(unittest.TestCase):
             self.assertEqual(manager.routes[route_id]["name"], "CENTER")
             manager.delete(route_id)
             self.assertEqual(manager.routes, {})
+
+    def test_gps_recording_needs_no_existing_route_and_survives_early_stop(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "routes.json"
+            path.write_text('{"schema_version":3,"selected_route_id":"","routes":[]}')
+            manager = RouteManager(path)
+            self.assertEqual(manager.selected, "")
+            manager.record_start("walk", minimum_distance_m=1.0, minimum_interval_s=0.5)
+            self.assertTrue(manager.record_point(35.0, 129.0, heading=10.0,
+                                                 timestamp="2026-10-16T00:00:00Z", now=0.0))
+            with self.assertRaisesRegex(ValueError, "recording remains active"):
+                manager.record_stop()
+            self.assertIsNotNone(manager.recording)
+            self.assertTrue(manager.record_point(35.00002, 129.0, heading=11.0,
+                                                 timestamp="2026-10-16T00:00:01Z", now=1.0))
+            route_id = manager.record_stop()
+            self.assertIn(route_id, manager.routes)
+            self.assertEqual(len(manager.routes[route_id]["waypoints"]), 2)
+            self.assertEqual([point["waypoint_number"] for point in manager.routes[route_id]["waypoints"]], [1, 2])
+        node = (ROOT / "catkin_ws/src/rcboat_ros/nodes/route_manager_node.py").read_text(encoding="utf-8")
+        self.assertLess(node.index("if self.rm.recording is not None:"),
+                        node.index("if self.gps.get('healthy') and self.rm.selected:"))
+        self.assertIn("capture_status", node)
 
     def test_named_multipath_supports_n_routes_without_endpoint_constraint(self):
         with tempfile.TemporaryDirectory() as directory:

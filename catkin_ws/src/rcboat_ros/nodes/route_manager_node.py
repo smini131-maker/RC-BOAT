@@ -119,6 +119,27 @@ class Node:
     def run(self):
         rate=rospy.Rate(4)
         while not rospy.is_shutdown():
+            capture_status='idle'
+            if self.rm.recording is not None:
+                if not self.gps.get('healthy'):
+                    capture_status='waiting_for_healthy_gps'
+                else:
+                    try:
+                        captured=self.rm.record_point(
+                            float(self.gps['latitude']),float(self.gps['longitude']),
+                            self.gps.get('heading_deg'),
+                            timestamp=self.gps.get('measurement_time_utc') or self.gps.get('utc_time'))
+                        capture_status='point_saved' if captured else 'waiting_for_distance_or_interval'
+                    except Exception as e:
+                        capture_status='capture_error'
+                        rospy.logerr('route recording sample %s',e)
+            navigation={}
+            if self.gps.get('healthy') and self.rm.selected:
+                try:
+                    navigation=self.rm.update((float(self.gps['latitude']),float(self.gps['longitude'])),
+                                              self.gps.get('heading_deg'))
+                    if self.rm.event:self.events.publish(pack(**self.rm.event))
+                except Exception as e:rospy.logerr('route update %s',e)
             recording=self.rm.recording
             data={'selected_route_id':self.rm.selected,'active_route_id':self.rm.active,
                   'group_routes':list(self.rm.group()),'test_route_ids':list(self.rm.test_route_ids),
@@ -135,17 +156,11 @@ class Node:
                                'minimum_distance_m':(recording or {}).get('minimum_distance_m',1.0),
                                'minimum_interval_s':(recording or {}).get('minimum_interval_s',.5),
                                'arrival_radius_m':(recording or {}).get('arrival_radius_m',3.0),
+                               'capture_status':capture_status,
+                               'gps_ready':bool(self.gps.get('healthy')),
                                'waypoints':list((recording or {}).get('waypoints',[])),
                                'latest_sample':((recording or {}).get('waypoints') or [None])[-1]}}
-            if self.gps.get('healthy') and self.rm.selected:
-                try:
-                    data.update(self.rm.update((float(self.gps['latitude']),float(self.gps['longitude'])),
-                                               self.gps.get('heading_deg')))
-                    if self.rm.recording is not None:
-                        self.rm.record_point(float(self.gps['latitude']),float(self.gps['longitude']),
-                                             self.gps.get('heading_deg'))
-                    if self.rm.event:self.events.publish(pack(**self.rm.event))
-                except Exception as e:rospy.logerr('route update %s',e)
+            data.update(navigation)
             self.pub.publish(pack(**data));rate.sleep()
 if __name__=='__main__':
     rospy.init_node('route_manager_node');Node().run()

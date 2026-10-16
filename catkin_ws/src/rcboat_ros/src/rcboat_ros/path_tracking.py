@@ -321,8 +321,10 @@ class RouteManager:
 
     def record_stop(self):
         if self.recording is None: raise RuntimeError('recording was not started')
-        item=self.recording; self.recording=None
-        if len(item['waypoints']) < 2: raise ValueError('need at least 2 distinct waypoints')
+        if len(self.recording['waypoints']) < 2:
+            raise ValueError('need at least 2 distinct waypoints; recording remains active')
+        item=dict(self.recording)
+        item['waypoints']=list(self.recording['waypoints'])
         item['id']='route_'+dt.datetime.now(dt.timezone.utc).strftime('%Y%m%d_%H%M%S_%f')
         item['waypoints']=enrich_waypoints(item['waypoints'])
         item['arrival_radius_m']=item.pop('arrival_radius_m',3.0)
@@ -331,7 +333,11 @@ class RouteManager:
         item['recorded_at_end']=item['waypoints'][-1]['timestamp']
         item['saved_at']=dt.datetime.now(dt.timezone.utc).isoformat()
         self.data['routes'].append(item)
-        _atomic_json(self.filename,self.data)
+        try:_atomic_json(self.filename,self.data)
+        except Exception:
+            self.data['routes'].pop()
+            raise
+        self.recording=None
         self.load()
         return item['id']
 

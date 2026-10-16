@@ -1,4 +1,4 @@
-# RC-BOAT ROS Noetic v2.1.2
+# RC-BOAT ROS Noetic v2.1.3
 
 정식 실행 구조는 ROS Noetic뿐입니다. Jetson backend는 `roslaunch rcboat_ros rcboat.launch`, Windows GUI는 ROS gateway TCP(기본 `8765`)로 통신합니다. SSH는 배포·터미널용 보조 채널이며, SSH가 끊겨도 ROS gateway가 살아 있으면 상태 조회와 `GROUND_TEST_STOP`이 동작합니다.
 
@@ -82,7 +82,7 @@ EXE 빌드:
 .\build.bat
 ```
 
-결과: `windows_gui\dist\RCBoatControl_ROS_v2.1.2.exe`
+결과: `windows_gui\dist\RCBoatControl_ROS_v2.1.3.exe`
 
 GUI 상단 상태는 서로 독립입니다: `SSH connected/disconnected`, `ROS master online/offline`, `ROS gateway online/offline`, `logger idle/recording/stopping/error`, `GPS valid/invalid/stale`, `RTK fix/float/dgps/no_fix/no_data`.
 
@@ -98,6 +98,8 @@ GUI 상단 상태는 서로 독립입니다: `SSH connected/disconnected`, `ROS 
 8. 시험 중 항로·대루트·설정을 바꾸면 시각, 변경 내용, 당시 항로 snapshot이 별도 로그에 기록됩니다.
 9. **도보 테스트 종료**를 누릅니다. 이 명령은 SSH 상태가 아니라 ROS gateway를 통해 전달됩니다.
 10. 완료된 시험을 선택하고 **선택 결과 다운로드**를 눌러 ZIP을 PC로 가져옵니다.
+
+GPS 새 항로 기록은 기존에 선택된 항로가 없어도 독립적으로 동작합니다. GUI에는 `유효한 GPS 대기 중`, `새 지점 저장됨`, `다음 거리·시간 조건 대기 중`이 표시됩니다. 최소 2개 지점이 모이기 전에 저장을 시도해도 기록 세션은 취소되지 않으므로 더 이동한 뒤 다시 저장할 수 있습니다.
 
 Jetson 저장 위치:
 
