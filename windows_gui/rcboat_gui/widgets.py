@@ -22,10 +22,15 @@ class StatusCard(QFrame):
         title_label.setObjectName("cardTitle")
         self.value_label = QLabel(value)
         self.value_label.setObjectName("cardValue")
+        self._rendered: tuple[str, bool | None] | None = None
         layout.addWidget(title_label)
         layout.addWidget(self.value_label)
 
     def set_value(self, value: str, ok: bool | None = None) -> None:
+        rendered = (str(value), ok)
+        if rendered == self._rendered:
+            return
+        self._rendered = rendered
         self.value_label.setText(value)
         if ok is None:
             color = "#e8eef8"
@@ -52,6 +57,7 @@ class MetricCard(QFrame):
         self.hint_label = QLabel(hint)
         self.hint_label.setObjectName("metricHint")
         self.hint_label.setWordWrap(True)
+        self._rendered: tuple[str, str | None] | None = None
 
         layout.addWidget(self.title_label)
         layout.addWidget(self.value_label)
@@ -59,6 +65,10 @@ class MetricCard(QFrame):
             layout.addWidget(self.hint_label)
 
     def set_value(self, value: str, level: str | None = None) -> None:
+        rendered = (str(value), level)
+        if rendered == self._rendered:
+            return
+        self._rendered = rendered
         self.value_label.setText(value)
         colors = {
             "GOOD": "#4ee0b0",
@@ -83,7 +93,8 @@ class TelemetryGraph(QWidget):
     def append(self, first: float | None, second: float | None) -> None:
         self.series[0].append(float(first) if first is not None else self.min_value)
         self.series[1].append(float(second) if second is not None else self.min_value)
-        self.update()
+        if self.isVisible():
+            self.update()
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
@@ -168,7 +179,8 @@ class RoutePlot(QWidget):
             route_id for route_id in previous_ids if route_id in self._known_ids
         }:
             self._auto_fit_pending = True
-        self.update()
+        if self.isVisible():
+            self.update()
 
     def set_route_visible(self, route_id: str, visible: bool) -> None:
         route_id = str(route_id)

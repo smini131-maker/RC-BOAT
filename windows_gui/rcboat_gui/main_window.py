@@ -47,7 +47,7 @@ from .ssh_worker import SSHWorker
 from .widgets import MetricCard, RoutePlot, StatusCard, TelemetryGraph
 
 
-APP_VERSION = "2.1.5"
+APP_VERSION = "2.1.6"
 
 
 STYLE = """
@@ -901,6 +901,7 @@ class MainWindow(QMainWindow):
     def _logs_tab(self) -> QWidget:
         page = QWidget(); layout = QVBoxLayout(page)
         self.logs = QTextEdit(); self.logs.setReadOnly(True)
+        self.logs.document().setMaximumBlockCount(2000)
         layout.addWidget(self.logs)
         return page
 
@@ -909,6 +910,7 @@ class MainWindow(QMainWindow):
         self.terminal_status = QLabel("SSH 연결 후 터미널을 사용할 수 있습니다")
         self.terminal_status.setStyleSheet("color:#8ea4c4")
         self.terminal_output = QTextEdit()
+        self.terminal_output.document().setMaximumBlockCount(5000)
         self.terminal_output.setReadOnly(True)
         self.terminal_output.setAcceptRichText(False)
         self.terminal_output.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
@@ -1062,6 +1064,8 @@ class MainWindow(QMainWindow):
 
     def on_terminal_state(self, ready: bool, message: str) -> None:
         self._set_terminal_ready(ready, message)
+        if not self.is_simulation:
+            self.cards["ssh"].set_value("connected" if ready else "disconnected", ready)
         if ready:
             self.append_terminal_output(f"\n--- SSH 터미널 연결됨: {message} ---\n")
             self.log(f"SSH 터미널 준비됨: {message}")

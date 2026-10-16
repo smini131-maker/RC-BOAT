@@ -17,7 +17,7 @@ from rcboat_ros.path_tracking import RouteManager
 
 class ReleaseV210(unittest.TestCase):
     def test_release_identity_and_empty_default_routes(self):
-        self.assertEqual((ROOT / "VERSION").read_text().strip(), "2.1.5")
+        self.assertEqual((ROOT / "VERSION").read_text().strip(), "2.1.6")
         routes = json.loads((ROOT / "catkin_ws/src/rcboat_ros/config/routes.json").read_text())
         self.assertEqual(routes["routes"], [])
         self.assertEqual(routes["multipaths"], [])
@@ -198,6 +198,14 @@ class ReleaseV210(unittest.TestCase):
         gui = (ROOT / "windows_gui/rcboat_gui/main_window.py").read_text(encoding="utf-8")
         for label in ("SSH 연결", "ROS master", "ROS gateway", "Logger", "GPS", "RTK"):
             self.assertIn(label, gui)
+
+    def test_ssh_status_uses_active_liveness_probe(self):
+        worker_source = (ROOT / "windows_gui/rcboat_gui/ssh_worker.py").read_text(encoding="utf-8")
+        gui_source = (ROOT / "windows_gui/rcboat_gui/main_window.py").read_text(encoding="utf-8")
+        self.assertIn("def _ssh_is_healthy", worker_source)
+        self.assertIn("transport.open_session(timeout=self.SSH_HEALTH_TIMEOUT_S)", worker_source)
+        self.assertIn("shell.closed or shell.exit_status_ready()", worker_source)
+        self.assertIn('self.cards["ssh"].set_value("connected" if ready else "disconnected", ready)', gui_source)
 
     def test_ground_test_full_output_requires_explicit_opt_in(self):
         supervisor = (ROOT / "catkin_ws/src/rcboat_ros/nodes/safety_supervisor_node.py").read_text(encoding="utf-8")

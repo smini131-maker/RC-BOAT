@@ -1,4 +1,4 @@
-# RC-BOAT ROS Noetic v2.1.5
+# RC-BOAT ROS Noetic v2.1.6
 
 정식 실행 구조는 ROS Noetic뿐입니다. Jetson backend는 `roslaunch rcboat_ros rcboat.launch`, Windows GUI는 ROS gateway TCP(기본 `8765`)로 통신합니다. SSH는 배포·터미널용 보조 채널이며, SSH가 끊겨도 ROS gateway가 살아 있으면 상태 조회와 `GROUND_TEST_STOP`이 동작합니다.
 
@@ -82,9 +82,11 @@ EXE 빌드:
 .\build.bat
 ```
 
-결과: `windows_gui\dist\RCBoatControl_ROS_v2.1.5.exe`
+결과: `windows_gui\dist\RCBoatControl_ROS_v2.1.6.exe`
 
 GUI 상단 상태는 서로 독립입니다: `SSH connected/disconnected`, `ROS master online/offline`, `ROS gateway online/offline`, `logger idle/recording/stopping/error`, `GPS valid/invalid/stale`, `RTK fix/float/dgps/no_fix/no_data`.
+
+SSH 표시는 Paramiko 객체 존재 여부가 아니라 Jetson이 실제 새 SSH 채널에 응답하는지를 3초마다 확인합니다. Wi-Fi 단절, sshd 종료 또는 GUI 터미널의 `exit`가 감지되면 즉시 `disconnected`로 바뀌며, ROS gateway가 살아 있으면 나머지 ROS 기능은 계속 동작합니다.
 
 ## 항로와 Ground Test 사용 순서
 

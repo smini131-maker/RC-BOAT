@@ -44,6 +44,11 @@ class ConfirmHostKeyPolicy(paramiko.MissingHostKeyPolicy):
 class SSHWorker(QThread):
     """ROS gateway worker with an independent, optional SSH management channel."""
 
+    STATUS_POLL_INTERVAL_S = 1.0
+    SSH_RETRY_INTERVAL_S = 10.0
+    SSH_HEALTH_INTERVAL_S = 3.0
+    SSH_HEALTH_TIMEOUT_S = 1.5
+
     connected = Signal()
     disconnected = Signal(str)
     telemetry = Signal(dict)
@@ -73,6 +78,51 @@ class SSHWorker(QThread):
         self._backend_error = ""
         self._backend_error_at = 0.0
 
+    def _close_ssh(self, message: str, *, notify: bool = True) -> None:
+        """Release both SSH channels before publishing the disconnected state."""
+        client, shell = self._client, self._shell_channel
+        self._client = None
+        self._shell_channel = None
+        if shell is not None:
+            try:
+                shell.close()
+            except Exception:
+                pass
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass
+        if notify:
+            self.terminal_state.emit(False, message)
+
+    def _ssh_is_healthy(self) -> bool:
+        """Actively prove that the authenticated SSH transport still accepts channels.
+
+        Paramiko's ``is_active()`` only reports its local transport-thread state and
+        can remain true after Wi-Fi or the remote sshd disappears.  Opening a small
+        throw-away channel requires a reply from the Jetson, so a timeout is an
+        actual liveness failure rather than a cached connection flag.
+        """
+        client = self._client
+        if client is None:
+            return False
+        transport = client.get_transport()
+        if transport is None or not transport.is_active() or not transport.is_authenticated():
+            return False
+        probe = None
+        try:
+            probe = transport.open_session(timeout=self.SSH_HEALTH_TIMEOUT_S)
+            return not probe.closed
+        except Exception:
+            return False
+        finally:
+            if probe is not None:
+                try:
+                    probe.close()
+                except Exception:
+                    pass
+
     def send_command(self, command: str, **kwargs: Any) -> str:
         request_id = uuid.uuid4().hex[:12]
         self._commands.put({"command": command, "request_id": request_id, **kwargs})
@@ -87,11 +137,7 @@ class SSHWorker(QThread):
     def stop(self) -> None:
         self._stop_requested = True
         self._host_key_event.set()
-        if self._client is not None:
-            try:
-                self._client.close()
-            except Exception:
-                pass
+        self._close_ssh("SSH disconnected", notify=False)
 
     def respond_to_host_key(self, accepted: bool) -> None:
         self._host_key_accepted = bool(accepted)
@@ -227,7 +273,7 @@ class SSHWorker(QThread):
         }
         logger_state = str(ground.get("state") or ("recording" if ground.get("active") else "idle"))
         return {
-            "type": "telemetry", "software_version": response.get("version", "2.1.5"),
+            "type": "telemetry", "software_version": response.get("version", "2.1.6"),
             "backend": {"name": str(response.get("backend") or "ROS Noetic"),
                         "ready": bool(response.get("gateway_online", True)), "node_count": len(nodes),
                         "master_online": bool(response.get("master_online")),
@@ -344,12 +390,13 @@ class SSHWorker(QThread):
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         self.connected.emit()
         self.log.emit("ROS gateway 직접 연결 시작 · SSH는 별도 관리 채널로 확인합니다")
-        last_poll = 0.0; last_ssh_attempt = 0.0; last_ssh_error = ""
+        last_poll = 0.0; last_ssh_attempt = 0.0; last_ssh_health = 0.0; last_ssh_error = ""
         try:
             while not self._stop_requested:
                 now = time.monotonic()
-                if self._client is None and now - last_ssh_attempt >= 15.0:
+                if self._client is None and now - last_ssh_attempt >= self.SSH_RETRY_INTERVAL_S:
                     last_ssh_attempt = now
+                    client = None
                     try:
                         client = paramiko.SSHClient(); client.load_system_host_keys()
                         if self.known_hosts_path.exists(): client.load_host_keys(str(self.known_hosts_path))
@@ -362,38 +409,64 @@ class SSHWorker(QThread):
                         shell = transport.open_session(timeout=4); shell.get_pty(term="xterm-256color", width=120, height=32)
                         shell.invoke_shell(); shell.settimeout(0.0)
                         self._client = client; self._shell_channel = shell
+                        transport.set_keepalive(int(self.SSH_HEALTH_INTERVAL_S))
+                        last_ssh_health = now
                         self.terminal_state.emit(True, f"{self.username}@{self.host}")
                         self.log.emit("SSH 관리 채널 연결 완료")
                         last_ssh_error = ""
                     except Exception as exc:
-                        if self._client is not None:
-                            try: self._client.close()
+                        if client is not None:
+                            try: client.close()
                             except Exception: pass
-                        self._client = None; self._shell_channel = None
+                        self._close_ssh("SSH disconnected", notify=False)
                         message = str(exc)
                         if message != last_ssh_error:
                             self.log.emit("SSH disconnected (ROS gateway 연결은 계속 시도): " + message)
                             last_ssh_error = message
                         self.terminal_state.emit(False, "SSH disconnected")
+                elif self._client is not None and now - last_ssh_health >= self.SSH_HEALTH_INTERVAL_S:
+                    last_ssh_health = now
+                    if not self._ssh_is_healthy():
+                        self._close_ssh("SSH disconnected · 연결 재시도 중")
+                        if last_ssh_error != "SSH health check failed":
+                            self.log.emit("SSH disconnected · 실제 세션 응답 없음 (ROS gateway는 독립 동작)")
+                        last_ssh_error = "SSH health check failed"
+                        last_ssh_attempt = now
                 try:
                     while True: self._handle_request(self._commands.get_nowait())
                 except queue.Empty: pass
                 shell = self._shell_channel
                 if shell is not None:
+                    if shell.closed or shell.exit_status_ready():
+                        self._close_ssh("SSH disconnected · 터미널 세션 종료")
+                        last_ssh_error = "SSH terminal session closed"
+                        last_ssh_attempt = now
+                        shell = None
+                if shell is not None:
                     try:
                         while True: shell.sendall(self._terminal_commands.get_nowait())
                     except queue.Empty: pass
                     except Exception:
-                        try: self._client.close()
-                        except Exception: pass
-                        self._client = None; self._shell_channel = None
-                        self.terminal_state.emit(False, "SSH disconnected")
+                        self._close_ssh("SSH disconnected · 터미널 전송 실패")
+                        last_ssh_error = "SSH terminal send failed"
+                        last_ssh_attempt = now
+                        shell = None
+                if shell is not None:
                     try:
                         while shell.recv_ready():
                             data = shell.recv(65536)
-                            if data: self.terminal_output.emit(clean_terminal_output(decoder.decode(data)))
-                    except Exception: pass
-                if now - last_poll >= 1.0:
+                            if data:
+                                self.terminal_output.emit(clean_terminal_output(decoder.decode(data)))
+                            else:
+                                self._close_ssh("SSH disconnected · 터미널 세션 종료")
+                                last_ssh_error = "SSH terminal EOF"
+                                last_ssh_attempt = now
+                                break
+                    except Exception:
+                        self._close_ssh("SSH disconnected · 터미널 수신 실패")
+                        last_ssh_error = "SSH terminal receive failed"
+                        last_ssh_attempt = now
+                if now - last_poll >= self.STATUS_POLL_INTERVAL_S:
                     last_poll = now
                     try:
                         response = self._bridge({"action": "status", "arguments": {}})
@@ -403,7 +476,7 @@ class SSHWorker(QThread):
                         self._backend_error = ""
                     except Exception as exc:
                         message = str(exc)
-                        offline = {"success": True, "version": "2.1.5", "backend": "ROS Noetic",
+                        offline = {"success": True, "version": "2.1.6", "backend": "ROS Noetic",
                                    "master_online": False, "gateway_online": False, "telemetry": {}, "nodes": []}
                         self.telemetry.emit(self._normalize(offline, self._client is not None))
                         if message != self._backend_error or now - self._backend_error_at >= 15.0:
@@ -411,9 +484,5 @@ class SSHWorker(QThread):
                             self._backend_error = message; self._backend_error_at = now
                 self.msleep(50)
         finally:
-            if self._client is not None:
-                try:
-                    self._client.close()
-                except Exception:
-                    pass
+            self._close_ssh("SSH 터미널 연결 종료", notify=False)
             self.terminal_state.emit(False, "SSH 터미널 연결 종료")
