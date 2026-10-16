@@ -17,7 +17,7 @@ from rcboat_ros.srv import Execute
 from rcboat_ros.common import pack, unpack
 
 
-VERSION = "2.1.3"
+VERSION = "2.1.4"
 SOCKET = os.path.expanduser("~/rcboat_ros_data/gui_bridge.sock")
 TOPICS = {
     "gps": "/rcboat/gps/status", "ntrip": "/rcboat/ntrip/status", "route": "/rcboat/route/state",

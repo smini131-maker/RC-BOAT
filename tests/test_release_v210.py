@@ -17,7 +17,7 @@ from rcboat_ros.path_tracking import RouteManager
 
 class ReleaseV210(unittest.TestCase):
     def test_release_identity_and_empty_default_routes(self):
-        self.assertEqual((ROOT / "VERSION").read_text().strip(), "2.1.3")
+        self.assertEqual((ROOT / "VERSION").read_text().strip(), "2.1.4")
         routes = json.loads((ROOT / "catkin_ws/src/rcboat_ros/config/routes.json").read_text())
         self.assertEqual(routes["routes"], [])
         self.assertEqual(routes["multipaths"], [])
