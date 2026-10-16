@@ -1,4 +1,4 @@
-# RC-BOAT ROS Noetic v2.1.4
+# RC-BOAT ROS Noetic v2.1.5
 
 정식 실행 구조는 ROS Noetic뿐입니다. Jetson backend는 `roslaunch rcboat_ros rcboat.launch`, Windows GUI는 ROS gateway TCP(기본 `8765`)로 통신합니다. SSH는 배포·터미널용 보조 채널이며, SSH가 끊겨도 ROS gateway가 살아 있으면 상태 조회와 `GROUND_TEST_STOP`이 동작합니다.
 
@@ -82,7 +82,7 @@ EXE 빌드:
 .\build.bat
 ```
 
-결과: `windows_gui\dist\RCBoatControl_ROS_v2.1.4.exe`
+결과: `windows_gui\dist\RCBoatControl_ROS_v2.1.5.exe`
 
 GUI 상단 상태는 서로 독립입니다: `SSH connected/disconnected`, `ROS master online/offline`, `ROS gateway online/offline`, `logger idle/recording/stopping/error`, `GPS valid/invalid/stale`, `RTK fix/float/dgps/no_fix/no_data`.
 
@@ -138,14 +138,16 @@ Jetson 저장 위치:
 
 7주차 지상검증 그래프는 `ground_test.csv`의 `final_steering_pwm`, `final_throttle_pwm`, `desired_rudder_angle_deg`, `target_path_distance_m`, `multipath_switch_threshold_m`, `active_route_id`와 `route_metrics.csv`의 소루트별 `heading_error_deg`를 사용해 재구성합니다. 실제 출력 체크를 켠 시험에서는 자동주행과 같은 조향·스로틀 명령이 PCA9685로 전달됩니다. 체크하지 않은 시험은 `6000/6450` 중립을 유지합니다. 어느 경우든 `actual_*_pwm`은 물리 센서 피드백이 아니라 PCA9685에 전송한 명령 확인값입니다.
 
-MATLAB에서 다운로드한 시험 ZIP을 푼 뒤 다음을 실행하면 7주차 강의자료와 도보검증 PPT 형식의 분석 PNG 8개와 PPT 작성·해석 가이드 TXT가 생성됩니다.
+MATLAB에서 다운로드한 시험 ZIP을 푼 뒤 다음을 실행하면 7주차 강의자료와 도보검증 PPT 형식의 분석 PNG 14개, 분리된 기준 항로/실제 경로 CSV, QGIS용 CSV, PPT 작성·해석·캡처 설계도 TXT가 생성됩니다.
 
 ```matlab
 addpath('matlab')
 plot_ground_test_week7('C:\path\to\ground_test_YYYYMMDD_HHMMSS')
 ```
 
-생성 파일은 `01_week7_full_summary.png`부터 `08_disturbance_case.png`까지의 8개 PNG와 `PPT_작성_및_그래프_해석_MATLAB.txt`입니다. 전체 요약, 기준/실제 경로, 2m 판정, 항로별 헤딩 오차, 러더·단일모터·속도 응답, GPS/RTK 품질, 비외란/외란 사례를 각각 제공합니다. 강의자료의 L/R thrust는 듀얼 추진기 예시이므로, 현재 단일 스로틀+러더 구조에서는 최종 스로틀 PWM과 러더 서보 PWM/각도로 대응해 표시합니다.
+생성 그래프는 `01_week7_full_summary.png`부터 `14_data_quality_and_availability_summary.png`까지입니다. 기존 PPT 대응 그래프 8종에 추적·속도 오차, 제어 명령/출력 검증, waypoint/항로 진행, 전환 응답 비교, 항로별 통계, 데이터 품질·가용성 그래프를 추가했습니다. 범례는 플롯 밖으로 이동하고 짧은 구간의 중복 글자를 생략하여 PPT 축소 시에도 겹치지 않게 했습니다. 강의자료의 L/R thrust는 듀얼 추진기 예시이므로, 현재 단일 스로틀+러더 구조에서는 최종 스로틀 PWM과 러더 서보 PWM/각도로 대응해 표시합니다.
+
+분석 결과의 `data` 폴더에는 `reference_route_01_*.csv`부터 `reference_route_03_*.csv`까지의 기준 항로 3개, `actual_path.csv`, 전체 원본/파생 CSV·JSON이 저장됩니다. `qgis` 폴더에는 `qgis_reference_routes.csv`, `qgis_actual_path.csv`, `qgis_route_switch_points.csv`가 생성됩니다. `docs/PPT_QGIS_그래프_해설_및_캡처_설계도.txt`에는 그래프별 해석 문장, 권장 PPT 순서, QGIS 좌표계·표현색·캡처 범위와 전환지점 확대 위치가 기록됩니다.
 
 CSV의 빈 값은 장치가 제공하지 않았거나 아직 수신되지 않은 값입니다. GUI는 이를 `unsupported`, `no_data`, `invalid`, `stale`로 구분하며 0으로 대체하지 않습니다.
 

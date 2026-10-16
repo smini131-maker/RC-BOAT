@@ -47,7 +47,7 @@ from .ssh_worker import SSHWorker
 from .widgets import MetricCard, RoutePlot, StatusCard, TelemetryGraph
 
 
-APP_VERSION = "2.1.4"
+APP_VERSION = "2.1.5"
 
 
 STYLE = """
