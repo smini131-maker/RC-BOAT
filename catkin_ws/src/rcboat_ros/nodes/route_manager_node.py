@@ -13,8 +13,7 @@ from rcboat_ros.srv import Execute, ExecuteResponse
 class Node:
     def __init__(self):
         f=rospy.get_param('/rcboat/routes_file')
-        self.rm=RouteManager(f,rospy.get_param('/rcboat/endpoint_tolerance_m',.75),
-                             rospy.get_param('/rcboat/multipath_switch_threshold_m',2.0))
+        self.rm=RouteManager(f,rospy.get_param('/rcboat/endpoint_tolerance_m',.75))
         self.settings_file=pathlib.Path(os.path.expanduser('~/rcboat_ros_data/multipath_settings.json'))
         if self.settings_file.exists():
             try:
@@ -23,10 +22,6 @@ class Node:
                     self.rm.endpoint_tolerance=float(settings['endpoint_tolerance_m'])
                 if 'enabled' in settings:
                     self.rm.multipath_enabled=bool(settings['enabled'])
-                if 'switch_threshold_m' in settings:
-                    threshold=float(settings['switch_threshold_m'])
-                    if threshold<=0:raise ValueError('switch_threshold_m must be positive')
-                    self.rm.switch_threshold_m=threshold
             except (ValueError,OSError) as e:rospy.logwarn('invalid multipath settings %s',e)
         self.gps={}
         self.pub=rospy.Publisher('/rcboat/route/state',String,queue_size=10)
@@ -91,18 +86,16 @@ class Node:
             elif action=='set_multipath':
                 updates={'enabled':bool(args.get('enabled',self.rm.multipath_enabled)),
                          'endpoint_tolerance_m':float(args['endpoint_tolerance_m']),
-                         'switch_threshold_m':float(args.get('switch_threshold_m',self.rm.switch_threshold_m))}
+                         'selection_policy':'nearest_route'}
                 if updates['endpoint_tolerance_m']<=0 or updates['endpoint_tolerance_m']>1000:raise ValueError('invalid multipath settings')
-                if updates['switch_threshold_m']<=0 or updates['switch_threshold_m']>1000:raise ValueError('invalid switch threshold')
                 self.rm.endpoint_tolerance=updates['endpoint_tolerance_m']
-                self.rm.switch_threshold_m=updates['switch_threshold_m']
                 self.rm.set_multipath_enabled(updates['enabled'])
                 from rcboat_ros.path_tracking import _atomic_json
                 _atomic_json(self.settings_file,updates)
                 result={'multipath':{'enabled':self.rm.multipath_enabled,
                                      'endpoint_tolerance_m':self.rm.endpoint_tolerance,
-                                     'switch_threshold_m':self.rm.switch_threshold_m,
-                                     'switch_rule':'active_target_distance_gt_threshold_then_nearest'}}
+                                     'selection_policy':'nearest_route',
+                                     'switch_rule':'nearest_route_each_update'}}
                 self.changed('multipath_settings',after=updates)
             else:raise ValueError('unknown route action')
             return ExecuteResponse(True,pack(**result))
@@ -147,8 +140,8 @@ class Node:
                   'execution_target_type':'multipath' if self.rm.multipath_enabled else 'single_route',
                   'routes':list(self.rm.routes.values()),'multipaths':list(self.rm.multipaths.values()),
                   'multipath':{'enabled':self.rm.multipath_enabled,'endpoint_tolerance_m':self.rm.endpoint_tolerance,
-                               'switch_threshold_m':self.rm.switch_threshold_m,
-                               'switch_rule':'active_target_distance_gt_threshold_then_nearest',
+                               'selection_policy':'nearest_route',
+                               'switch_rule':'nearest_route_each_update',
                                'off_route_gate':False,'priority_gate':False,'cooldown_gate':False},
                   'recording':{'active':recording is not None,
                                'name':(recording or {}).get('name',''),

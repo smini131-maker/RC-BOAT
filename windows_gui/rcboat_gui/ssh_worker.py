@@ -182,7 +182,6 @@ class SSHWorker(QThread):
             return {"action": "set_multipath", "arguments": {
                 "enabled": kwargs.get("enabled", True),
                 "endpoint_tolerance_m": kwargs.get("endpoint_tolerance_m", 0.75),
-                "switch_threshold_m": kwargs.get("switch_threshold_m", 2.0),
             }}
         if command == "SET_AUTO_CRUISE_PWM":
             return {"action": "set_auto_cruise_pwm", "arguments": {"value": kwargs.get("value")}}
@@ -267,13 +266,13 @@ class SSHWorker(QThread):
         group_ids = list(route.get("group_routes") or [])
         multipath = route.get("multipath") or {
             "enabled": True, "endpoint_tolerance_m": route.get("endpoint_tolerance_m", 0.75),
-            "switch_threshold_m": 2.0,
-            "switch_rule": "active_target_distance_gt_threshold_then_nearest",
+            "selection_policy": "nearest_route",
+            "switch_rule": "nearest_route_each_update",
             "off_route_gate": False, "priority_gate": False, "cooldown_gate": False,
         }
         logger_state = str(ground.get("state") or ("recording" if ground.get("active") else "idle"))
         return {
-            "type": "telemetry", "software_version": response.get("version", "2.1.6"),
+            "type": "telemetry", "software_version": response.get("version", "2.1.7"),
             "backend": {"name": str(response.get("backend") or "ROS Noetic"),
                         "ready": bool(response.get("gateway_online", True)), "node_count": len(nodes),
                         "master_online": bool(response.get("master_online")),
@@ -338,9 +337,11 @@ class SSHWorker(QThread):
                       "selected_route_persisted": True, "multipath": multipath,
                       "multipath_group_route_ids": group_ids,
                       "alternative_route_id": route.get("candidate_route_id", ""),
-                      "target_path_distance_m": route.get("previous_target_path_distance_m"),
+                      "target_path_distance_m": route.get("distance_to_route_m"),
+                      "previous_target_path_distance_m": route.get("previous_target_path_distance_m"),
                       "candidate_route_distance_m": route.get("candidate_route_distance_m"),
-                      "switch_threshold_exceeded": route.get("switch_threshold_exceeded"),
+                      "route_distance_improvement_m": route.get("route_distance_improvement_m"),
+                      "selection_metric": route.get("selection_metric"),
                       "switch_decision": route.get("switch_decision"),
                       "route_candidates": route.get("route_candidates") or [],
                       "off_route_duration_s": 0.0},
@@ -476,7 +477,7 @@ class SSHWorker(QThread):
                         self._backend_error = ""
                     except Exception as exc:
                         message = str(exc)
-                        offline = {"success": True, "version": "2.1.6", "backend": "ROS Noetic",
+                        offline = {"success": True, "version": "2.1.7", "backend": "ROS Noetic",
                                    "master_online": False, "gateway_online": False, "telemetry": {}, "nodes": []}
                         self.telemetry.emit(self._normalize(offline, self._client is not None))
                         if message != self._backend_error or now - self._backend_error_at >= 15.0:

@@ -1,4 +1,4 @@
-# RC-BOAT ROS Noetic v2.1.6
+# RC-BOAT ROS Noetic v2.1.7
 
 정식 실행 구조는 ROS Noetic뿐입니다. Jetson backend는 `roslaunch rcboat_ros rcboat.launch`, Windows GUI는 ROS gateway TCP(기본 `8765`)로 통신합니다. SSH는 배포·터미널용 보조 채널이며, SSH가 끊겨도 ROS gateway가 살아 있으면 상태 조회와 `GROUND_TEST_STOP`이 동작합니다.
 
@@ -21,7 +21,7 @@
 - **소루트**: waypoint 좌표를 가진 실제 항로입니다.
 - **대루트(Multi-Path)**: 사용자가 이름을 붙이고 소루트 1개 이상을 명시적으로 묶은 실행 단위입니다. 예를 들어 `대루트 A = [소루트 1, 소루트 2, 소루트 3, ...]`입니다.
 
-대루트 운항을 켜면 현재 Target Path와 보트 위치의 상대거리(경로선까지 최소거리)가 임계값 `2.0 m` 이하일 때 현재 소루트를 유지합니다. 거리가 `2.0 m`를 엄격히 초과할 때만 선택한 대루트 안의 최근접 소루트로 Target Path를 변경합니다. 이는 7주차 강의자료의 `≤ 2 m 유지`, `> 2 m 변경` 조건입니다. 대루트 운항을 끄면 선택한 소루트 하나만 운항·시험합니다. “공통 출발·도착 자동 체크”는 대루트 편집 시 후보를 체크해 주는 선택적 도우미이며 자동 저장 또는 필수 조건이 아닙니다.
+대루트 운항을 켜면 유효한 GPS가 갱신될 때마다 보트 위치에서 각 소루트 경로선까지의 최소거리를 비교하고, 선택한 대루트 안에서 가장 가까운 소루트를 즉시 Target Path로 사용합니다. `2 m` 같은 거리 임계값, 유지시간, 우선순위 gate, cooldown은 없습니다. 거리가 수치상 완전히 같은 경우에만 의미 없는 왕복 전환을 피하려고 현재 소루트를 유지합니다. 대루트 운항을 끄면 선택한 소루트 하나만 운항·시험합니다. “공통 출발·도착 자동 체크”는 대루트 편집 시 후보를 체크해 주는 선택적 도우미이며 자동 저장 또는 필수 조건이 아닙니다.
 
 ## Windows PowerShell — 전송
 
@@ -82,7 +82,7 @@ EXE 빌드:
 .\build.bat
 ```
 
-결과: `windows_gui\dist\RCBoatControl_ROS_v2.1.6.exe`
+결과: `windows_gui\dist\RCBoatControl_ROS_v2.1.7.exe`
 
 GUI 상단 상태는 서로 독립입니다: `SSH connected/disconnected`, `ROS master online/offline`, `ROS gateway online/offline`, `logger idle/recording/stopping/error`, `GPS valid/invalid/stale`, `RTK fix/float/dgps/no_fix/no_data`.
 
@@ -126,7 +126,7 @@ Jetson 저장 위치:
 - `ground_test.jsonl`: 각 sample의 원본 구조 보존
 - `reference_routes.*`: 시험 시작 시 선택한 대루트의 모든 소루트(또는 단일 소루트) 전체 좌표/번호/UTM 고정본
 - `route_metrics.csv`: sample × 소루트 장기형 데이터. 각 후보 항로의 거리, 횡오차, 목표점, 목표 헤딩, 헤딩 오차를 저장합니다.
-- `route_switches.csv`: 활성 소루트 전환 시각, 전환 전후 항로, 현재 Target Path 거리, 후보 거리, 2m 임계값과 전환 판정
+- `route_switches.csv`: 활성 소루트 전환 시각, 전환 전후 항로, 이전 Target Path 거리, 선택된 최근접 후보 거리, 거리 개선량과 전환 판정
 - `route_changes.jsonl`: 시험 중 항로·설정 변경 시각과 전후 정보
 - `events.jsonl`: 수동 개입, 모드, 비상정지, 오류, 정지 이벤트. 비정상 종료 후 logger가 다시 시작되면 `LOGGER_RESTART_DETECTED`가 추가됩니다.
 - `test_metadata.json`: 코드 버전, ROS 설정, 서보 보정, 시작/종료 정보
@@ -138,7 +138,7 @@ Jetson 저장 위치:
 
 로거는 실시간 그래프 이미지를 계산하지 않고 원본과 기본 파생값을 저장합니다. 따라서 연산 부담을 낮추면서도 MATLAB에서 강의자료 형식의 그래프를 2차 분석으로 재구성할 수 있습니다.
 
-7주차 지상검증 그래프는 `ground_test.csv`의 `final_steering_pwm`, `final_throttle_pwm`, `desired_rudder_angle_deg`, `target_path_distance_m`, `multipath_switch_threshold_m`, `active_route_id`와 `route_metrics.csv`의 소루트별 `heading_error_deg`를 사용해 재구성합니다. 실제 출력 체크를 켠 시험에서는 자동주행과 같은 조향·스로틀 명령이 PCA9685로 전달됩니다. 체크하지 않은 시험은 `6000/6450` 중립을 유지합니다. 어느 경우든 `actual_*_pwm`은 물리 센서 피드백이 아니라 PCA9685에 전송한 명령 확인값입니다.
+7주차 지상검증 그래프는 `ground_test.csv`의 `final_steering_pwm`, `final_throttle_pwm`, `desired_rudder_angle_deg`, `target_path_distance_m`, `previous_target_path_distance_m`, `candidate_route_distance_m`, `route_distance_improvement_m`, `active_route_id`와 `route_metrics.csv`의 소루트별 `heading_error_deg`를 사용해 재구성합니다. 실제 출력 체크를 켠 시험에서는 자동주행과 같은 조향·스로틀 명령이 PCA9685로 전달됩니다. 체크하지 않은 시험은 `6000/6450` 중립을 유지합니다. 어느 경우든 `actual_*_pwm`은 물리 센서 피드백이 아니라 PCA9685에 전송한 명령 확인값입니다.
 
 MATLAB에서 다운로드한 시험 ZIP을 푼 뒤 다음을 실행하면 7주차 강의자료와 도보검증 PPT 형식의 분석 PNG 14개, 분리된 기준 항로/실제 경로 CSV, QGIS용 CSV, PPT 작성·해석·캡처 설계도 TXT가 생성됩니다.
 

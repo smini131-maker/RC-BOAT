@@ -17,7 +17,7 @@ from rcboat_ros.path_tracking import RouteManager
 
 class ReleaseV210(unittest.TestCase):
     def test_release_identity_and_empty_default_routes(self):
-        self.assertEqual((ROOT / "VERSION").read_text().strip(), "2.1.6")
+        self.assertEqual((ROOT / "VERSION").read_text().strip(), "2.1.7")
         routes = json.loads((ROOT / "catkin_ws/src/rcboat_ros/config/routes.json").read_text())
         self.assertEqual(routes["routes"], [])
         self.assertEqual(routes["multipaths"], [])
@@ -119,7 +119,7 @@ class ReleaseV210(unittest.TestCase):
                             "target_heading_deg", "heading_error_deg"):
                     self.assertIn(key, metric)
 
-    def test_week7_target_path_switches_only_above_two_metres(self):
+    def test_multipath_always_selects_the_nearest_route_without_a_distance_gate(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "routes.json"
             metres_per_degree_lon = 91188.0
@@ -136,17 +136,23 @@ class ReleaseV210(unittest.TestCase):
                                                         "route_ids": ["center", "right"],
                                                         "default_route_id": "center"}],
                                         "routes": routes}))
-            manager = RouteManager(path, switch_threshold_m=2.0)
-            inside = manager.update((35.0002, 129.0 + 1.8 / metres_per_degree_lon), heading=0.0)
-            self.assertEqual(inside["active_route_id"], "center")
-            self.assertFalse(inside["switch_threshold_exceeded"])
-            self.assertEqual(inside["switch_decision"], "KEEP_ACTIVE_WITHIN_THRESHOLD")
-            outside = manager.update((35.0003, 129.0 + 2.2 / metres_per_degree_lon), heading=0.0)
-            self.assertEqual(outside["active_route_id"], "right")
-            self.assertTrue(outside["switch_threshold_exceeded"])
-            self.assertTrue(outside["multipath_switch"])
-            self.assertEqual(outside["selection_metric"],
-                             "ACTIVE_TARGET_DISTANCE_GT_THRESHOLD_THEN_NEAREST")
+            manager = RouteManager(path)
+            nearer_right = manager.update((35.0002, 129.0 + 1.8 / metres_per_degree_lon), heading=0.0)
+            self.assertEqual(nearer_right["active_route_id"], "right")
+            self.assertTrue(nearer_right["multipath_switch"])
+            self.assertLess(nearer_right["previous_target_path_distance_m"], 2.0)
+            self.assertEqual(nearer_right["switch_decision"], "SWITCH_TO_NEAREST_ROUTE")
+            self.assertEqual(nearer_right["selection_metric"], "MINIMUM_POLYLINE_DISTANCE")
+            self.assertNotIn("switch_threshold_m", nearer_right)
+            self.assertNotIn("switch_threshold_exceeded", nearer_right)
+            nearer_center = manager.update((35.0003, 129.0 + 1.2 / metres_per_degree_lon), heading=0.0)
+            self.assertEqual(nearer_center["active_route_id"], "center")
+            self.assertTrue(nearer_center["multipath_switch"])
+
+            tracking_source = (SRC / "rcboat_ros/path_tracking.py").read_text(encoding="utf-8")
+            gui_source = (ROOT / "windows_gui/rcboat_gui/main_window.py").read_text(encoding="utf-8")
+            config_source = (ROOT / "catkin_ws/src/rcboat_ros/config/boat.yaml").read_text(encoding="utf-8")
+            self.assertNotIn("switch_threshold", tracking_source + gui_source + config_source)
 
     def test_utm_is_plausible_and_not_placeholder_zero(self):
         easting, northing, zone = latlon_to_utm(35.0, 129.0)
@@ -167,7 +173,7 @@ class ReleaseV210(unittest.TestCase):
                       "output_send_success", "manual_intervention", "output_locked",
                       "desired_rudder_angle_deg", "target_speed_mps", "route_candidates_json",
                       "execution_target_type", "target_path_distance_m",
-                      "multipath_switch_threshold_m", "switch_threshold_exceeded",
+                      "previous_target_path_distance_m", "route_distance_improvement_m", "selection_metric",
                       "switch_decision", "ground_test_actuation_enabled"):
             self.assertIn(field, source)
         self.assertIn("already_stopped", source)

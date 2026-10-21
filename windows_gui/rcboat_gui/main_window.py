@@ -47,7 +47,7 @@ from .ssh_worker import SSHWorker
 from .widgets import MetricCard, RoutePlot, StatusCard, TelemetryGraph
 
 
-APP_VERSION = "2.1.6"
+APP_VERSION = "2.1.7"
 
 
 STYLE = """
@@ -460,40 +460,21 @@ class MainWindow(QMainWindow):
         self.multipath_enabled = QCheckBox("대루트 운항 사용")
         self.multipath_enabled.setChecked(True)
         self.multipath_endpoint = self._distance_spin(0.10, 1.00, 0.75, 0.05, " m")
-        self.multipath_switch_threshold = self._distance_spin(0.1, 100.0, 2.0, 0.1, " m")
-        self.multipath_hold = self._distance_spin(0.0, 30.0, 0.0, 0.5, " s")
-        self.multipath_advantage = self._distance_spin(0.0, 50.0, 0.0, 0.5, " m")
-        self.multipath_cooldown = self._distance_spin(0.0, 60.0, 0.0, 0.5, " s")
-        for ignored in (
-            self.multipath_hold,
-            self.multipath_advantage,
-            self.multipath_cooldown,
-        ):
-            ignored.setEnabled(False)
-            ignored.setToolTip("ROS 도보 테스트에서는 무시됩니다. 같은 시작/끝 묶음 안의 최근접 경로만 사용합니다.")
         self.multipath_apply = QPushButton("기준 저장")
         self.multipath_apply.clicked.connect(self.apply_multipath)
         self.multipath_status = QLabel("설정 대기")
         self.multipath_status.setWordWrap(True)
         self.multipath_status.setObjectName("sectionHint")
         multipath_layout.addWidget(self.multipath_enabled, 0, 0)
-        for column, (label, widget) in enumerate((
-            ("자동 편성 도움 허용거리", self.multipath_endpoint),
-            ("Target Path 전환 임계값", self.multipath_switch_threshold),
-        ), 1):
-            box = QVBoxLayout()
-            box.addWidget(QLabel(label))
-            box.addWidget(widget)
-            multipath_layout.addLayout(box, 0, column)
-        multipath_layout.addWidget(self.multipath_apply, 0, 3)
-        multipath_layout.addWidget(self.multipath_status, 1, 0, 1, 4)
+        helper_box = QVBoxLayout()
+        helper_box.addWidget(QLabel("자동 편성 도움 허용거리"))
+        helper_box.addWidget(self.multipath_endpoint)
+        multipath_layout.addLayout(helper_box, 0, 1)
+        multipath_layout.addWidget(self.multipath_apply, 0, 2)
+        multipath_layout.addWidget(self.multipath_status, 1, 0, 1, 3)
         for widget in (
             self.multipath_enabled,
             self.multipath_endpoint,
-            self.multipath_switch_threshold,
-            self.multipath_hold,
-            self.multipath_advantage,
-            self.multipath_cooldown,
         ):
             if isinstance(widget, QCheckBox):
                 widget.toggled.connect(self._mark_multipath_dirty)
@@ -1671,7 +1652,6 @@ class MainWindow(QMainWindow):
             "SET_MULTIPATH",
             enabled=self.multipath_enabled.isChecked(),
             endpoint_tolerance_m=self.multipath_endpoint.value(),
-            switch_threshold_m=self.multipath_switch_threshold.value(),
         )
         if request_id is not None:
             self._pending_multipath_request = request_id
@@ -1732,8 +1712,7 @@ class MainWindow(QMainWindow):
         if self.current_mode == "REMOTE":
             self._release_remote_controls()
         self.command("SET_MULTIPATH", enabled=False,
-                     endpoint_tolerance_m=self.multipath_endpoint.value(),
-                     switch_threshold_m=self.multipath_switch_threshold.value())
+                     endpoint_tolerance_m=self.multipath_endpoint.value())
         self.pending_route_id = str(route_id)
         request_id = self.command("SELECT_ROUTE", route_id=route_id)
         if request_id is not None:
@@ -1748,8 +1727,7 @@ class MainWindow(QMainWindow):
         if self.current_mode == "REMOTE":
             self._release_remote_controls()
         self.command("SET_MULTIPATH", enabled=True,
-                     endpoint_tolerance_m=self.multipath_endpoint.value(),
-                     switch_threshold_m=self.multipath_switch_threshold.value())
+                     endpoint_tolerance_m=self.multipath_endpoint.value())
         request_id = self.command("SELECT_MULTIPATH", multipath_id=multipath_id)
         if request_id is not None:
             self.pending_multipath_start_request = request_id
@@ -2392,10 +2370,6 @@ class MainWindow(QMainWindow):
             try:
                 self.multipath_enabled.setChecked(bool(multipath.get("enabled", True)))
                 self.multipath_endpoint.setValue(float(multipath.get("endpoint_tolerance_m", 0.75)))
-                self.multipath_switch_threshold.setValue(float(multipath.get("switch_threshold_m", 2.0)))
-                self.multipath_hold.setValue(0.0)
-                self.multipath_advantage.setValue(0.0)
-                self.multipath_cooldown.setValue(0.0)
                 self.multipath_apply.setText("기준 저장")
             finally:
                 self._syncing_multipath = False
@@ -2490,7 +2464,7 @@ class MainWindow(QMainWindow):
             self.multipath_status.setText(
                 f"{'대루트 운항' if multipath.get('enabled', True) else '단일 소루트 운항'} · 구성 {len(group_ids)}개"
                 f" · 대체 {route.get('alternative_route_id') or '-'}"
-                f" · 전환: 현재 Target Path 거리 > {float(multipath.get('switch_threshold_m', 2.0)):.1f}m이면 최근접 경로"
+                f" · 전환: 거리 임계값 없이 항상 최근접 소루트 선택"
                 f" · 저장 {multipath_config_path}"
             )
         nav_detail = ""

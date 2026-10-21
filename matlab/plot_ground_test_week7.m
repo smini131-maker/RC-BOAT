@@ -25,6 +25,19 @@ M = readtable(fullfile(testFolder,"route_metrics.csv"),"Delimiter",",","Variable
 W = readtable(fullfile(testFolder,"route_switches.csv"),"Delimiter",",","VariableNamingRule","preserve");
 assert(height(S)>=2 && height(R)>=2,"Ground-test CSV files are empty");
 
+% Backward-compatible input mapping for logs recorded before v2.1.7.
+sampleVariables=string(S.Properties.VariableNames);
+if ~ismember("previous_target_path_distance_m",sampleVariables)
+    S.previous_target_path_distance_m=S.target_path_distance_m;
+end
+if ~ismember("route_distance_improvement_m",sampleVariables)
+    S.route_distance_improvement_m=max(0,S.previous_target_path_distance_m-S.candidate_route_distance_m);
+end
+switchVariables=string(W.Properties.VariableNames);
+if ~ismember("route_distance_improvement_m",switchVariables)
+    W.route_distance_improvement_m=max(0,W.previous_target_path_distance_m-W.candidate_route_distance_m);
+end
+
 set(groot,"defaultFigureColor","w");
 set(groot,"defaultAxesColor","w");
 set(groot,"defaultAxesXColor","k");
@@ -86,26 +99,26 @@ title(ax,"Reference Paths and Actual Path with Target Path Switches","FontSize",
 axis(ax,"padded");
 outputFiles(end+1)=saveFigure(fig,graphFolder,"02_reference_and_actual_path.png");
 
-%% 3. Target Path 2 m decision
+%% 3. Nearest-route Target Path decision
 fig=figure("Position",[50 50 1650 930]); L=tiledlayout(fig,2,1,"TileSpacing","compact","Padding","compact");
 ax=nexttile(L); hold(ax,"on"); grid(ax,"on");
-plot(ax,t,S.target_path_distance_m,"Color",[.05 .35 .95],"DisplayName","Current Target Path Distance");
-plot(ax,t,S.candidate_route_distance_m,"Color",[0 .65 .65],"DisplayName","Nearest Candidate Distance");
-plot(ax,t,S.multipath_switch_threshold_m,"--","Color",[.95 .1 .2],"DisplayName","Switch Threshold (2 m)");
+plot(ax,t,S.previous_target_path_distance_m,"Color",[.05 .35 .95],"DisplayName","Previous Active Path Distance");
+plot(ax,t,S.candidate_route_distance_m,"Color",[0 .65 .65],"DisplayName","Nearest Path Distance");
+plot(ax,t,S.route_distance_improvement_m,"--","Color",[.95 .35 .05],"DisplayName","Distance Improvement");
 for k=1:height(W)
     name="Target Path Switch"; vis="off"; if k==1,vis="on";end
     scatter(ax,W.elapsed_time_s(k),W.previous_target_path_distance_m(k),55,[.85 .05 .08],"filled","MarkerEdgeColor","w","DisplayName",name,"HandleVisibility",vis);
     text(ax,W.elapsed_time_s(k),W.previous_target_path_distance_m(k),"  S"+k);
 end
 shadeActive(ax,S,routeIds,roles,true); ylabel(ax,"Distance (m)");
-title(ax,"Target Path Decision: <= 2 m Keep, > 2 m Select Nearest Path","FontSize",18,"FontWeight","bold");
+title(ax,"Target Path Decision: Select Minimum Route Distance (No Threshold)","FontSize",18,"FontWeight","bold");
 legend(ax,"Location","northoutside","Orientation","horizontal","NumColumns",4);
 ax=nexttile(L); hold(ax,"on"); grid(ax,"on"); active=string(S.active_route_id); y=zeros(height(S),1);
 for k=1:numel(routeIds), y(active==routeIds(k))=roleIndex(roles(k)); end
 stairs(ax,t,y,"k","LineWidth",1.8,"DisplayName","Active Target Path"); drawSwitchLines(ax,switchTimes,true);
 yticks(ax,[1 2 3]); yticklabels(ax,["Left Path","Center Path","Right Path"]); ylim(ax,[.5 3.5]);
 xlabel(ax,"Time (s)"); ylabel(ax,"Target Path"); legend(ax,"Location","northoutside","Orientation","horizontal");
-outputFiles(end+1)=saveFigure(fig,graphFolder,"03_target_path_2m_decision.png");
+outputFiles(end+1)=saveFigure(fig,graphFolder,"03_nearest_route_decision.png");
 
 %% 4. Heading error for all paths
 fig=figure("Position",[60 60 1650 930]); L=tiledlayout(fig,3,1,"TileSpacing","compact","Padding","compact");
@@ -225,8 +238,8 @@ if isfinite(c),xline(ax,c,"k-","DisplayName","Target Path Switch");end
 ylabel(ax,"Steering Angle (deg)"); title(ax,"Rudder Steering Command"); legend(ax,"Location","northoutside","Orientation","horizontal","NumColumns",4);
 
 ax=nexttile(L); hold(ax,"on"); grid(ax,"on");
-plot(ax,t(mask),S.target_path_distance_m(mask),"Color",[.05 .35 .95],"DisplayName","Target Path Distance");
-plot(ax,t(mask),S.multipath_switch_threshold_m(mask),"--","Color",[.95 .1 .2],"DisplayName","Switch Threshold");
+plot(ax,t(mask),S.previous_target_path_distance_m(mask),"Color",[.05 .35 .95],"DisplayName","Previous Active Path Distance");
+plot(ax,t(mask),S.candidate_route_distance_m(mask),"Color",[0 .65 .65],"DisplayName","Nearest Path Distance");
 if isfinite(c),xline(ax,c,"k-","DisplayName","Target Path Switch");end
 ylabel(ax,"Distance (m)"); title(ax,"Target Path Decision"); legend(ax,"Location","northoutside","Orientation","horizontal","NumColumns",3);
 
@@ -250,8 +263,8 @@ t=S.elapsed_time_s; switchTimes=W.elapsed_time_s; files=strings(0,1);
 fig=figure("Position",[95 35 1700 1080]); L=tiledlayout(fig,4,1,"TileSpacing","compact","Padding","compact");
 title(L,"Tracking Error and Speed Error","FontSize",19,"FontWeight","bold","Color","black");
 ax=nexttile(L); hold(ax,"on"); grid(ax,"on");
-plot(ax,t,S.target_path_distance_m,"Color",[.05 .35 .95],"DisplayName","Target Path Distance");
-plot(ax,t,S.multipath_switch_threshold_m,"--","Color",[.95 .1 .2],"DisplayName","Switch Threshold (2 m)");
+plot(ax,t,S.previous_target_path_distance_m,"Color",[.05 .35 .95],"DisplayName","Previous Active Path Distance");
+plot(ax,t,S.target_path_distance_m,"Color",[0 .65 .65],"DisplayName","Selected Nearest Path Distance");
 ylabel(ax,"Distance (m)"); title(ax,"Distance from Active Target Path");
 legend(ax,"Location","northoutside","Orientation","horizontal"); drawSwitchLines(ax,switchTimes,false);
 ax=nexttile(L); hold(ax,"on"); grid(ax,"on");
@@ -328,12 +341,12 @@ if height(W)>0
     ax3=nexttile(L); hold(ax3,"on"); grid(ax3,"on");
     for k=1:height(W)
         relative=t-W.elapsed_time_s(k); mask=relative>=-5 & relative<=8;
-        plot(ax1,relative(mask),S.target_path_distance_m(mask),"Color",colours(k,:),"DisplayName","S"+k);
+        plot(ax1,relative(mask),S.route_distance_improvement_m(mask),"Color",colours(k,:),"DisplayName","S"+k);
         plot(ax2,relative(mask),S.heading_error_deg(mask),"Color",colours(k,:),"HandleVisibility","off");
         plot(ax3,relative(mask),S.final_rudder_angle_deg(mask),"Color",colours(k,:),"HandleVisibility","off");
     end
-    yline(ax1,2,"--","Color",[.95 .1 .2],"DisplayName","Switch Threshold"); xline(ax1,0,"k-","HandleVisibility","off");
-    ylabel(ax1,"Distance (m)"); title(ax1,"Active Target Path Distance");
+    yline(ax1,0,":","Color",[.25 .75 .3],"DisplayName","No Distance Gain"); xline(ax1,0,"k-","HandleVisibility","off");
+    ylabel(ax1,"Improvement (m)"); title(ax1,"Distance Gain from Nearest-Path Selection");
     legend(ax1,"Location","northoutside","Orientation","horizontal","NumColumns",5);
     yline(ax2,0,":","Color",[.25 .75 .3]); xline(ax2,0,"k-"); ylim(ax2,[-180 180]);
     ylabel(ax2,"Heading Error (deg)"); title(ax2,"Controller Heading Error");
@@ -485,12 +498,12 @@ fprintf(fid,"- HDOP 평균/최소/최대: %.3f / %.3f / %.3f\n",mean(S.hdop,"omi
 fprintf(fid,"- 출력 전송 성공률: %.1f %%\n\n",100*mean(boolVector(S.output_send_success)));
 
 fprintf(fid,"3. 권장 PPT 구성\n");
-fprintf(fid,"1쪽: 시험 목적, 시험 환경, 대루트와 2m 전환 조건\n");
+fprintf(fid,"1쪽: 시험 목적, 시험 환경, 대루트와 최근접 소루트 자동 선택 조건\n");
 fprintf(fid,"2쪽: 01 전체 요약. 조향각, 항로별 Heading Error, 실제/목표 속도를 강의자료와 같은 흐름으로 설명\n");
 fprintf(fid,"3쪽: QGIS 전체 경로 캡처와 02 기준/실제 경로. 실제 이동이 세 기준항로 사이에서 어떻게 변했는지 설명\n");
-fprintf(fid,"4쪽: 03 2m 판단. 2m 이하 유지와 2m 초과 최근접 항로 변경을 전환 S1~S8로 증명\n");
+fprintf(fid,"4쪽: 03 최근접 항로 판단. 기존 활성 항로 거리와 최근접 후보 거리를 비교해 S1~S8 전환을 증명\n");
 fprintf(fid,"5쪽: 07 비외란 사례. Target Path 유지 중 거리와 Heading Error가 어떻게 유지되는지 설명\n");
-fprintf(fid,"6쪽: 08 외란 사례. 2m 초과 전후 Target Path, 러더 명령, Heading Error 변화를 설명\n");
+fprintf(fid,"6쪽: 08 외란 사례. 최근접 소루트가 바뀐 전후 Target Path, 러더 명령, Heading Error 변화를 설명\n");
 fprintf(fid,"7쪽: 05와 10. 단일모터/러더 명령 및 desired-final-actual 전송 체인을 설명\n");
 fprintf(fid,"8쪽: 09와 13. 횡오차, Heading Error, 속도 오차 및 항로별 평균/95%% 통계\n");
 fprintf(fid,"9쪽: 11과 12. waypoint 진행과 8회 전환의 상대시간 응답 비교\n");
@@ -499,25 +512,25 @@ fprintf(fid,"10쪽: 06과 14. GPS/RTK 품질, 보정 지연과 데이터 가용�
 fprintf(fid,"4. 그래프별 발표 해설\n");
 fprintf(fid,"01 전체 요약: 위에서부터 러더 조향 명령, Right/Center/Left 기준 Heading Error, 실제/목표 속도다. 회색 세로선은 자동 Target Path 전환 시각이다. 짧은 구간은 이름을 생략해 글자 겹침을 막았다.\n");
 fprintf(fid,"02 기준/실제 경로: 점선 3개는 시험 시작 시 고정 저장한 기준항로, 노란 실선은 실제 GPS 경로, 빨간 점은 전환 위치다. 지도 배경은 QGIS 캡처로 보완한다.\n");
-fprintf(fid,"03 2m 판단: 파란선이 현재 Target Path 거리다. 빨간 2m 선을 넘은 시점에서 최근접 후보 거리로 비교하고 활성 항로가 변경된다.\n");
+fprintf(fid,"03 최근접 판단: 파란선은 전환 직전 활성 항로 거리, 청록선은 모든 후보 중 최소거리다. 후보가 더 가까워지는 즉시 임계값 없이 활성 항로가 변경되고 주황선은 확보한 거리 개선량을 나타낸다.\n");
 fprintf(fid,"04 항로별 Heading Error: 각 시점의 위치와 헤딩을 세 기준항로 모두에 대해 계산한 값이다. 현재 선택되지 않은 항로의 오차도 비교할 수 있다.\n");
 fprintf(fid,"05 제어응답: 러더 각도, 러더 PWM, 단일 추진모터 PWM, 속도를 시간순으로 비교한다. L/R thrust 대신 이 그래프를 사용한다.\n");
 fprintf(fid,"06 GPS/RTK 품질: HDOP/HACC, RTK 상태, GPS 및 보정 데이터 지연, 위성 수/CN0를 표시한다. 보정 지연이 10초를 넘는 구간은 RTK 보정 신뢰에 주의한다.\n");
 fprintf(fid,"07 비외란 사례: 가장 긴 Target Path 유지 구간에서 경로, 러더, 거리, 항로별 Heading Error를 묶어 보여준다.\n");
-fprintf(fid,"08 외란 사례: 첫 자동 전환 전후 5초/8초 구간이다. 수동 마커 없이 2m 초과 시각을 외란 판정 기준으로 삼았다.\n");
+fprintf(fid,"08 외란 사례: 첫 자동 전환 전후 5초/8초 구간이다. 수동 마커 없이 최근접 소루트가 바뀐 자동 결정시각을 외란 판정 기준으로 삼았다.\n");
 fprintf(fid,"09 추종 오차: Target Path 거리, 부호 있는 횡오차, 제어용 Heading Error, 속도 오차를 같은 시간축에서 해석한다.\n");
 fprintf(fid,"10 출력 검증: navigation desired, safety final, PCA9685 전송 확인값을 비교한다. actual PWM은 물리 센서 피드백이 아니라 전송 명령 확인값이다.\n");
 fprintf(fid,"11 waypoint 진행: 목표 waypoint 번호, waypoint까지 거리, 활성 항로, 누적 보행거리를 함께 보여준다.\n");
-fprintf(fid,"12 전환 응답 비교: S1~S8 전환을 각각 t=0에 맞춰 전환 전후 Target Path 거리, Heading Error, 러더 명령을 비교한다.\n");
+fprintf(fid,"12 전환 응답 비교: S1~S8 전환을 각각 t=0에 맞춰 최근접 선택 거리 개선량, Heading Error, 러더 명령을 비교한다.\n");
 fprintf(fid,"13 항로별 통계: 각 활성 항로 구간의 평균과 95백분위 오차를 제시한다. LOW_SPEED 표본은 Heading Error 통계에서 제외한다.\n");
 fprintf(fid,"14 데이터 가용성: RTK 상태, 보정 지연 등급, GPS/출력 성공률, course 품질의 표본 비율이다.\n\n");
 
 fprintf(fid,"5. Target Path 자동 전환 기록\n");
-fprintf(fid,"번호 | 시간(s) | 전환 전 | 전환 후 | 기존 거리(m) | 새 거리(m)\n");
+fprintf(fid,"번호 | 시간(s) | 전환 전 | 전환 후 | 기존 거리(m) | 최근접 거리(m) | 개선량(m)\n");
 for k=1:height(W)
-    fprintf(fid,"S%d | %.3f | %s | %s | %.4f | %.4f\n",k,W.elapsed_time_s(k),...
+    fprintf(fid,"S%d | %.3f | %s | %s | %.4f | %.4f | %.4f\n",k,W.elapsed_time_s(k),...
         routeName(string(W.previous_route_id(k)),ids,names),routeName(string(W.new_route_id(k)),ids,names),...
-        W.previous_target_path_distance_m(k),W.candidate_route_distance_m(k));
+        W.previous_target_path_distance_m(k),W.candidate_route_distance_m(k),W.route_distance_improvement_m(k));
 end
 
 allLat=[S.latitude;R.latitude]; allLon=[S.longitude;R.longitude];
@@ -531,7 +544,7 @@ fprintf(fid,"좌표 설정\n- X=longitude, Y=latitude, CRS=EPSG:4326\n- 또는 U
 fprintf(fid,"전체 경로 캡처 권장 범위(WGS84)\n- longitude %.8f ~ %.8f\n- latitude %.8f ~ %.8f\n",lonMin,lonMax,latMin,latMax);
 fprintf(fid,"레이어 순서와 색\n- 배경: 위성 또는 OpenStreetMap. 제출 시 지도 출처 표기\n- 다리 L: 빨강 점선 1.2 mm\n- 다리 C: 짙은 회색 점선 1.2 mm\n- 다리 R: 자홍 점선 1.2 mm\n- actual path: 노랑 실선 1.8 mm\n- route switch points: 빨간 원, switch_number 라벨\n");
 fprintf(fid,"반드시 캡처할 화면\n1) 전체 3개 기준항로와 실제 경로가 모두 보이는 화면. 북쪽표시, 축척, 지도 출처를 포함한다.\n");
-fprintf(fid,"2) S1 첫 전환 위치 확대 화면. 2m 초과 후 Center Path로 변경된 사례에 사용한다.\n");
+fprintf(fid,"2) S1 첫 전환 위치 확대 화면. 최근접 후보가 바뀌어 Target Path가 변경된 사례에 사용한다.\n");
 fprintf(fid,"3) S4 또는 S5 부근 확대 화면. Center/Left 사이 전환 사례와 실제 경로 복귀 모습을 보여준다.\n");
 fprintf(fid,"4) 필요하면 S6~S8 연속 전환 구간을 별도 확대한다. 이 구간은 전환 간격이 짧아 전체 지도에서 라벨이 겹칠 수 있다.\n");
 for k=1:height(W)
@@ -542,7 +555,7 @@ end
 fprintf(fid,"\n7. 해석 시 주의사항\n");
 fprintf(fid,"- final/actual PWM은 실제 추력 또는 러더 위치 센서값이 아니다. PCA9685로 전송한 명령 확인값이다.\n");
 fprintf(fid,"- GPS 속도에는 사람이 배를 들고 이동한 속도가 포함된다. 수상 성능으로 직접 일반화하지 않는다.\n");
-fprintf(fid,"- 수동 외란 마커는 사용하지 않았다. 2m 초과 및 자동 Target Path 전환 시각을 외란 사례 기준으로 사용한다.\n");
+fprintf(fid,"- 수동 외란 마커는 사용하지 않았다. 모든 소루트 거리 비교로 결정된 자동 Target Path 전환 시각을 외란 사례 기준으로 사용한다.\n");
 fprintf(fid,"- LOW_SPEED 구간의 GNSS course는 불안정할 수 있으므로 정밀 Heading Error 통계에서 제외한다.\n");
 fprintf(fid,"- 보정 데이터 지연이 10초를 넘으면 RTK FIX 여부와 별도로 보정 신선도를 주의해서 해석한다.\n");
 fprintf(fid,"- QGIS 배경지도는 데이터에 포함되지 않는다. 반드시 QGIS에서 동일 좌표계로 불러와 캡처한다.\n\n");

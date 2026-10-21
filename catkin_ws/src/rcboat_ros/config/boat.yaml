@@ -1,4 +1,4 @@
-version: '2.1.6'
+version: '2.1.7'
 gui_gateway_bind: '0.0.0.0'
 gui_gateway_port: 8765
 ground_test_log_root: '~/rcboat_ros_data/logs/ground_tests'
@@ -26,11 +26,10 @@ command_timeout_s: 0.75
 remote_heartbeat_s: 0.7
 log_rate_hz: 4.0
 endpoint_tolerance_m: 0.75
-multipath_switch_threshold_m: 2.0
 # Routes are never generated automatically. Multi-Path considers only routes
 # explicitly saved by the operator; a ground test freezes the selected N-route group or one route.
-# Keep the current Target Path at <= 2 m. At > 2 m select the nearest saved
-# subroute in the named Multi-Path, matching the Week-7 ground-test rule.
+# At every GPS update, select the member subroute with the smallest polyline
+# distance. There is no distance threshold, hold timer, priority gate or cooldown.
 tracking_mode: 'HEADING'
 lookahead_base_m: 2.0
 lookahead_speed_gain_s: 2.5

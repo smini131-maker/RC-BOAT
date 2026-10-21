@@ -52,8 +52,8 @@ class MockWorker(QThread):
         self.ground_test_actuation_enabled = False
         self.multipath = {
             "enabled": True, "endpoint_tolerance_m": 0.75,
-            "switch_threshold_m": 2.0,
-            "switch_rule": "active_target_distance_gt_threshold_then_nearest",
+            "selection_policy": "nearest_route",
+            "switch_rule": "nearest_route_each_update",
             "off_route_gate": False, "priority_gate": False, "cooldown_gate": False,
         }
         self.recording_minimum_distance_m = 1.0
@@ -123,7 +123,6 @@ class MockWorker(QThread):
             elif command == "SET_MULTIPATH":
                 limits = {
                     "endpoint_tolerance_m": (0.10, 1.00),
-                    "switch_threshold_m": (0.10, 100.0),
                 }
                 if "enabled" in kwargs:
                     self.multipath["enabled"] = bool(kwargs["enabled"])
@@ -404,8 +403,10 @@ class MockWorker(QThread):
                               "waypoint_index": 0, "waypoint_count": 3, "distance_to_waypoint_m": 5.4,
                               "distance_to_route_m": 1.1, "route_complete": False, "load_error": "",
                               "target_path_distance_m": 1.1, "candidate_route_distance_m": 1.1,
-                              "switch_threshold_exceeded": False,
-                              "switch_decision": "KEEP_ACTIVE_WITHIN_THRESHOLD",
+                              "previous_target_path_distance_m": 1.1,
+                              "route_distance_improvement_m": 0.0,
+                              "selection_metric": "MINIMUM_POLYLINE_DISTANCE",
+                              "switch_decision": "KEEP_NEAREST_ROUTE",
                               "multipath": dict(self.multipath),
                               "multipath_group_route_ids": next((group["route_ids"] for group in self.multipaths
                                                                  if group["id"] == self.selected_multipath_id), [self.selected_route_id]),

@@ -17,7 +17,7 @@ from rcboat_ros.srv import Execute
 from rcboat_ros.common import pack, unpack
 
 
-VERSION = "2.1.6"
+VERSION = "2.1.7"
 SOCKET = os.path.expanduser("~/rcboat_ros_data/gui_bridge.sock")
 TOPICS = {
     "gps": "/rcboat/gps/status", "ntrip": "/rcboat/ntrip/status", "route": "/rcboat/route/state",
@@ -118,7 +118,6 @@ class Bridge:
         multipath_state=route_state.get("multipath",{})
         multipath_settings={
             "endpoint_tolerance_m":float(multipath_state.get("endpoint_tolerance_m",.75)),
-            "switch_threshold_m":float(multipath_state.get("switch_threshold_m",2.0)),
         }
         if target_type=="multipath":
             groups={str(item.get("id")):item for item in route_state.get("multipaths",[])}

@@ -16,7 +16,7 @@ from rcboat_ros.common import pack, unpack
 from rcboat_ros.geo import enrich_waypoints
 
 
-VERSION = "2.1.6"
+VERSION = "2.1.7"
 CSV_FIELDS = [
     "sample_index", "sample_time_epoch_s", "logger_time_utc", "measurement_time_utc", "gps_received_time_utc",
     "output_time_utc", "elapsed_time_s", "latitude", "longitude", "utm_easting_m",
@@ -27,7 +27,7 @@ CSV_FIELDS = [
     "execution_target_name", "selected_route_id", "active_route_id", "previous_active_route_id",
     "test_route_ids", "target_waypoint_number", "target_waypoint_index", "distance_to_waypoint_m",
     "cross_track_error_m", "target_path_distance_m", "candidate_route_distance_m",
-    "multipath_switch_threshold_m", "switch_threshold_exceeded", "switch_decision",
+    "previous_target_path_distance_m", "route_distance_improvement_m", "selection_metric", "switch_decision",
     "multipath_candidate_id", "multipath_switch", "controller_mode",
     "target_heading_deg", "heading_error_deg", "desired_rudder_angle_deg", "final_rudder_angle_deg",
     "target_speed_mps", "desired_steering_pwm", "desired_throttle_pwm", "route_candidates_json",
@@ -45,7 +45,7 @@ ROUTE_METRIC_FIELDS = [
 ROUTE_SWITCH_FIELDS = [
     "sample_index", "logger_time_utc", "elapsed_time_s", "previous_route_id", "new_route_id",
     "candidate_route_id", "previous_target_path_distance_m", "candidate_route_distance_m",
-    "switch_threshold_m", "switch_decision", "selection_metric",
+    "route_distance_improvement_m", "switch_decision", "selection_metric",
 ]
 
 
@@ -283,7 +283,7 @@ class Logger:
                 "actual GPS path and all reference subroutes",
                 "desired/final rudder angle versus elapsed time",
                 "per-subroute heading error versus elapsed time",
-                "current Target Path distance versus the 2 m switch threshold",
+                "previous Target Path distance versus the nearest candidate distance",
                 "active subroute bands and switch instants",
                 "target and measured speed versus elapsed time",
                 "desired/final steering and throttle PWM versus elapsed time",
@@ -348,10 +348,11 @@ class Logger:
             "target_waypoint_index": route.get("target_waypoint_index"),
             "distance_to_waypoint_m": route.get("distance_to_waypoint_m"),
             "cross_track_error_m": route.get("cross_track_error_m"),
-            "target_path_distance_m": route.get("previous_target_path_distance_m"),
+            "target_path_distance_m": route.get("distance_to_route_m"),
             "candidate_route_distance_m": route.get("candidate_route_distance_m"),
-            "multipath_switch_threshold_m": route.get("switch_threshold_m"),
-            "switch_threshold_exceeded": route.get("switch_threshold_exceeded"),
+            "previous_target_path_distance_m": route.get("previous_target_path_distance_m"),
+            "route_distance_improvement_m": route.get("route_distance_improvement_m"),
+            "selection_metric": route.get("selection_metric"),
             "switch_decision": route.get("switch_decision"),
             "multipath_candidate_id": route.get("candidate_route_id"), "multipath_switch": route.get("multipath_switch"),
             "controller_mode": nav.get("controller_mode"), "target_heading_deg": nav.get("target_heading_deg"),
@@ -390,7 +391,7 @@ class Logger:
                 "candidate_route_id": route.get("candidate_route_id"),
                 "previous_target_path_distance_m": route.get("previous_target_path_distance_m"),
                 "candidate_route_distance_m": route.get("candidate_route_distance_m"),
-                "switch_threshold_m": route.get("switch_threshold_m"),
+                "route_distance_improvement_m": route.get("route_distance_improvement_m"),
                 "switch_decision": route.get("switch_decision"),
                 "selection_metric": route.get("selection_metric"),
             })

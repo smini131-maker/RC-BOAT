@@ -67,12 +67,9 @@ def _atomic_json(path, obj):
     os.replace(pending, path)
 
 class RouteManager:
-    def __init__(self, filename, endpoint_tolerance=0.75, switch_threshold_m=2.0):
+    def __init__(self, filename, endpoint_tolerance=0.75):
         self.filename = Path(filename)
         self.endpoint_tolerance = float(endpoint_tolerance)
-        self.switch_threshold_m = float(switch_threshold_m)
-        if self.switch_threshold_m <= 0:
-            raise ValueError('multipath switch threshold must be positive')
         self.recording = None
         self.load()
         self.event = None
@@ -104,6 +101,7 @@ class RouteManager:
         self.next_index = 0
         self.progress = {route_id:0 for route_id in self.routes}
         self.progress_fraction = 0.0
+        if migrated:_atomic_json(self.filename,self.data)
 
     def select(self, route_id):
         if route_id not in self.routes: raise ValueError('route does not exist')
@@ -113,7 +111,6 @@ class RouteManager:
         self.next_index = 0
         self.progress = {name:0 for name in self.routes}
         self.progress_fraction = 0.0
-        if migrated:_atomic_json(self.filename,self.data)
 
     def select_multipath(self, multipath_id):
         multipath_id=str(multipath_id)
@@ -223,28 +220,26 @@ class RouteManager:
                     'heading_error_deg':None if heading is None else round(angle_error(target_heading,float(heading)),4)}
             route_metrics.append(metric)
             distances[route_id]=(route_distance,waypoint_index,waypoint_distance)
-        current = distances[self.active][0]
-        candidate = min(distances, key=lambda k: distances[k][0]); previous = self.active
+        previous = self.active
+        previous_distance = distances[previous][0]
+        nearest_distance = min(value[0] for value in distances.values())
+        # Equal-distance routes are equally optimal. Retain the active route on an
+        # exact tie, but use the strictly closest explicit subroute otherwise.
+        candidate = (self.active if abs(previous_distance-nearest_distance) <= 1e-9
+                     else min(distances, key=lambda k: distances[k][0]))
         candidate_distance = distances[candidate][0]
-        threshold_exceeded = current > self.switch_threshold_m
-        switched = False
-        # Week-7 lecture rule: retain the current Target Path while its relative
-        # distance is <= 2 m (configurable). Only after the active-path distance
-        # is strictly greater than the threshold may the nearest explicit
-        # subroute become the new Target Path.
-        if candidate != self.active and threshold_exceeded:
+        switched = candidate != self.active
+        # Multi-Path always follows the nearest member route. There is no distance
+        # threshold, hold timer, priority gate or cooldown gate.
+        if switched:
             self.active = candidate
             points=_waypoints(self.routes[candidate])
             equivalent=int(math.ceil(self.progress_fraction*max(0,len(points)-1)))
             self.next_index=max(self.progress.get(candidate,0),equivalent,min(distances[candidate][1]+1,len(points)-1))
             self.progress[candidate]=self.next_index
-            switched=True
-        if switched:
-            switch_decision='SWITCH_TO_NEAREST_AFTER_THRESHOLD'
-        elif threshold_exceeded:
-            switch_decision='THRESHOLD_EXCEEDED_ACTIVE_ALREADY_NEAREST'
-        else:
-            switch_decision='KEEP_ACTIVE_WITHIN_THRESHOLD'
+        switch_decision='SWITCH_TO_NEAREST_ROUTE' if switched else 'KEEP_NEAREST_ROUTE'
+        selected_distance=distances[self.active][0]
+        distance_improvement=max(0.0,previous_distance-selected_distance)
         route = self.routes[self.active]
         points = _waypoints(route)
         self.next_index = min(max(self.next_index,self.progress.get(self.active,0)),len(points)-1)
@@ -261,18 +256,18 @@ class RouteManager:
         dwp=meters(position,target)
         cte=nearest_route(position, points)[2]
         self.event = {'type':'ROUTE_SWITCH','previous_route':previous,'candidate_route':candidate,
-                      'new_route':self.active,'previous_target_path_distance_m':round(current,4),
+                      'new_route':self.active,'previous_target_path_distance_m':round(previous_distance,4),
                       'candidate_route_distance_m':round(candidate_distance,4),
-                      'switch_threshold_m':self.switch_threshold_m,
+                      'route_distance_improvement_m':round(distance_improvement,4),
+                      'selection_metric':'MINIMUM_POLYLINE_DISTANCE',
                       'switch_decision':switch_decision,'monotonic':now} if switched else None
         return {'selected_route_id':self.selected,'active_route_id':self.active,'candidate_route_id':candidate,
                 'group_routes':list(group),'endpoint_gaps':group,
-                'switch_threshold_m':self.switch_threshold_m,
-                'switch_threshold_exceeded':threshold_exceeded,
-                'previous_target_path_distance_m':round(current,4),
+                'previous_target_path_distance_m':round(previous_distance,4),
                 'candidate_route_distance_m':round(candidate_distance,4),
+                'route_distance_improvement_m':round(distance_improvement,4),
                 'switch_decision':switch_decision,
-                'selection_metric':'ACTIVE_TARGET_DISTANCE_GT_THRESHOLD_THEN_NEAREST',
+                'selection_metric':'MINIMUM_POLYLINE_DISTANCE',
                 'multipath_switch':switched,'previous_route': previous if switched else '',
                 'target_waypoint_index':self.next_index,'target_lat':target[0],'target_lon':target[1],
                 'path_waypoints':[{'lat':a,'lon':b} for a,b in points],
