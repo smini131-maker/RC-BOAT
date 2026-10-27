@@ -14,7 +14,7 @@ from rcboat_ros.srv import Execute,ExecuteResponse
 import json
 import pathlib
 
-NTRIP_ENV_PATH = pathlib.Path(os.path.expanduser('~/rcboat_ros_data/ntrip.env'))
+NTRIP_ENV_PATH = pathlib.Path(os.path.expanduser('~/rcboat_balloon_data/ntrip.env'))
 
 
 def load_local_env(path):

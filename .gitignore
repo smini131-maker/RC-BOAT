@@ -18,3 +18,12 @@ config/ntrip.local.json
 logs/ground_tests/
 logs/gps/
 gps_*.csv
+training/vendor/
+training/downloads/
+training/datasets/
+training/runs/
+models/*.pt
+models/*.onnx
+artifacts/
+tmp/
+**/vision.local.json

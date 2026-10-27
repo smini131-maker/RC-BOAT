@@ -1,4 +1,16 @@
-# RC-BOAT ROS Noetic v2.1.7 architecture
+# RC-BOAT ROS Noetic v2.2.0 architecture
+
+The camera extension is isolated in the balloon workspace/data directory and optional
+`balloon_vision_node`. Its capture thread keeps only the newest frame, its inference
+worker runs YOLOv5n ONNX, and an independent ROS timer publishes status and demands.
+The original frame monotonic timestamp is retained through inference and checked again
+by the safety supervisor. A fresh camera frame cannot make an old detection fresh.
+
+`BALLOON` mode requires explicit arming after target acquisition. Camera/model loss,
+target loss, stale inference and the configured image-size stop condition latch a neutral
+output until the operator rearms. Manual RC takeover and E-STOP override vision.
+The actuator remains the sole PCA9685 owner. JPEG preview is a separate HTTP connection
+on 8766, requested only while the GUI camera tab is visible.
 
 ```text
 Windows GUI

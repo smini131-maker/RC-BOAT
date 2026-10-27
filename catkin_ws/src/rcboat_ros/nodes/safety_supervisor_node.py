@@ -7,14 +7,16 @@ from std_msgs.msg import String
 from rcboat_ros.msg import ControlCommand
 from rcboat_ros.srv import Execute,ExecuteResponse
 from rcboat_ros.common import unpack,pack,clamp,lerp,fresh,SAFE_STEERING,SAFE_THROTTLE
+from rcboat_ros.balloon_tracking import safe_balloon_output
 
-MODES={'AUTO_SAFE','AUTO','MANUAL','REMOTE','NAVIGATION','GROUND_TEST'}
+MODES={'AUTO_SAFE','AUTO','MANUAL','REMOTE','NAVIGATION','GROUND_TEST','BALLOON'}
 
 class Supervisor:
     def __init__(self):
         self.mode='AUTO_SAFE';self.armed=False;self.estop=False
         self.ground_test_actuation_enabled=False
         self.gps={};self.rc={};self.nav={};self.remote={};self.remote_stamp=0
+        self.vision={};self.vision_desired={}
         self.auto_gesture_since=None;self.manual_gesture_since=None;self.manual_rearm_since=None;self.manual_rearm_pending=False
         self.cmd=rospy.Publisher('/rcboat/safety/final_command',ControlCommand,queue_size=4)
         self.state=rospy.Publisher('/rcboat/safety/state',String,queue_size=4,latch=True)
@@ -22,6 +24,8 @@ class Supervisor:
         rospy.Subscriber('/rcboat/gps/status',String,lambda m:setattr(self,'gps',unpack(m)))
         rospy.Subscriber('/rcboat/rc/input',String,lambda m:setattr(self,'rc',unpack(m)))
         rospy.Subscriber('/rcboat/navigation/desired',String,lambda m:setattr(self,'nav',unpack(m)))
+        rospy.Subscriber('/rcboat/vision/status',String,lambda m:setattr(self,'vision',unpack(m)))
+        rospy.Subscriber('/rcboat/vision/desired',String,lambda m:setattr(self,'vision_desired',unpack(m)))
         rospy.Service('/rcboat/safety/execute',Execute,self.execute)
     def execute(self,req):
         try:
@@ -39,13 +43,16 @@ class Supervisor:
                 mode=str(args['mode'])
                 if mode not in MODES:raise ValueError('unknown mode')
                 if self.estop and mode!='AUTO_SAFE':raise ValueError('E-STOP latched')
+                if mode=='BALLOON' and args.get('armed') and safe_balloon_output(
+                        self.vision,self.vision_desired,time.monotonic()) is None:
+                    raise ValueError('balloon target/model/camera not ready; enable camera and acquire target first')
                 self.mode=mode
                 self.ground_test_actuation_enabled=(
                     mode=='GROUND_TEST' and bool(args.get('ground_test_actuation_enabled',False))
                 )
                 self.auto_gesture_since=None;self.manual_gesture_since=None
                 self.manual_rearm_pending=False
-                self.armed=bool(args.get('armed',False)) if mode=='NAVIGATION' else False
+                self.armed=bool(args.get('armed',False)) if mode in ('NAVIGATION','BALLOON') else False
                 if mode=='REMOTE':self.remote_stamp=0
                 self.events.publish(pack(type='MODE_CHANGED',mode=mode,at=time.time()))
             elif req.action=='set_remote_pwm':
@@ -72,7 +79,7 @@ class Supervisor:
                 self.mode='AUTO_SAFE';self.armed=False;self.auto_gesture_since=None
                 self.events.publish(pack(type='RC_GESTURE_AUTO_SAFE',at=time.time()))
         else:self.auto_gesture_since=None
-        if self.mode in ('AUTO_SAFE','AUTO','NAVIGATION','REMOTE') and throttle>=1850:
+        if self.mode in ('AUTO_SAFE','AUTO','NAVIGATION','REMOTE','BALLOON') and throttle>=1850:
             if self.manual_gesture_since is None:self.manual_gesture_since=now
             elif now-self.manual_gesture_since>=.5:
                 self.mode='MANUAL';self.armed=False;self.manual_rearm_pending=True
@@ -91,6 +98,15 @@ class Supervisor:
         self._gestures(now)
         # GPS hard faults must lock autonomous navigation, not physically safe manual takeover.
         if self.estop:return 'ESTOP',s,t,True
+        if self.mode=='BALLOON':
+            demand=safe_balloon_output(self.vision,self.vision_desired,now) if self.armed else None
+            if demand is not None:
+                return 'BALLOON',demand[0],demand[1],False
+            if self.armed:
+                self.armed=False
+                self.events.publish(pack(type='BALLOON_STOP_REARM_REQUIRED',
+                                         reason=self.vision.get('reason','vision_unavailable'),at=time.time()))
+            return 'BALLOON_WAITING_REARM',s,t,True
         if self.mode=='GROUND_TEST':
             # Full navigation-equivalent output is allowed only for the explicit,
             # non-persistent ground-test opt-in. E-STOP, GPS and freshness gates still win.

@@ -9,7 +9,7 @@ def main():
     try:
         data=json.load(sys.stdin)
         sock=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);sock.settimeout(6)
-        sock.connect(os.path.expanduser('~/rcboat_ros_data/gui_bridge.sock'))
+        sock.connect(os.path.expanduser('~/rcboat_balloon_data/gui_bridge.sock'))
         sock.sendall((json.dumps(data)+'\n').encode())
         buf=b''
         while not buf.endswith(b'\n') and len(buf)<250000000:

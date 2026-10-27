@@ -2,7 +2,7 @@
 set -Eeo pipefail
 set +u
 source /opt/ros/noetic/setup.bash
-source /home/jetson/rcboat_ros_ws/catkin_ws/devel/setup.bash
+source /home/jetson/rcboat_balloon_ros_ws/catkin_ws/devel/setup.bash
 set -u
 printf 'Checking ROS master...\n'
 rosnode list >/dev/null

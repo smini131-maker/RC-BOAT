@@ -47,7 +47,7 @@ class Actuator:
                         s=msg.steering_pwm;t=msg.throttle_pwm;state='GROUND_TEST_NAVIGATION'
                     else:state='GROUND_TEST_REJECTED'
                 elif msg.actuator_locked:state='LOCKED'
-                elif msg.source in ('AUTO','MANUAL','REMOTE','NAVIGATION'):
+                elif msg.source in ('AUTO','MANUAL','REMOTE','NAVIGATION','BALLOON'):
                     if 4900<=msg.steering_pwm<=7300 and 5800<=msg.throttle_pwm<=7000:
                         s=msg.steering_pwm;t=msg.throttle_pwm;state=msg.source
             try:

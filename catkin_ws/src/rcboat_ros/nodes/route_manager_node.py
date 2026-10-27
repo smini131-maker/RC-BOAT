@@ -14,7 +14,7 @@ class Node:
     def __init__(self):
         f=rospy.get_param('/rcboat/routes_file')
         self.rm=RouteManager(f,rospy.get_param('/rcboat/endpoint_tolerance_m',.75))
-        self.settings_file=pathlib.Path(os.path.expanduser('~/rcboat_ros_data/multipath_settings.json'))
+        self.settings_file=pathlib.Path(os.path.expanduser('~/rcboat_balloon_data/multipath_settings.json'))
         if self.settings_file.exists():
             try:
                 settings=json.loads(self.settings_file.read_text(encoding='utf-8'))

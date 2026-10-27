@@ -1,0 +1,6 @@
+<launch>
+  <!-- Vision-only commissioning: no actuator, serial, GPS or safety-output node. -->
+  <arg name="config" default="$(find rcboat_ros)/config/boat.yaml" />
+  <rosparam command="load" file="$(arg config)" ns="rcboat" />
+  <node pkg="rcboat_ros" type="balloon_vision_node.py" name="balloon_vision_node" output="screen" />
+</launch>

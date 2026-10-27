@@ -6,4 +6,4 @@ for dev in /dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_5563930353
  [[ -e $dev ]] || { echo "FAILED: missing $dev";exit 2; }
  if fuser "$(readlink -f "$dev")" >/dev/null 2>&1;then echo "FAILED: busy $dev";exit 3;fi
 done
-python3 /home/jetson/rcboat_ros_ws/deployment/jetson/set_safe_pwm.py
+python3 /home/jetson/rcboat_balloon_ros_ws/deployment/jetson/set_safe_pwm.py

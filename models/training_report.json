@@ -1,0 +1,118 @@
+{
+  "model": "YOLOv5n balloon, 320x320 ONNX",
+  "validation_images": 13,
+  "validation_balloons": 50,
+  "training_best_epoch": 5,
+  "training_epochs_completed": 25,
+  "training_validation_mAP50": 0.6486,
+  "training_validation_mAP50_95": 0.43551,
+  "deployed_opencv": {
+    "confidence": 0.45,
+    "iou_match": 0.5,
+    "true_positive": 29,
+    "false_positive": 8,
+    "false_negative": 21,
+    "precision": 0.7837837837837838,
+    "recall": 0.58,
+    "pc_cpu_mean_inference_ms": 51.03390769307645
+  },
+  "images": [
+    {
+      "image": "14898532020_ba6199dd22_k.jpg",
+      "ground_truth": 9,
+      "detections": 3,
+      "true_positive": 3,
+      "false_positive": 0
+    },
+    {
+      "image": "16335852991_f55de7958d_k.jpg",
+      "ground_truth": 7,
+      "detections": 5,
+      "true_positive": 5,
+      "false_positive": 0
+    },
+    {
+      "image": "24631331976_defa3bb61f_k.jpg",
+      "ground_truth": 1,
+      "detections": 1,
+      "true_positive": 1,
+      "false_positive": 0
+    },
+    {
+      "image": "2917282960_06beee649a_b.jpg",
+      "ground_truth": 1,
+      "detections": 1,
+      "true_positive": 1,
+      "false_positive": 0
+    },
+    {
+      "image": "3800636873_ace2c2795f_b.jpg",
+      "ground_truth": 1,
+      "detections": 2,
+      "true_positive": 1,
+      "false_positive": 1
+    },
+    {
+      "image": "3825919971_93fb1ec581_b.jpg",
+      "ground_truth": 6,
+      "detections": 5,
+      "true_positive": 5,
+      "false_positive": 0
+    },
+    {
+      "image": "410488422_5f8991f26e_b.jpg",
+      "ground_truth": 3,
+      "detections": 3,
+      "true_positive": 3,
+      "false_positive": 0
+    },
+    {
+      "image": "4581425993_72b9b15fc0_b.jpg",
+      "ground_truth": 1,
+      "detections": 1,
+      "true_positive": 1,
+      "false_positive": 0
+    },
+    {
+      "image": "4838031651_3e7b5ea5c7_b.jpg",
+      "ground_truth": 3,
+      "detections": 1,
+      "true_positive": 1,
+      "false_positive": 0
+    },
+    {
+      "image": "5555705118_3390d70abe_b.jpg",
+      "ground_truth": 1,
+      "detections": 1,
+      "true_positive": 1,
+      "false_positive": 0
+    },
+    {
+      "image": "5603212091_2dfe16ea72_b.jpg",
+      "ground_truth": 7,
+      "detections": 11,
+      "true_positive": 6,
+      "false_positive": 5
+    },
+    {
+      "image": "6810773040_3d81036d05_k.jpg",
+      "ground_truth": 4,
+      "detections": 0,
+      "true_positive": 0,
+      "false_positive": 0
+    },
+    {
+      "image": "8053085540_a72bd21a64_k.jpg",
+      "ground_truth": 6,
+      "detections": 3,
+      "true_positive": 1,
+      "false_positive": 2
+    }
+  ],
+  "field_validated": false,
+  "limitations": [
+    "Only 13 public validation images; no independent field test set.",
+    "No water/boat-camera negative scenes; no field false-positive rate established.",
+    "CPU timings are this Windows PC, not Jetson Nano."
+  ]
+}

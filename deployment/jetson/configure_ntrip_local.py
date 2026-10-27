@@ -64,7 +64,7 @@ def prompt(label, current="", required=True):
 def main():
     if os.geteuid() == 0:
         raise SystemExit("Run this as the jetson account, not root.")
-    path = Path.home() / "rcboat_ros_data" / "ntrip.env"
+    path = Path.home() / "rcboat_balloon_data" / "ntrip.env"
     current = load_env_file(path)
     print("NTRIP values are stored only on this Jetson. The password is never displayed.")
     host = prompt("Host", current.get("RCBOAT_NTRIP_HOST", ""))
@@ -89,7 +89,7 @@ def main():
     }
     write_env_file(path, values)
     print(f"Saved {path} with mode 0600.")
-    print("Restart rcboat_ros.service, or stop and relaunch roslaunch, to load it now.")
+    print("Restart rcboat_balloon_ros.service, or stop and relaunch roslaunch, to load it now.")
 
 
 if __name__ == "__main__":

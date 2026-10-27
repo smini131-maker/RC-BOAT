@@ -11,5 +11,6 @@ catkin_install_python(PROGRAMS
  nodes/route_manager_node.py nodes/navigation_node.py
  nodes/safety_supervisor_node.py nodes/actuator_node.py
  nodes/ground_test_logger_node.py nodes/gui_bridge_node.py
+ nodes/balloon_vision_node.py
  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
 install(DIRECTORY launch config DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})

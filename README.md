@@ -1,4 +1,7 @@
-# RC-BOAT ROS Noetic v2.1.7
+# RC-BOAT ROS Noetic v2.2.0
+
+이 폴더는 기존 v2.1.7을 보존한 카메라·풍선 추적 확장판입니다. 새 기능, 학습 모델, 카메라 선택,
+새 서비스/데이터 경로, 배포 명령은 [README_BALLOON.md](README_BALLOON.md)를 먼저 확인하십시오.
 
 정식 실행 구조는 ROS Noetic뿐입니다. Jetson backend는 `roslaunch rcboat_ros rcboat.launch`, Windows GUI는 ROS gateway TCP(기본 `8765`)로 통신합니다. SSH는 배포·터미널용 보조 채널이며, SSH가 끊겨도 ROS gateway가 살아 있으면 상태 조회와 `GROUND_TEST_STOP`이 동작합니다.
 
@@ -11,7 +14,7 @@
 - `catkin_ws/src/rcboat_ros`: ROS package, nodes, messages, service, launch, config
 - `windows_gui`: Windows PySide6 GUI
 - `deployment/jetson`: Jetson 설치·점검 도구
-- `systemd/rcboat_ros.service`: 선택적 ROS 자동 시작 unit
+- `systemd/rcboat_balloon_ros.service`: 선택적 ROS 자동 시작 unit
 - `tests`: 하드웨어 없이 실행 가능한 회귀 테스트
 
 초기 `routes.json`은 비어 있습니다. LEFT/CENTER/RIGHT 또는 다른 항로가 자동 생성되지 않습니다. 이름은 자유이며 사용자가 GUI에서 직접 추가·수정·삭제합니다. 저장 waypoint에는 번호, 위도, 경도, UTM easting/northing/zone이 모두 들어갑니다.
@@ -28,9 +31,9 @@
 저장소 루트에서 다음을 실행합니다.
 
 ```powershell
-git clone https://github.com/smini131-maker/RC-BOAT.git
+git clone -b codex/balloon-v2.2.0 https://github.com/smini131-maker/RC-BOAT.git
 cd RC-BOAT
-git switch main
+git switch codex/balloon-v2.2.0
 powershell -ExecutionPolicy Bypass -File .\tools\windows\runner.ps1 -Action DEPLOY_ROS -Root . -Destination jetson@JETSON_IP
 ```
 
@@ -45,7 +48,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\runner.ps1 -Action INST
 수동 실행(권장 점검 경로):
 
 ```bash
-cd /home/jetson/rcboat_ros_ws
+cd /home/jetson/rcboat_balloon_ros_ws
 python3 -m pip install --user pyserial smbus2
 source /opt/ros/noetic/setup.bash
 cd catkin_ws
@@ -57,7 +60,7 @@ roslaunch rcboat_ros rcboat.launch
 선택적으로 부팅 자동 시작을 설치하려면:
 
 ```bash
-cd /home/jetson/rcboat_ros_ws
+cd /home/jetson/rcboat_balloon_ros_ws
 bash deployment/jetson/install_jetson_ros.sh
 bash deployment/jetson/check_ros.sh
 ```
@@ -82,7 +85,7 @@ EXE 빌드:
 .\build.bat
 ```
 
-결과: `windows_gui\dist\RCBoatControl_ROS_v2.1.7.exe`
+결과: `windows_gui\dist\RCBoatControl_ROS_v2.2.0.exe`
 
 GUI 상단 상태는 서로 독립입니다: `SSH connected/disconnected`, `ROS master online/offline`, `ROS gateway online/offline`, `logger idle/recording/stopping/error`, `GPS valid/invalid/stale`, `RTK fix/float/dgps/no_fix/no_data`.
 
@@ -106,7 +109,7 @@ GPS 새 항로 기록은 기존에 선택된 항로가 없어도 독립적으로
 Jetson 저장 위치:
 
 ```text
-~/rcboat_ros_data/logs/ground_tests/
+~/rcboat_balloon_data/logs/ground_tests/
   ground_test_YYYYMMDD_HHMMSS/
     ground_test.csv
     ground_test.jsonl
@@ -155,22 +158,22 @@ CSV의 빈 값은 장치가 제공하지 않았거나 아직 수신되지 않은
 
 ## RTK/NTRIP 비밀정보
 
-자격정보를 저장소 파일에 넣지 마십시오. Jetson 로컬 전용 `/home/jetson/rcboat_ros_data/ntrip.env`(권한 `0600`) 또는 환경변수를 사용합니다. 이 파일은 Git 배포와 GUI ZIP에 포함되지 않으며, 재배포 후에도 보존됩니다. `ntrip_node`가 파일을 직접 읽으므로 systemd와 직접 `roslaunch` 실행 모두 같은 설정을 사용합니다.
+자격정보를 저장소 파일에 넣지 마십시오. Jetson 로컬 전용 `/home/jetson/rcboat_balloon_data/ntrip.env`(권한 `0600`) 또는 환경변수를 사용합니다. 이 파일은 Git 배포와 GUI ZIP에 포함되지 않으며, 재배포 후에도 보존됩니다. `ntrip_node`가 파일을 직접 읽으므로 systemd와 직접 `roslaunch` 실행 모두 같은 설정을 사용합니다.
 
 ```bash
-cd /home/jetson/rcboat_ros_ws
+cd /home/jetson/rcboat_balloon_ros_ws
 python3 deployment/jetson/configure_ntrip_local.py
 ```
 
 화면 안내에 따라 Host, Port, Mount Point, Username을 입력하고 Password는 숨김 입력합니다. 기존 파일이 있으면 비밀번호 입력에서 Enter만 눌러 저장된 비밀번호를 유지합니다. 즉시 적용하려면 ROS 실행 방식에 맞춰 다음 중 하나만 수행합니다.
 
 ```bash
-# rcboat_ros.service로 실행 중일 때
-sudo systemctl restart rcboat_ros.service
+# rcboat_balloon_ros.service로 실행 중일 때
+sudo systemctl restart rcboat_balloon_ros.service
 
 # 터미널에서 roslaunch로 직접 실행 중일 때: Ctrl+C 후 다시 실행
 source /opt/ros/noetic/setup.bash
-source /home/jetson/rcboat_ros_ws/catkin_ws/devel/setup.bash
+source /home/jetson/rcboat_balloon_ros_ws/catkin_ws/devel/setup.bash
 roslaunch rcboat_ros rcboat.launch
 ```
 

@@ -39,15 +39,17 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QVBoxLayout,
     QWidget,
+    QSizePolicy,
 )
 
 from .credentials import delete_password, load_password, save_password
 from .mock_worker import MockWorker
 from .ssh_worker import SSHWorker
+from .balloon_panel import BalloonPanel
 from .widgets import MetricCard, RoutePlot, StatusCard, TelemetryGraph
 
 
-APP_VERSION = "2.1.7"
+APP_VERSION = "2.2.0"
 
 
 STYLE = """
@@ -98,7 +100,7 @@ class MainWindow(QMainWindow):
         else:
             self.resize(1420, 900)
         self.setStyleSheet(STYLE)
-        self.settings = QSettings("AdventureDesign", "RCBoatControl")
+        self.settings = QSettings("AdventureDesign", "RCBoatBalloonControl")
         self.worker: SSHWorker | MockWorker | None = None
         self.is_simulation = False
         self.last_event_timestamp = 0.0
@@ -176,7 +178,7 @@ class MainWindow(QMainWindow):
 
         connect_group = QGroupBox("Jetson ROS gateway / SSH 연결")
         connect_layout = QHBoxLayout(connect_group)
-        self.host = QLineEdit("10.122.105.215")
+        self.host = QLineEdit("10.180.227.215")
         self.host.setMinimumWidth(150)
         self.port = QSpinBox(); self.port.setRange(1, 65535); self.port.setValue(22)
         self.username = QLineEdit("jetson")
@@ -213,7 +215,7 @@ class MainWindow(QMainWindow):
 
         action_layout = QHBoxLayout()
         self.mode_combo = QComboBox()
-        for label, value in (("자동 대기", "AUTO"), ("수동 조종", "MANUAL"), ("GPS 항법", "NAVIGATION"), ("PC 원격 조종", "REMOTE")):
+        for label, value in (("자동 대기", "AUTO"), ("수동 조종", "MANUAL"), ("GPS 항법", "NAVIGATION"), ("풍선 자동 추적", "BALLOON"), ("PC 원격 조종", "REMOTE")):
             self.mode_combo.addItem(label, value)
         self.mode_combo.currentIndexChanged.connect(self._on_mode_selected)
         self.mode_button = QPushButton("모드 적용"); self.mode_button.setIcon(self.style().standardIcon(QStyle.SP_DialogApplyButton)); self.mode_button.clicked.connect(self.set_mode)
@@ -259,6 +261,11 @@ class MainWindow(QMainWindow):
         tabs.addTab(self._gps_rtk_tab(), self.style().standardIcon(QStyle.SP_DriveNetIcon), "GPS · RTK")
         tabs.addTab(self._route_tab(), self.style().standardIcon(QStyle.SP_FileDialogDetailedView), "항로")
         tabs.addTab(self._ground_test_tab(), self.style().standardIcon(QStyle.SP_DialogApplyButton), "도보 테스트")
+        self.balloon_panel = BalloonPanel()
+        self.balloon_panel.request.connect(lambda command, arguments: self.command(command, **arguments))
+        self.balloon_panel.start_tracking.connect(lambda: self._request_mode("BALLOON"))
+        self.balloon_panel.stop_tracking.connect(lambda: self._request_mode("AUTO"))
+        tabs.addTab(self.balloon_panel, "카메라 · 풍선 추적")
         tabs.addTab(self._remote_tab(), self.style().standardIcon(QStyle.SP_ArrowRight), "PC 원격 조종")
         self.terminal_tab_index = tabs.addTab(
             self._terminal_tab(),
@@ -266,7 +273,20 @@ class MainWindow(QMainWindow):
             "SSH 터미널",
         )
         tabs.addTab(self._logs_tab(), self.style().standardIcon(QStyle.SP_FileDialogInfoView), "운항 기록")
+        tabs.currentChanged.connect(self._fit_current_tab)
+        self._fit_current_tab(tabs.currentIndex())
         outer.addWidget(tabs, 1)
+
+    def _fit_current_tab(self, index: int) -> None:
+        # Hidden long configuration tabs must not stretch the camera page.
+        for page_index in range(self.tabs.count()):
+            policy = QSizePolicy.Preferred if page_index == index else QSizePolicy.Ignored
+            self.tabs.widget(page_index).setSizePolicy(policy, policy)
+        if self.tabs.widget(index) is self.balloon_panel:
+            self.tabs.setMaximumHeight(620)
+        else:
+            self.tabs.setMaximumHeight(16777215)
+        self.tabs.updateGeometry()
 
     def _dashboard_tab(self) -> QWidget:
         page = QWidget(); layout = QVBoxLayout(page)
@@ -942,7 +962,7 @@ class MainWindow(QMainWindow):
             self.worker.interrupt_terminal()
 
     def _load_settings(self) -> None:
-        self.host.setText(self.settings.value("host", "10.122.105.215"))
+        self.host.setText(self.settings.value("host", "10.180.227.215"))
         self.port.setValue(int(self.settings.value("port", 22)))
         self.username.setText(self.settings.value("username", "jetson"))
         self.ntrip_username.setText(self.settings.value("ntrip_username", ""))
@@ -997,6 +1017,7 @@ class MainWindow(QMainWindow):
         worker.start()
 
     def _set_connected(self, connected: bool) -> None:
+        self.balloon_panel.set_connected(connected)
         self.connect_button.setEnabled(True)
         self.connect_button.setText("연결 해제" if connected else "연결")
         self.simulation_badge.setVisible(connected and self.is_simulation)
@@ -1735,6 +1756,10 @@ class MainWindow(QMainWindow):
 
     def on_ack(self, ack: dict) -> None:
         if ack.get("ok"):
+            if ack.get("command") == "DOWNLOAD_VISION_LOG":
+                folder = str(ack.get("folder") or "")
+                self.log(f"풍선 추적 로그 저장 완료: {folder}")
+                QMessageBox.information(self, "추적 로그 다운로드 완료", folder)
             if (
                 ack.get("command") == "SELECT_ROUTE"
                 and ack.get("request_id") == self._pending_route_request
@@ -1902,6 +1927,7 @@ class MainWindow(QMainWindow):
         return f"{value}{suffix}"
 
     def update_telemetry(self, state: dict) -> None:
+        self.balloon_panel.update_state(state, self.host.text().strip())
         devices, gps, rc, pca = state.get("devices", {}), state.get("gps", {}), state.get("rc", {}), state.get("pca", {})
         mode = state.get("mode", "-")
         self.current_mode = str(mode)
@@ -1915,7 +1941,7 @@ class MainWindow(QMainWindow):
         auto_cruise_pwm = state.get("auto_cruise_pwm")
         if not self._auto_speed_dirty and isinstance(auto_cruise_pwm, int):
             self._set_auto_speed_editor(auto_cruise_pwm, dirty=False)
-        mode_ko = {"AUTO": "자동 대기", "MANUAL": "수동 조종", "NAVIGATION": "GPS 항법", "REMOTE": "PC 원격"}.get(mode, mode)
+        mode_ko = {"AUTO": "자동 대기", "MANUAL": "수동 조종", "NAVIGATION": "GPS 항법", "REMOTE": "PC 원격", "BALLOON": "풍선 추적"}.get(mode, mode)
         operation_ko = {
             "AUTO": "자동 대기", "AUTO_ACTIVE": "직진 운항 중", "AUTO_SAFE": "안전 정지",
             "MANUAL_WAITING_RC": "조종기 입력 대기", "MANUAL_WAITING_NEUTRAL": "중립 입력 대기", "MANUAL_ACTIVE": "수동 조종 중",
@@ -1927,6 +1953,7 @@ class MainWindow(QMainWindow):
             "NAVIGATION_ROUTE_COMPLETE": "목적지 도착·정지",
             "REMOTE_ACTIVE": "PC 원격 조종 중", "EMERGENCY_STOP": "비상정지",
             "GROUND_TEST": "도보 테스트 중",
+            "BALLOON": "풍선 자동 추적",
         }.get(operation, operation)
         self.cards["mode"].set_value(f"{mode_ko} · {operation_ko}", not state.get("estop", False))
         backend = state.get("backend") or {}
@@ -2510,6 +2537,7 @@ class MainWindow(QMainWindow):
             self.last_hardware_errors = current_errors
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        self.balloon_panel.timer.stop()
         self._release_remote_controls()
         if self.worker and self.worker.isRunning():
             self.worker.stop()

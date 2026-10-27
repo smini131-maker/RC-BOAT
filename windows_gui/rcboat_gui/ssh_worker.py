@@ -16,7 +16,7 @@ import paramiko
 from PySide6.QtCore import QThread, Signal
 
 
-REMOTE_BRIDGE = r'''p=/home/jetson/rcboat_ros_ws/deployment/jetson/bridge_client.py
+REMOTE_BRIDGE = r'''p=/home/jetson/rcboat_balloon_ros_ws/deployment/jetson/bridge_client.py
 [ -f "$p" ] && exec python3 "$p"
 printf '{"success":false,"error":"ROS bridge_client.py not found"}\n'
 exit 1'''
@@ -169,12 +169,15 @@ class SSHWorker(QThread):
             "SET_GPS_SETTINGS": "set_gps_settings", "START_GPS_LOGGING": "gps_log_start",
             "STOP_GPS_LOGGING": "gps_log_stop", "GROUND_TEST_START": "ground_start",
             "GROUND_TEST_STOP": "ground_stop",
+            "VISION_ENABLE": "vision_enable", "VISION_CONFIGURE": "vision_configure",
         }
         if command == "SET_MODE":
             mode = str(kwargs.get("mode", "AUTO")).upper()
+            if mode == "AUTO":
+                mode = "AUTO_SAFE"
             return {"action": "set_mode", "arguments": {
                 "mode": mode,
-                "armed": mode == "NAVIGATION",
+                "armed": mode in {"NAVIGATION", "BALLOON"},
             }}
         if command == "START_GPS_RECORDING":
             return {"action": "record_start", "arguments": kwargs}
@@ -272,13 +275,15 @@ class SSHWorker(QThread):
         }
         logger_state = str(ground.get("state") or ("recording" if ground.get("active") else "idle"))
         return {
-            "type": "telemetry", "software_version": response.get("version", "2.1.7"),
+            "type": "telemetry", "software_version": response.get("version", "2.2.0"),
             "backend": {"name": str(response.get("backend") or "ROS Noetic"),
                         "ready": bool(response.get("gateway_online", True)), "node_count": len(nodes),
                         "master_online": bool(response.get("master_online")),
                         "gateway_online": bool(response.get("gateway_online", True)),
                         "ssh_connected": bool(ssh_connected), "logger_state": logger_state},
             "timestamp": time.time(), "mode": mode, "operation_state": ros_mode,
+            "vision": cache.get("vision") or {}, "vision_desired": cache.get("vision_desired") or {},
+            "balloon_armed": ros_mode == "BALLOON" and bool(safety.get("armed")),
             "navigation_active": ros_mode == "NAVIGATION" and bool(safety.get("armed")),
             "estop": bool(safety.get("estop")), "failsafe_reason": safety.get("reason") or "",
             "manual_waiting_for_neutral": False,
@@ -332,8 +337,8 @@ class SSHWorker(QThread):
                       "distance_to_waypoint_m": route.get("distance_to_waypoint_m"),
                       "distance_to_route_m": route.get("distance_to_route_m"),
                       "route_complete": bool(route.get("route_complete")), "load_error": "",
-                      "storage_path": "~/rcboat_ros_data/routes.json",
-                      "multipath_config_path": "~/rcboat_ros_data/multipath_settings.json",
+                      "storage_path": "~/rcboat_balloon_data/routes.json",
+                      "multipath_config_path": "~/rcboat_balloon_data/multipath_settings.json",
                       "selected_route_persisted": True, "multipath": multipath,
                       "multipath_group_route_ids": group_ids,
                       "alternative_route_id": route.get("candidate_route_id", ""),
@@ -350,8 +355,10 @@ class SSHWorker(QThread):
             "hardware_errors": [], "events": [],
         }
 
-    def _download_results(self, destination: str, categories: list[str], test_id: str = "") -> dict[str, Any]:
-        response = self._bridge({"action": "download_ground_test", "arguments": {"test_id": test_id}})
+    def _download_results(self, destination: str, categories: list[str], test_id: str = "",
+                          vision_log: bool = False) -> dict[str, Any]:
+        response = self._bridge({"action": "download_vision_log" if vision_log else "download_ground_test",
+                                 "arguments": {"test_id": test_id}})
         if not response.get("success"):
             raise RuntimeError(str(response.get("error") or "download failed"))
         detail = response.get("response") or {}
@@ -369,10 +376,10 @@ class SSHWorker(QThread):
         ack = {"type": "ack", "request_id": request["request_id"],
                "command": command, "ok": False, "error": ""}
         try:
-            if command == "DOWNLOAD_GROUND_RESULTS":
+            if command in {"DOWNLOAD_GROUND_RESULTS", "DOWNLOAD_VISION_LOG"}:
                 result = self._download_results(
                     str(request["destination"]), list(request.get("categories") or []),
-                    str(request.get("test_id") or "")
+                    str(request.get("test_id") or ""), command == "DOWNLOAD_VISION_LOG"
                 )
                 ack.update(result)
                 ack["ok"] = True
@@ -477,7 +484,7 @@ class SSHWorker(QThread):
                         self._backend_error = ""
                     except Exception as exc:
                         message = str(exc)
-                        offline = {"success": True, "version": "2.1.7", "backend": "ROS Noetic",
+                        offline = {"success": True, "version": "2.2.0", "backend": "ROS Noetic",
                                    "master_online": False, "gateway_online": False, "telemetry": {}, "nodes": []}
                         self.telemetry.emit(self._normalize(offline, self._client is not None))
                         if message != self._backend_error or now - self._backend_error_at >= 15.0:

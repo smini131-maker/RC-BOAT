@@ -16,7 +16,7 @@ from rcboat_ros.common import pack, unpack
 from rcboat_ros.geo import enrich_waypoints
 
 
-VERSION = "2.1.7"
+VERSION = "2.2.0"
 CSV_FIELDS = [
     "sample_index", "sample_time_epoch_s", "logger_time_utc", "measurement_time_utc", "gps_received_time_utc",
     "output_time_utc", "elapsed_time_s", "latitude", "longitude", "utm_easting_m",
@@ -73,7 +73,7 @@ class Logger:
         self.execution_target_name = ""
         self.previous_active_route_id = ""
         self.actuation_enabled = False
-        root = rospy.get_param("/rcboat/ground_test_log_root", "~/rcboat_ros_data/logs/ground_tests")
+        root = rospy.get_param("/rcboat/ground_test_log_root", "~/rcboat_balloon_data/logs/ground_tests")
         self.root = pathlib.Path(os.path.expanduser(root))
         self.root.mkdir(parents=True, exist_ok=True)
         self.recover_interrupted_runs()

@@ -11,4 +11,4 @@ for p in /dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_556393035343
   if [[ ! -e $p ]];then echo "MISSING: $p";exit 1;fi
   echo "DEVICE: $p -> $(readlink -f "$p")"
 done
-systemctl is-enabled rcboat_ros.service || true
+systemctl is-enabled rcboat_balloon_ros.service || true

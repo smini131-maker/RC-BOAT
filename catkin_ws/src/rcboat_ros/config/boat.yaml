@@ -1,7 +1,7 @@
-version: '2.1.7'
+version: '2.2.0'
 gui_gateway_bind: '0.0.0.0'
 gui_gateway_port: 8765
-ground_test_log_root: '~/rcboat_ros_data/logs/ground_tests'
+ground_test_log_root: '~/rcboat_balloon_data/logs/ground_tests'
 arduino_port: '/dev/serial/by-id/usb-Arduino__www.arduino.cc__Arduino_Uno_55639303534351D01210-if00'
 gps_port: '/dev/serial/by-id/usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00'
 arduino_baudrate: 9600
@@ -39,3 +39,22 @@ speed_feedback_enabled: false
 target_speed_mps: 0.6
 # GNSS course-over-ground quality is diagnostic only (not physical heading)
 course_min_speed_mps: 0.35
+vision:
+  camera_type: usb
+  camera_source: /dev/video0
+  csi_sensor_id: 0
+  width: 640
+  height: 480
+  camera_fps: 15
+  model_path: ~/rcboat_balloon_data/models/balloon_yolov5n.onnx
+  model_manifest: ~/rcboat_balloon_data/models/model_manifest.json
+  input_size: 320
+  confidence: 0.45
+  inference_hz: 5.0
+  max_frame_age_s: 1.0
+  acquire_frames: 3
+  cruise_pwm: 6550
+  max_throttle_pwm: 6650
+  steering_right_sign: -1
+  stop_area_ratio: 0.18
+  preview_port: 8766

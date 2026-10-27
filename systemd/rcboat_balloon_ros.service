@@ -1,0 +1,22 @@
+[Unit]
+Description=RCBoat ROS Noetic v2.2.0 balloon camera backend
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=simple
+User=jetson
+Group=jetson
+SupplementaryGroups=dialout i2c video
+WorkingDirectory=/home/jetson/rcboat_balloon_ros_ws
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/home/jetson/rcboat_balloon_data/ntrip.env
+ExecStartPre=/bin/bash /home/jetson/rcboat_balloon_ros_ws/deployment/jetson/hardware_gate.sh
+ExecStart=/bin/bash -lc 'source /opt/ros/noetic/setup.bash; source /home/jetson/rcboat_balloon_ros_ws/catkin_ws/devel/setup.bash; exec roslaunch rcboat_ros rcboat.launch'
+ExecStopPost=/usr/bin/python3 /home/jetson/rcboat_balloon_ros_ws/deployment/jetson/set_safe_pwm.py
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+KillMode=control-group
+# Optional boot integration for the ROS-only release.
+[Install]
+WantedBy=multi-user.target

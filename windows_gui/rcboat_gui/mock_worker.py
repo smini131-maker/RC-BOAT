@@ -50,6 +50,11 @@ class MockWorker(QThread):
         self.ground_test_active = False
         self.ground_test_samples = 0
         self.ground_test_actuation_enabled = False
+        self.vision_enabled = False
+        self.vision_config = {"camera_type": "usb", "camera_source": "/dev/video0",
+                              "csi_sensor_id": 0, "model_path": "~/rcboat_balloon_data/models/balloon_yolov5n.onnx",
+                              "confidence": .45, "cruise_pwm": 6550, "stop_area_ratio": .18,
+                              "steering_right_sign": -1}
         self.multipath = {
             "enabled": True, "endpoint_tolerance_m": 0.75,
             "selection_policy": "nearest_route",
@@ -80,18 +85,22 @@ class MockWorker(QThread):
         try:
             if command == "SET_MODE":
                 mode = str(kwargs["mode"]).upper()
-                if mode not in {"AUTO", "MANUAL", "NAVIGATION", "REMOTE"}:
+                if mode not in {"AUTO", "MANUAL", "NAVIGATION", "REMOTE", "BALLOON"}:
                     raise ValueError(f"invalid mode: {mode}")
                 if self.estop:
                     raise RuntimeError("Emergency Stop is latched")
                 if mode == "MANUAL" and not self.arduino_connected:
                     raise RuntimeError("Arduino/RC data is unavailable; MANUAL rejected")
                 self.mode = mode
+                if mode == "BALLOON" and not self.vision_enabled:
+                    self.mode = "AUTO"
+                    raise ValueError("카메라를 먼저 켜세요 (시뮬레이션)")
                 requested_state = {
                     "AUTO": "AUTO",
                     "MANUAL": "MANUAL_ACTIVE",
                     "NAVIGATION": "NAVIGATION_ACTIVE",
                     "REMOTE": "REMOTE_ACTIVE",
+                    "BALLOON": "BALLOON",
                 }[mode]
                 if mode == "NAVIGATION" and (not self.gps_connected or not self.gps_fix):
                     requested_state = "NAVIGATION_WAITING_GPS"
@@ -105,7 +114,16 @@ class MockWorker(QThread):
                     else 6450
                 )
                 if mode == "AUTO":
-                    self.operation_state = "AUTO_ACTIVE"
+                    self.operation_state = "AUTO_SAFE"
+                    self.steering, self.throttle = 6000, 6450
+            elif command == "VISION_ENABLE":
+                self.vision_enabled = bool(kwargs.get("enabled"))
+                self.mode, self.operation_state = "AUTO", "AUTO_SAFE"
+                self.steering, self.throttle = 6000, 6450
+            elif command == "VISION_CONFIGURE":
+                if self.vision_enabled:
+                    raise ValueError("카메라를 끄고 설정하세요")
+                self.vision_config.update(kwargs)
             elif command == "REMOTE_CONTROL":
                 if self.mode != "REMOTE":
                     raise RuntimeError("REMOTE mode is not active")
@@ -366,6 +384,9 @@ class MockWorker(QThread):
             selected = next(route for route in self.routes if route["id"] == self.selected_route_id)
             active = next(route for route in self.routes if route["id"] == self.active_route_id)
             nav_active = self.operation_state == "NAVIGATION_ACTIVE"
+            if self.mode == "BALLOON" and self.vision_enabled and not self.estop:
+                self.steering = 6000-int(math.sin(t/3)*450)
+                self.throttle = self.vision_config["cruise_pwm"]
             self.telemetry.emit(
                 {
                     "type": "telemetry",
@@ -378,6 +399,15 @@ class MockWorker(QThread):
                     "mode": self.mode,
                     "operation_state": self.operation_state,
                     "navigation_active": nav_active,
+                    "balloon_armed": self.mode == "BALLOON" and not self.estop,
+                    "vision": {"enabled": self.vision_enabled, "camera_online": self.vision_enabled,
+                               "model_ready": self.vision_enabled, "preview_port": 8766,
+                               "reason": "TRACKING" if self.vision_enabled else "CAMERA_DISABLED",
+                               "configuration": dict(self.vision_config), "error": "",
+                               "inference_ms": 55, "frame_age_s": .05,
+                               "target": {"confidence": .92, "center_x_normalized": math.sin(t/3)*.45,
+                                          "area_ratio": .04} if self.vision_enabled else None},
+                    "vision_desired": {"valid": self.vision_enabled},
                     "estop": self.estop,
                     "failsafe_reason": self.failsafe_reason,
                     "manual_waiting_for_neutral": False,

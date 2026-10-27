@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Make SCP-transferred ROS source safe for Linux Bash and roslaunch.
-Only changes the dedicated /home/jetson/rcboat_ros_ws workspace.
+Only changes the dedicated /home/jetson/rcboat_balloon_ros_ws workspace.
 Invoke via python3, not the shebang, to tolerate initial CRLF.
 """
 from pathlib import Path
 import stat
 import sys
 
-ROOT = Path('/home/jetson/rcboat_ros_ws')
+ROOT = Path('/home/jetson/rcboat_balloon_ros_ws')
 SAFE_DIRS = ('deployment/jetson', 'catkin_ws/src', 'systemd')
 EXTENSIONS = {'.sh', '.py', '.service', '.launch', '.yaml', '.xml', '.msg', '.srv', '.json'}
 

@@ -17,13 +17,14 @@ from rcboat_ros.srv import Execute
 from rcboat_ros.common import pack, unpack
 
 
-VERSION = "2.1.7"
-SOCKET = os.path.expanduser("~/rcboat_ros_data/gui_bridge.sock")
+VERSION = "2.2.0"
+SOCKET = os.path.expanduser("~/rcboat_balloon_data/gui_bridge.sock")
 TOPICS = {
     "gps": "/rcboat/gps/status", "ntrip": "/rcboat/ntrip/status", "route": "/rcboat/route/state",
     "navigation": "/rcboat/navigation/desired", "safety": "/rcboat/safety/state",
     "actuator": "/rcboat/actuator/status", "ground_test": "/rcboat/ground_test/status",
     "rc": "/rcboat/rc/input",
+    "vision": "/rcboat/vision/status", "vision_desired": "/rcboat/vision/desired",
 }
 
 
@@ -32,7 +33,7 @@ class Bridge:
         self.cache = {}
         self.gps_log_file = None; self.gps_log_writer = None; self.gps_log_samples = 0; self.gps_log_path = ""
         self.test_root = pathlib.Path(os.path.expanduser(rospy.get_param(
-            "/rcboat/ground_test_log_root", "~/rcboat_ros_data/logs/ground_tests")))
+            "/rcboat/ground_test_log_root", "~/rcboat_balloon_data/logs/ground_tests")))
         self.test_root.mkdir(parents=True, exist_ok=True)
         self.bind_host = str(rospy.get_param("/rcboat/gui_gateway_bind", "0.0.0.0"))
         self.bind_port = int(rospy.get_param("/rcboat/gui_gateway_port", 8765))
@@ -58,7 +59,7 @@ class Bridge:
 
     def start_gps_log(self):
         if self.gps_log_file: raise RuntimeError("GPS logging already active")
-        folder = pathlib.Path(os.path.expanduser("~/rcboat_ros_data/gps_logs")); folder.mkdir(parents=True, exist_ok=True)
+        folder = pathlib.Path(os.path.expanduser("~/rcboat_balloon_data/gps_logs")); folder.mkdir(parents=True, exist_ok=True)
         self.gps_log_path = str(folder / ("gps_" + dt.datetime.now().strftime("%Y%m%d_%H%M%S") + ".csv"))
         fields = ["logger_time_utc", "measurement_time_utc", "received_time_utc", "latitude", "longitude",
                   "utm_easting_m", "utm_northing_m", "utm_zone", "altitude_m", "fix", "rtk_state",
@@ -179,8 +180,24 @@ class Bridge:
             return {"success": True, "response": {"file_path": path, "samples": samples}}
         if command == "list_ground_tests": return {"success": True, "response": {"ground_tests": self.tests()}}
         if command == "download_ground_test": return {"success": True, "response": self.download_test(args.get("test_id"))}
+        if command == "download_vision_log":
+            folder = pathlib.Path(os.path.expanduser("~/rcboat_balloon_data/logs/vision"))
+            files = sorted(folder.glob("balloon_*.jsonl"), key=lambda item: item.stat().st_mtime, reverse=True)
+            if not files:
+                raise ValueError("no balloon tracking log found")
+            selected = files[0]
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+                archive.write(selected, selected.name)
+            payload = buffer.getvalue()
+            return {"success": True, "response": {
+                "filename": selected.stem+".zip", "zip_base64": base64.b64encode(payload).decode("ascii"),
+                "sha256": __import__("hashlib").sha256(payload).hexdigest()}}
         if command == "ground_start": return {"success": True, "response": self.ground_start(args)}
         if command == "ground_stop": return {"success": True, "response": self.ground_stop()}
+        if command in ("vision_enable", "vision_configure"):
+            # Disarm before changing the source of autonomous visual commands.
+            self.service("/rcboat/safety/execute", "set_mode", {"mode": "AUTO_SAFE"})
         if command == "set_gps_settings":
             if "navigation_max_hdop" in args: rospy.set_param("/rcboat/max_hdop", float(args["navigation_max_hdop"]))
             self.events.publish(pack(type="CONFIG_CHANGE", change_type="gps_settings", after=args))
@@ -192,6 +209,7 @@ class Bridge:
                                                          "choose_nearest_group_route", "set_test_route_set",
                                                          "select_multipath","upsert_multipath","delete_multipath",
                                                          "compatible_routes")
+            else "/rcboat/vision/execute" if command in ("vision_enable", "vision_configure", "vision_status")
             else "/rcboat/ntrip/execute" if command == "configure"
             else "/rcboat/navigation/execute" if command in ("set_tracking_mode", "set_auto_cruise_pwm") else None
         )

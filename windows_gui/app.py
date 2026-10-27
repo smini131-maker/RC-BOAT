@@ -11,13 +11,15 @@ from rcboat_gui.main_window import MainWindow
 
 def main() -> int:
     app = QApplication([sys.argv[0]] if "--smoke-test" in sys.argv else sys.argv)
-    app.setApplicationName("RCBoatControl")
+    app.setApplicationName("RCBoatBalloonControl")
     app.setOrganizationName("AdventureDesign")
     bundle_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
     app.setWindowIcon(QIcon(str(bundle_root / "assets" / "cat_boat_icon.ico")))
     window = MainWindow()
     window.show()
     if "--smoke-test" in sys.argv:
+        if "--balloon-tab" in sys.argv:
+            window.tabs.setCurrentWidget(window.balloon_panel)
         app.processEvents()
         if "--screenshot" in sys.argv:
             index = sys.argv.index("--screenshot")

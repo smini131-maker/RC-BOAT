@@ -1,0 +1,7 @@
+# Replace with your labelled dataset. Class 0 must be balloon.
+path: C:/RCBoatDataset
+train: images/train
+val: images/val
+test: images/test
+nc: 1
+names: [balloon]
