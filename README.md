@@ -1,8 +1,8 @@
-# RC-BOAT ROS Noetic v2.1.7
+# RC-BOAT ROS Noetic v2.1.8
 
 정식 실행 구조는 ROS Noetic뿐입니다. Jetson backend는 `roslaunch rcboat_ros rcboat.launch`, Windows GUI는 ROS gateway TCP(기본 `8765`)로 통신합니다. SSH는 배포·터미널용 보조 채널이며, SSH가 끊겨도 ROS gateway가 살아 있으면 상태 조회와 `GROUND_TEST_STOP`이 동작합니다.
 
-기존 1.6.0 소스는 `release/1.6.0` 브랜치와 `release/archive/v1.6.0/`에 보존됩니다. `beta/`는 개발 이력일 뿐 정식 실행 위치가 아닙니다.
+카메라 없는 정식 버전은 v2.1.8입니다. 설치·수동 전환 시험은 [배포_및_시험_순서_v2.1.8.txt](배포_및_시험_순서_v2.1.8.txt)를 따릅니다. 이전 소스는 Git 이력에서 확인할 수 있습니다.
 
 버전은 `MAJOR.MINOR.PATCH` 형식을 사용합니다. 호환성이 깨지는 구조 변경은 MAJOR, 기능 추가는 MINOR, 수정·정리는 PATCH를 올립니다. GUI 제목, ROS 응답, `VERSION`, EXE와 배포 ZIP 파일명은 항상 같은 버전으로 맞춥니다.
 
@@ -47,6 +47,8 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\runner.ps1 -Action INST
 ```bash
 cd /home/jetson/rcboat_ros_ws
 python3 -m pip install --user pyserial smbus2
+sudo systemctl stop rcboat_ros.service
+python3 deployment/jetson/normalize_line_endings.py
 source /opt/ros/noetic/setup.bash
 cd catkin_ws
 catkin_make
@@ -82,11 +84,11 @@ EXE 빌드:
 .\build.bat
 ```
 
-결과: `windows_gui\dist\RCBoatControl_ROS_v2.1.7.exe`
+결과: `windows_gui\dist\RCBoatControl_ROS_v2.1.8.exe`
 
 GUI 상단 상태는 서로 독립입니다: `SSH connected/disconnected`, `ROS master online/offline`, `ROS gateway online/offline`, `logger idle/recording/stopping/error`, `GPS valid/invalid/stale`, `RTK fix/float/dgps/no_fix/no_data`.
 
-SSH 표시는 Paramiko 객체 존재 여부가 아니라 Jetson이 실제 새 SSH 채널에 응답하는지를 3초마다 확인합니다. Wi-Fi 단절, sshd 종료 또는 GUI 터미널의 `exit`가 감지되면 즉시 `disconnected`로 바뀌며, ROS gateway가 살아 있으면 나머지 ROS 기능은 계속 동작합니다.
+SSH 표시는 Paramiko 객체 존재 여부가 아니라 Jetson이 실제 새 SSH 채널에 응답하는지를 3초마다 확인합니다. Wi-Fi 단절, sshd 종료 또는 GUI 터미널의 `exit`가 감지되면 즉시 `disconnected`로 바뀌며, ROS gateway가 살아 있으면 조회·정지는 계속 동작합니다. v2.1.8부터 운항 중 SSH가 끊기면 MANUAL로 전환하고 중립 확인 전 출력을 잠급니다.
 
 ## 항로와 Ground Test 사용 순서
 
@@ -183,3 +185,23 @@ GUI에서 비밀번호를 한 번 입력하고 `설정 저장 · 연결`을 눌�
 - `8765/tcp`는 시험 LAN에서만 허용하고 gateway token 또는 방화벽을 적용합니다.
 - `actual_*_pwm`은 PCA에 전송한 명령이지 물리 위치 센서 피드백이 아닙니다.
 - 지상 도보 시험 통과는 수상 자율운항 안전 승인을 의미하지 않습니다.
+
+## v2.1.8 안전 수동 전환
+
+비상정지, 목표 도착, SSH 단절/GUI 링크 만료, GPS FIX 소실/2초 이상 데이터 갱신 중단,
+항법 오류, 출력 오류, 추진 고장 입력 시 MANUAL로 전환합니다. 원인은 GUI와 `/rcboat/events`에 표시합니다.
+전환 직후 조향 6000 / 스로틀 6450으로 정지하고 RC 스로틀 1500±30 µs를 0.3초 유지해야 수동 조종이 가능합니다.
+GPS/SSH 없이도 유효한 RC 입력으로 수동 조종할 수 있습니다. 자동주행은 명시적으로 다시 시작해야 합니다.
+비상정지는 MANUAL 표시와 별개로 해제 전까지 모든 출력을 잠급니다.
+
+PC에서 별도 작업 스레드가 약 1초 주기로 SSH 실제 응답을 확인해 ROS gateway에 전달합니다.
+SSH 단절은 검출 직후 다음 10 Hz 제어 주기에 반영합니다. GUI 종료·통신 단절 시 Jetson이 마지막
+링크를 5초 후 만료시켜 스스로 MANUAL로 전환합니다. 로그 다운로드는 링크 확인을 막지 않습니다.
+이 버전은 GUI와 backend를 함께 업데이트해야 하며 구 GUI에는 operator_link 기능이 없습니다.
+
+회전수/전류 센서는 현재 없습니다. 기본적으로 AUTO/NAVIGATION에서 전진 PWM≥6550,
+GPS 속도<0.15 m/s 및 시작점 대비 이동<1 m가 15초 이어지면 `PROPULSION_NO_PROGRESS_SUSPECTED`로
+전환합니다. 바람·계류·GPS 오차도 원인이 될 수 있으며 스크류 걸림 확정 진단이 아닙니다.
+GROUND_TEST에는 이 의심 감지를 적용하지 않습니다. 실제 걸림을 빠르게 검출하려면 RPM/전류/ESC
+센서와 `/rcboat/propulsion/status`의 `{"blocked":true}` 또는 `{"fault":true}` 송신부가 필요합니다.
+센서가 없으면 상태는 unsupported입니다. `boat.yaml`의 no_progress 설정으로 의심 감지를 조절합니다.

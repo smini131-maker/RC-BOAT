@@ -71,6 +71,12 @@ class MockWorker(QThread):
             "credentials_saved": False,
         }
 
+    def _manual_fault(self, reason: str) -> None:
+        self.mode, self.operation_state = "MANUAL", "MANUAL_WAITING_NEUTRAL"
+        self.steering, self.throttle = 6000, 6450
+        self.failsafe_reason = reason
+        self.ground_test_active = self.ground_test_actuation_enabled = False
+
     def stop(self) -> None:
         self._stop_requested = True
 
@@ -101,11 +107,10 @@ class MockWorker(QThread):
                 self.operation_state = requested_state
                 self.steering, self.throttle = 6000, (
                     self.auto_cruise_pwm if requested_state == "NAVIGATION_ACTIVE"
-                    else self.auto_cruise_pwm if requested_state == "AUTO"
                     else 6450
                 )
                 if mode == "AUTO":
-                    self.operation_state = "AUTO_ACTIVE"
+                    self.operation_state = "AUTO_SAFE"
             elif command == "REMOTE_CONTROL":
                 if self.mode != "REMOTE":
                     raise RuntimeError("REMOTE mode is not active")
@@ -116,8 +121,8 @@ class MockWorker(QThread):
                 if isinstance(value, bool) or not isinstance(value, int):
                     raise ValueError("auto_cruise_pwm must be an integer")
                 self.auto_cruise_pwm = value
-                if self.mode == "AUTO" and not self.failsafe_reason and not self.estop:
-                    self.steering, self.throttle = 6000, value
+                if self.mode == "AUTO":
+                    self.steering, self.throttle = 6000, 6450
                 elif self.mode == "NAVIGATION" and self.operation_state == "NAVIGATION_ACTIVE" and not self.estop:
                     self.throttle = value
             elif command == "SET_MULTIPATH":
@@ -133,11 +138,11 @@ class MockWorker(QThread):
                             raise ValueError(f"multipath {key} out of range")
                         self.multipath[key] = value
             elif command == "EMERGENCY_STOP":
-                self.estop, self.mode, self.operation_state = True, "AUTO", "EMERGENCY_STOP"
+                self.estop, self.mode, self.operation_state = True, "MANUAL", "EMERGENCY_STOP"
                 self.steering, self.throttle = 6000, 6450
                 self.failsafe_reason = "EMERGENCY_STOP"
             elif command == "CLEAR_ESTOP":
-                self.estop, self.mode, self.operation_state = False, "AUTO", "AUTO"
+                self.estop, self.mode, self.operation_state = False, "MANUAL", "MANUAL_WAITING_NEUTRAL"
                 self.steering, self.throttle = 6000, 6450
                 self.failsafe_reason = "ESTOP_CLEARED"
             elif command == "SELECT_ROUTE":
@@ -257,6 +262,8 @@ class MockWorker(QThread):
                 if scenario not in {"NO_FIX", "GPS_FIX", "DGPS", "RTK_FLOAT", "RTK_FIXED", "HDOP_BAD", "SATELLITE_LOW", "GPS_STALE"}:
                     raise ValueError("unknown GPS scenario")
                 self.gps_scenario = scenario
+                if scenario in {"NO_FIX", "GPS_STALE"} and self.mode in {"NAVIGATION", "GROUND_TEST", "REMOTE"}:
+                    self._manual_fault("GPS_INVALID_OR_STALE")
             elif command == "GROUND_TEST_START":
                 target_type = str(kwargs.get("target_type") or "")
                 target_id = str(kwargs.get("target_id") or "")
@@ -296,9 +303,7 @@ class MockWorker(QThread):
                 if not self.gps_connected:
                     self.gps_fix = False
                 if self.mode == "NAVIGATION" and not self.gps_connected:
-                    self.operation_state = "NAVIGATION_WAITING_GPS"
-                    self.steering, self.throttle = 6000, 6450
-                    self.failsafe_reason = "GPS_NO_FIX"
+                    self._manual_fault("GPS_INVALID_OR_STALE")
             elif command == "SIM_SET_GPS_FIX":
                 self.gps_fix = self.gps_connected and bool(kwargs["fix"])
                 if self.mode == "NAVIGATION":
@@ -307,15 +312,11 @@ class MockWorker(QThread):
                         self.steering, self.throttle = 6000, self.auto_cruise_pwm
                         self.failsafe_reason = ""
                     else:
-                        self.operation_state = "NAVIGATION_WAITING_GPS"
-                        self.steering, self.throttle = 6000, 6450
-                        self.failsafe_reason = "GPS_NO_FIX"
+                        self._manual_fault("GPS_INVALID_OR_STALE")
             elif command == "SIM_REMOTE_HEARTBEAT_LOSS":
                 if self.mode != "REMOTE":
                     raise RuntimeError("REMOTE mode is not active")
-                self.mode, self.operation_state = "AUTO", "AUTO"
-                self.steering, self.throttle = 6000, 6450
-                self.failsafe_reason = "REMOTE_HEARTBEAT_TIMEOUT"
+                self._manual_fault("REMOTE_TIMEOUT")
             elif command == "SIM_MULTIPATH_SWITCH":
                 if self.mode != "NAVIGATION":
                     raise RuntimeError("NAVIGATION mode is not active")
@@ -380,7 +381,7 @@ class MockWorker(QThread):
                     "navigation_active": nav_active,
                     "estop": self.estop,
                     "failsafe_reason": self.failsafe_reason,
-                    "manual_waiting_for_neutral": False,
+                    "manual_waiting_for_neutral": self.operation_state == "MANUAL_WAITING_NEUTRAL",
                     "auto_cruise_pwm": self.auto_cruise_pwm,
                     "gps_recording": {"active": self.gps_recording, "name": self.gps_recording_name, "point_count": len(self.gps_recording_points), "minimum_distance_m": self.recording_minimum_distance_m, "minimum_interval_s": self.recording_minimum_interval_s, "arrival_radius_m": self.recording_arrival_radius_m},
                     "gps_logging": {"active": self.gps_data_logging, "file_path": "/home/jetson/rcboat/logs/gps/mock_week6.csv" if self.gps_data_samples else "", "samples": self.gps_data_samples, "started_at": "simulation" if self.gps_data_logging else None},

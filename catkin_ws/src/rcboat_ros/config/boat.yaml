@@ -1,4 +1,4 @@
-version: '2.1.7'
+version: '2.1.8'
 gui_gateway_bind: '0.0.0.0'
 gui_gateway_port: 8765
 ground_test_log_root: '~/rcboat_ros_data/logs/ground_tests'
@@ -39,3 +39,9 @@ speed_feedback_enabled: false
 target_speed_mps: 0.6
 # GNSS course-over-ground quality is diagnostic only (not physical heading)
 course_min_speed_mps: 0.35
+
+# Suspected lack of propulsion, not a physical shaft obstruction measurement.
+# Excluded from GROUND_TEST. Continuous forward >=6550, speed <0.15 m/s,
+# displacement <1 m for 15 s triggers a MANUAL takeover.
+no_progress_enabled: true
+no_progress_timeout_s: 15.0

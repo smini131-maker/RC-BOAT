@@ -9,6 +9,7 @@ import os
 import pathlib
 import socket
 import threading
+import time
 import zipfile
 
 import rospy
@@ -17,7 +18,7 @@ from rcboat_ros.srv import Execute
 from rcboat_ros.common import pack, unpack
 
 
-VERSION = "2.1.7"
+VERSION = "2.1.8"
 SOCKET = os.path.expanduser("~/rcboat_ros_data/gui_bridge.sock")
 TOPICS = {
     "gps": "/rcboat/gps/status", "ntrip": "/rcboat/ntrip/status", "route": "/rcboat/route/state",
@@ -37,6 +38,7 @@ class Bridge:
         self.bind_host = str(rospy.get_param("/rcboat/gui_gateway_bind", "0.0.0.0"))
         self.bind_port = int(rospy.get_param("/rcboat/gui_gateway_port", 8765))
         self.token = os.getenv("RCBOAT_GATEWAY_TOKEN", "")
+        self.link_pub = rospy.Publisher("/rcboat/gui/link", String, queue_size=1)
         self.events = rospy.Publisher("/rcboat/events", String, queue_size=8)
         for name, topic in TOPICS.items():
             callback = self.gps_update if name == "gps" else lambda message, key=name: self.cache.__setitem__(key, unpack(message))
@@ -135,6 +137,14 @@ class Bridge:
         else:raise ValueError("target_type must be multipath or single_route")
         self.service("/rcboat/route/execute", "set_test_route_set", {"route_ids": ids})
         try:
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline:
+                nav = self.cache.get("navigation", {})
+                if nav.get("route_id") in ids and nav.get("valid"):
+                    break
+                rospy.sleep(.05)
+            else:
+                raise ValueError("selected route navigation is not ready")
             self.service("/rcboat/safety/execute", "set_mode", {
                 "mode": "GROUND_TEST", "ground_test_actuation_enabled": actuation_enabled})
             rospy.sleep(.25)
@@ -148,10 +158,11 @@ class Bridge:
 
     def ground_stop(self):
         errors = []; result = {}
+        # Stop propulsion before flushing/exporting potentially large logs.
+        try: self.service("/rcboat/safety/execute", "set_mode", {"mode": "MANUAL"})
+        except Exception as exc: errors.append("safety: " + str(exc))
         try: result = self.service("/rcboat/logger/execute", "stop", {})
         except Exception as exc: errors.append("logger: " + str(exc))
-        try: self.service("/rcboat/safety/execute", "set_mode", {"mode": "AUTO_SAFE"})
-        except Exception as exc: errors.append("safety: " + str(exc))
         try: self.service("/rcboat/route/execute", "set_test_route_set", {"route_ids": []})
         except Exception as exc: errors.append("route: " + str(exc))
         if errors: raise RuntimeError("; ".join(errors))
@@ -161,6 +172,11 @@ class Bridge:
         if self.token and payload.get("token") != self.token:
             return {"success": False, "error": "gateway authentication failed"}
         command = payload.get("action", "status"); args = payload.get("arguments", {})
+        if command == "operator_link":
+            # Stamp at the Jetson; PC/Jetson monotonic clocks are unrelated.
+            self.link_pub.publish(pack(ssh_connected=args.get("ssh_connected") is True,
+                                       monotonic=time.monotonic()))
+            return {"success": True}
         if command == "status":
             try:
                 import rosnode

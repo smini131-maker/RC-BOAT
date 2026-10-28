@@ -31,8 +31,8 @@ def main():
                 parser.feed(data)
             except Exception as exc:
                 rospy.logerr('GPS read fault %s',exc)
-                parser.state['fix']=False
-                rospy.sleep(0.25)
+                pub.publish(pack(fix=False,healthy=False,data_validity='invalid',error=str(exc)))
+                raise  # roslaunch respawns GPS only; manual RC control stays alive.
             now=time.monotonic()
             if now-last_poll>=1.0:
                 try:

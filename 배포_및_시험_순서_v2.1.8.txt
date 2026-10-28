@@ -1,0 +1,108 @@
+RC BOAT ROS Noetic v2.1.8 — 카메라 없는 버전
+기준: v2.1.7 / 최근 전달받은 Jetson IP: 10.180.227.215
+
+1. 이번 변경
+- 운항 중 목표 도착, SSH 단절, GUI 링크 5초 만료, GPS FIX 소실/데이터 갱신 2초 초과,
+  항법/항로/RC 응답 소실, PWM 출력 이상, 추진 고장 입력 시 MANUAL로 전환합니다.
+- 전환 직후 PWM은 조향 6000 / 스로틀 6450이며 자동 재출발하지 않습니다.
+- RC 스로틀을 1500±30 us 중립으로 0.3초 유지한 뒤 수동 조종합니다.
+- 비상정지는 MANUAL 모드로 바뀌어도 출력 잠금을 유지합니다. 비상정지 해제 후에도 중립 확인이 필요합니다.
+- SSH가 없어도 ROS gateway 조회/비상정지/도보 테스트 정지는 가능합니다.
+  단, 이번 요청에 따라 SSH 단절 상태에서 자동/원격/도보 주행은 시작할 수 없습니다.
+- GPS/항법/항로/RC 프로세스가 죽어도 수동 제어 노드는 유지하고 해당 노드만 재시작합니다.
+  수동 조종에는 정상 조종기/Arduino/출력 장치가 필요합니다.
+
+2. 스크류 걸림 감지의 실제 범위
+현재 장치에는 RPM/전류 센서가 없습니다. 걸림 여부를 직접 측정할 수 없습니다.
+AUTO/NAVIGATION에서 전진 PWM >=6550, GPS 속도 <0.15m/s, 이동 <1m가 15초 지속하면
+PROPULSION_NO_PROGRESS_SUSPECTED(추진 이상 의심)으로 MANUAL 전환합니다.
+바람/계류/GPS 오차와 구분할 수 없으며, GPS가 튀면 걸림을 놓칠 수 있습니다.
+도보 테스트에는 이 조건을 적용하지 않습니다. 기준은 boat.yaml의 no_progress 설정에 있습니다.
+확실한 검출을 원하면 RPM/전류/ESC 센서가 필요합니다. 연결 시 센서 송신부가
+/rcboat/propulsion/status (std_msgs/String)에 {"blocked":true} 또는 {"fault":true}를 보냅니다.
+고장 원인이 해결되면 false를 송신합니다. 센서 미장착 상태는 unsupported입니다.
+
+3. Windows PowerShell — 배포
+기존 GUI를 닫고, 실제 보트에서는 먼저 추진 전원을 끄거나 프로펠러를 제거합니다.
+아래 순서대로 실행합니다. IP가 바뀌면 -Destination과 ssh의 주소를 함께 바꿉니다.
+
+Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_Project"
+Test-NetConnection 10.180.227.215 -Port 22
+.\DEPLOY_ROS.cmd -Destination "jetson@10.180.227.215"
+ssh jetson@10.180.227.215
+
+배포 스크립트는 전송 후 Linux 줄바꿈/실행 권한을 정리합니다.
+catkin_ws/deployment/systemd/matlab 소스만 갱신하며 Jetson의 rcboat_ros_data 안 항로,
+NTRIP 로컬 비밀번호, 시험 로그는 보존합니다. Windows와 Jetson 모두 v2.1.8이어야 합니다.
+옛 GUI에는 operator_link가 없으므로 v2.1.8 backend의 운항 시작이 거부됩니다.
+
+4. 위 ssh로 들어간 Jetson 터미널 — 설치/빌드/ROS 실행
+
+cd /home/jetson/rcboat_ros_ws
+python3 deployment/jetson/normalize_line_endings.py
+python3 -m pip install --user pyserial smbus2
+bash deployment/jetson/install_jetson_ros.sh
+bash deployment/jetson/check_ros.sh
+grep '<version>' catkin_ws/src/rcboat_ros/package.xml
+sudo systemctl status rcboat_ros.service --no-pager
+
+정상 버전은 2.1.8입니다. 설치 스크립트가 catkin_make와 ROS 자동 시작을 수행합니다.
+오류 확인:
+sudo journalctl -u rcboat_ros.service -n 100 --no-pager
+
+자동 시작 대신 직접 roslaunch로 점검하려면 별도 Jetson 터미널에서:
+sudo systemctl stop rcboat_ros.service
+cd /home/jetson/rcboat_ros_ws
+source /opt/ros/noetic/setup.bash
+source catkin_ws/devel/setup.bash
+roslaunch rcboat_ros rcboat.launch
+
+두 방식을 동시에 실행하지 마세요. 직접 실행을 끝낸 뒤 자동 시작을 복구하려면:
+sudo systemctl start rcboat_ros.service
+
+5. Windows PowerShell — GUI 실행 / 필요할 때 재빌드
+
+Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_Project"
+& ".\windows_gui\dist\RCBoatControl_ROS_v2.1.8.exe"
+
+EXE는 빌드해서 제공하며 다시 빌드할 때만:
+.\BUILD_ROS_GUI.cmd
+
+GUI 제목이 v2.1.8인지 확인하고 IP 10.180.227.215로 연결합니다.
+SSH connected / ROS master online / ROS gateway online을 확인한 뒤 운항을 시작합니다.
+처음 연결 후 operator_link가 도착할 때까지 1~3초 기다립니다.
+
+6. 반드시 할 실제 장치 시험 (프로펠러 제거 상태)
+별도 Jetson 관찰 터미널:
+source /opt/ros/noetic/setup.bash
+source /home/jetson/rcboat_ros_ws/catkin_ws/devel/setup.bash
+rostopic echo /rcboat/safety/state
+
+A. 정상 항법: GPS valid와 항로를 확인한 뒤 항법 시작. NAVIGATION/armed:true 확인.
+B. 비상정지: GUI 비상정지 → MANUAL/estop:true/actuator_locked:true 및 6000/6450 확인.
+   스틱을 움직여도 추진이 나가면 안 됩니다. 해제 후 중립 유지 → 수동 조종 확인.
+C. 목표 도착: 짧은 시험 항로 마지막 waypoint 도착 → MANUAL, TARGET_ARRIVED 확인.
+D. SSH 종료: 운항 중 GUI의 SSH 터미널에서 exit → SSH disconnected와 MANUAL 확인.
+   ROS gateway는 online 유지. SSH를 재연결해도 MANUAL 유지 및 자동 재출발 안 함 확인.
+E. GUI 강제 종료/PC Wi-Fi 해제: 마지막 링크 도착 후 약 5초+제어 주기 이내 MANUAL/중립 확인.
+   관찰은 PC와 독립된 Jetson 현지 터미널에서 합니다. 연결 복구 후 자동 재출발 안 함 확인.
+F. GPS FIX 소실/갱신 중단: FIX가 사라지거나 최신 유효 GPS가 2초 이상 끊기면 MANUAL 확인.
+   GPS USB 탈착 시 전체 ROS가 종료되지 않고 GPS만 재시작하는지 확인.
+   복구 뒤 자동 재출발하지 않고 RC 수동 조종은 가능한지 확인.
+G. 추진 이상 의심: 도보 테스트가 아닌 NAVIGATION에서 전진 명령 중 배를 정지시켜
+   속도/이동 조건을 만족하는 15초 뒤 MANUAL 전환 확인. GPS 오차가 크면 이 시험은 불확실합니다.
+H. 도보 테스트: 경로 선택 → 시작 → 정지. 정지부터 MANUAL/중립으로 바뀌고 ZIP 저장 가능한지 확인.
+   정지 명령은 SSH disconnected 상태에서도 ROS gateway로 동작해야 합니다.
+I. 수동 인수: 전환 당시 스로틀이 올라가 있으면 출력 잠금 유지. 중립 0.3초 후에만 수동 출력 확인.
+J. GUI의 '자동 대기'는 AUTO_SAFE/중립이어야 합니다. 직진 추진 명령을 내보내면 안 됩니다.
+
+연결/GPS 소실은 검출 후 처리하며, 물리적으로 끊기는 순간을 0초 지연으로 아는 것은 불가능합니다.
+PCA/I2C/전원 자체 고장이나 안전 제어 프로세스 종료 때는 수동 조종을 보장할 수 없습니다.
+소프트웨어 출력 잠금은 물리적 비상 전원 차단을 대신하지 않습니다.
+
+7. PC 회귀 검증
+프로젝트 루트에서:
+python -m unittest discover -s tests -v
+
+실제 safety_supervisor 코드에 가짜 ROS/시계를 연결해 안전 전환/중립 인수/잠금/복구를 검증합니다.
+Jetson catkin 빌드/실물 GPS/조종기/PCA/모터 검증은 실제 Jetson에서 별도로 해야 합니다.

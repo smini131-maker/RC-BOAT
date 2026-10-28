@@ -47,7 +47,7 @@ from .ssh_worker import SSHWorker
 from .widgets import MetricCard, RoutePlot, StatusCard, TelemetryGraph
 
 
-APP_VERSION = "2.1.7"
+APP_VERSION = "2.1.8"
 
 
 STYLE = """
@@ -1985,6 +1985,20 @@ class MainWindow(QMainWindow):
         self.value_labels["course"].set_value(self._fmt(gps.get("course_deg"), 1, "°"))
         failsafe = state.get("failsafe_reason") or "없음"
         failsafe_ko = {
+            "ROUTE_TIMEOUT": "항로 응답 소실 → 수동 전환",
+            "RC_INPUT_LOST": "조종기 입력 소실 → 수동 대기 · 중립 후 조종",
+            "SSH_DISCONNECTED": "SSH 단절 → 수동 전환 · 중립 후 조종",
+            "GUI_LINK_TIMEOUT": "GUI/통신 응답 소실 → 수동 전환",
+            "GPS_INVALID_OR_STALE": "GPS 무효/갱신 중단 → 수동 전환",
+            "TARGET_ARRIVED": "목표 도착 → 수동 전환",
+            "NAVIGATION_TIMEOUT": "항법 응답 소실 → 수동 전환",
+            "NAVIGATION_INVALID": "항법 계산 불가 → 수동 전환",
+            "ACTUATOR_ERROR": "PWM 출력 오류 → 수동 전환 · 장치 확인",
+            "ACTUATOR_TIMEOUT": "출력 확인 소실 → 수동 전환",
+            "PROPULSION_FAULT": "추진 장치 고장 입력 → 수동 전환",
+            "PROPULSION_NO_PROGRESS_SUSPECTED": "추진 중 이동 없음(걸림 등 의심) → 수동 전환",
+            "REMOTE_TIMEOUT": "원격 조종 신호 소실 → 수동 전환",
+            "ESTOP_CLEARED_NEUTRAL_REQUIRED": "비상정지 해제 · 스로틀 중립 후 수동 조종",
             "BOOT_SAFE": "부팅 안전",
             "BOOT_WAITING_RC": "부팅 후 조종기 입력 대기",
             "EMERGENCY_STOP": "비상정지",

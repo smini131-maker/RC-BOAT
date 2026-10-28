@@ -3,7 +3,7 @@ import time
 import json
 import rospy
 from std_msgs.msg import String
-from rcboat_ros.common import pack,unpack
+from rcboat_ros.common import pack,unpack,fresh
 from rcboat_ros.path_tracking import navigation_command,TRACKING_MODES
 from rcboat_ros.srv import Execute,ExecuteResponse
 
@@ -51,8 +51,12 @@ class Navigation:
                  'desired_rudder_angle_deg':0,'controller_mode':self.config['tracking_mode'],
                  'target_speed_mps':float(self.config['target_speed_mps']),
                  'auto_cruise_pwm':int(self.config['cruise_pwm']),
+                 'route_id':self.route.get('active_route_id'),
+                 'route_monotonic':self.route.get('monotonic'),
+                 'route_complete':bool(self.route.get('route_complete')),
                  'monotonic':time.monotonic()}
-            if self.gps.get('healthy') and 'target_lat' in self.route and self.gps.get('heading_deg') is not None:
+            if (fresh(float(self.route.get('monotonic') or 0),1.0) and
+                    self.gps.get('healthy')) and 'target_lat' in self.route and self.gps.get('heading_deg') is not None:
                 try:
                     abs_error=None
                     calc=navigation_command(self.gps,self.route,self.config,self.large_turn_seen)

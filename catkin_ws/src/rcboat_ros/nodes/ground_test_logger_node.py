@@ -16,7 +16,7 @@ from rcboat_ros.common import pack, unpack
 from rcboat_ros.geo import enrich_waypoints
 
 
-VERSION = "2.1.7"
+VERSION = "2.1.8"
 CSV_FIELDS = [
     "sample_index", "sample_time_epoch_s", "logger_time_utc", "measurement_time_utc", "gps_received_time_utc",
     "output_time_utc", "elapsed_time_s", "latitude", "longitude", "utm_easting_m",
@@ -35,6 +35,7 @@ CSV_FIELDS = [
     "output_send_success", "output_status", "operation_mode", "effective_source",
     "output_locked", "ground_test_actuation_enabled", "throttle_locked", "steering_test_enabled",
     "manual_intervention", "estop", "navigation_valid", "logger_state",
+    "failsafe_reason", "manual_rearm_pending", "propulsion_feedback_status",
 ]
 
 ROUTE_METRIC_FIELDS = [
@@ -303,9 +304,10 @@ class Logger:
             return
         safety = self.cache.get("safety", {}); actuator = self.cache.get("actuator", {})
         if safety.get("mode") != "GROUND_TEST" or bool(safety.get("ground_test_actuation_enabled")) != self.actuation_enabled:
-            self.last_error = "ground-test safety mode or actuation acknowledgement lost"
-            self._write_jsonl("events", {"type": "LOGGER_FORCED_STOP", "event_time_utc": utc_now(),
-                                         "error": self.last_error})
+            normal_stop = safety.get("mode") == "MANUAL" and not safety.get("reason")
+            self.last_error = "" if normal_stop else str(safety.get("reason") or "ground-test safety mode or actuation acknowledgement lost")
+            self._write_jsonl("events", {"type": "GROUND_TEST_STOPPED_BY_MODE" if normal_stop else "LOGGER_FORCED_STOP", "event_time_utc": utc_now(),
+                                         "error": self.last_error, "safety": safety})
             self.close(error=self.last_error); return
         steering = actuator.get("actual_steering_pwm"); throttle = actuator.get("actual_throttle_pwm")
         confirmed = (actuator.get("command_applied") is True and steering is not None and throttle is not None and
@@ -373,6 +375,9 @@ class Logger:
             "throttle_locked": safety.get("throttle_locked"),
             "steering_test_enabled": safety.get("steering_test_enabled"),
             "manual_intervention": safety.get("effective_source") in {"MANUAL", "REMOTE"},
+            "failsafe_reason": safety.get("reason"),
+            "manual_rearm_pending": safety.get("manual_rearm_pending"),
+            "propulsion_feedback_status": safety.get("propulsion_feedback_status") or "unsupported",
             "estop": safety.get("estop"), "navigation_valid": nav.get("valid"), "logger_state": self.state,
         }
         self.writer.writerow(row); self.files["csv"].flush(); self._write_jsonl("jsonl", row)

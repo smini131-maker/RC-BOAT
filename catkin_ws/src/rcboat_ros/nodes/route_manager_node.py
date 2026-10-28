@@ -134,7 +134,7 @@ class Node:
                     if self.rm.event:self.events.publish(pack(**self.rm.event))
                 except Exception as e:rospy.logerr('route update %s',e)
             recording=self.rm.recording
-            data={'selected_route_id':self.rm.selected,'active_route_id':self.rm.active,
+            data={'monotonic':time.monotonic(),'selected_route_id':self.rm.selected,'active_route_id':self.rm.active,
                   'group_routes':list(self.rm.group()),'test_route_ids':list(self.rm.test_route_ids),
                   'selected_multipath_id':self.rm.selected_multipath,
                   'execution_target_type':'multipath' if self.rm.multipath_enabled else 'single_route',

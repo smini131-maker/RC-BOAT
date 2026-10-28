@@ -2,17 +2,21 @@
 """All commands arbitrate here; ground-test actuation requires explicit opt-in."""
 import json
 import time
+import threading
 import rospy
 from std_msgs.msg import String
 from rcboat_ros.msg import ControlCommand
 from rcboat_ros.srv import Execute,ExecuteResponse
-from rcboat_ros.common import unpack,pack,clamp,lerp,fresh,SAFE_STEERING,SAFE_THROTTLE
+from rcboat_ros.common import unpack,pack,clamp,lerp,fresh,SAFE_STEERING,SAFE_THROTTLE,gps_is_healthy
+from rcboat_ros.failsafe import ProgressMonitor
 
 MODES={'AUTO_SAFE','AUTO','MANUAL','REMOTE','NAVIGATION','GROUND_TEST'}
 
 class Supervisor:
     def __init__(self):
         self.mode='AUTO_SAFE';self.armed=False;self.estop=False
+        self.lock=threading.RLock();self.reason='';self.link={};self.actuator={};self.propulsion={}
+        self.progress=ProgressMonitor();self.mode_since=time.monotonic()
         self.ground_test_actuation_enabled=False
         self.gps={};self.rc={};self.nav={};self.remote={};self.remote_stamp=0
         self.auto_gesture_since=None;self.manual_gesture_since=None;self.manual_rearm_since=None;self.manual_rearm_pending=False
@@ -22,29 +26,45 @@ class Supervisor:
         rospy.Subscriber('/rcboat/gps/status',String,lambda m:setattr(self,'gps',unpack(m)))
         rospy.Subscriber('/rcboat/rc/input',String,lambda m:setattr(self,'rc',unpack(m)))
         rospy.Subscriber('/rcboat/navigation/desired',String,lambda m:setattr(self,'nav',unpack(m)))
+        rospy.Subscriber('/rcboat/gui/link',String,lambda m:setattr(self,'link',unpack(m)))
+        rospy.Subscriber('/rcboat/actuator/status',String,lambda m:setattr(self,'actuator',unpack(m)))
+        rospy.Subscriber('/rcboat/propulsion/status',String,lambda m:setattr(self,'propulsion',unpack(m)))
         rospy.Service('/rcboat/safety/execute',Execute,self.execute)
     def execute(self,req):
+        with self.lock:return self._execute(req)
+
+    def _execute(self,req):
         try:
             args=json.loads(req.arguments_json or '{}')
             if not isinstance(args,dict):raise ValueError('request must be JSON object')
             if req.action=='estop':
-                self.estop=True;self.mode='AUTO_SAFE';self.armed=False
-                self.ground_test_actuation_enabled=False
+                self.estop=True;self._manual('EMERGENCY_STOP')
                 self.events.publish(pack(type='ESTOP',at=time.time()))
             elif req.action=='reset_estop':
                 # Requires physical-safe mode; reset never restores navigation automatically.
-                if self.mode!='AUTO_SAFE':raise ValueError('must first select AUTO_SAFE')
+                if self.mode not in ('MANUAL','AUTO_SAFE'):raise ValueError('select MANUAL first')
                 self.estop=False;self.armed=False
+                self._manual('ESTOP_CLEARED_NEUTRAL_REQUIRED')
             elif req.action=='set_mode':
                 mode=str(args['mode'])
                 if mode not in MODES:raise ValueError('unknown mode')
-                if self.estop and mode!='AUTO_SAFE':raise ValueError('E-STOP latched')
-                self.mode=mode
+                if self.estop and mode not in ('AUTO_SAFE','MANUAL'):raise ValueError('E-STOP latched')
+                if mode in ('AUTO','NAVIGATION','REMOTE','GROUND_TEST'):
+                    reason=self._link_fault(time.monotonic())
+                    if reason:raise ValueError(reason)
+                if mode in ('AUTO','NAVIGATION','REMOTE','GROUND_TEST'):
+                    if not self.gps.get('healthy') or not gps_is_healthy(self.gps,time.monotonic(),2.0):
+                        raise ValueError('GPS_INVALID_OR_STALE')
+                if mode in ('NAVIGATION','GROUND_TEST'):
+                    reason=self._navigation_fault(time.monotonic())
+                    if reason:raise ValueError(reason)
+                self.mode=mode;self.mode_since=time.monotonic();self.reason='';self.progress.reset()
                 self.ground_test_actuation_enabled=(
                     mode=='GROUND_TEST' and bool(args.get('ground_test_actuation_enabled',False))
                 )
                 self.auto_gesture_since=None;self.manual_gesture_since=None
-                self.manual_rearm_pending=False
+                self.manual_rearm_pending=mode=='MANUAL'
+                self.manual_rearm_since=None
                 self.armed=bool(args.get('armed',False)) if mode=='NAVIGATION' else False
                 if mode=='REMOTE':self.remote_stamp=0
                 self.events.publish(pack(type='MODE_CHANGED',mode=mode,at=time.time()))
@@ -64,6 +84,7 @@ class Supervisor:
     def _gestures(self,now):
         if self.estop or not fresh(float(self.rc.get('monotonic',0)),.75,now):
             self.auto_gesture_since=self.manual_gesture_since=self.manual_rearm_since=None
+            if self.mode=='MANUAL':self.manual_rearm_pending=True
             return
         steer=int(self.rc['steering_us']);throttle=int(self.rc['throttle_us'])
         if self.mode=='MANUAL' and steer>=1950 and abs(throttle-1500)<=30:
@@ -72,7 +93,7 @@ class Supervisor:
                 self.mode='AUTO_SAFE';self.armed=False;self.auto_gesture_since=None
                 self.events.publish(pack(type='RC_GESTURE_AUTO_SAFE',at=time.time()))
         else:self.auto_gesture_since=None
-        if self.mode in ('AUTO_SAFE','AUTO','NAVIGATION','REMOTE') and throttle>=1850:
+        if self.mode in ('AUTO_SAFE','AUTO','NAVIGATION','REMOTE','GROUND_TEST') and throttle>=1850:
             if self.manual_gesture_since is None:self.manual_gesture_since=now
             elif now-self.manual_gesture_since>=.5:
                 self.mode='MANUAL';self.armed=False;self.manual_rearm_pending=True
@@ -86,8 +107,61 @@ class Supervisor:
                     self.manual_rearm_pending=False;self.manual_rearm_since=None
                     self.events.publish(pack(type='RC_MANUAL_ARMED',at=time.time()))
             else:self.manual_rearm_since=None
+    def _manual(self,reason):
+        previous=self.mode
+        self.mode='MANUAL';self.armed=False;self.reason=reason
+        self.ground_test_actuation_enabled=False
+        self.manual_rearm_pending=True;self.manual_rearm_since=None
+        self.auto_gesture_since=self.manual_gesture_since=None
+        self.progress.reset()
+        self.events.publish(pack(type='FAILSAFE_MANUAL',reason=reason,previous_mode=previous,
+                                 mode='MANUAL',at=time.time(),monotonic=time.monotonic()))
+
+    def _link_fault(self,now):
+        if not fresh(float(self.link.get('monotonic') or 0),5.0,now):return 'GUI_LINK_TIMEOUT'
+        if not self.link.get('ssh_connected'):return 'SSH_DISCONNECTED'
+        return ''
+
+    def _navigation_fault(self,now):
+        if not self.gps.get('healthy') or not gps_is_healthy(self.gps,now,2.0):return 'GPS_INVALID_OR_STALE'
+        if not fresh(float(self.nav.get('monotonic') or 0),.75,now):return 'NAVIGATION_TIMEOUT'
+        if not fresh(float(self.nav.get('route_monotonic') or 0),1.0,now):return 'ROUTE_TIMEOUT'
+        if self.nav.get('route_complete'):return 'TARGET_ARRIVED'
+        if not self.nav.get('valid'):return 'NAVIGATION_INVALID'
+        return ''
+
+    def _fault(self,now):
+        reason=self._link_fault(now)
+        if reason:return reason
+        if not fresh(float(self.rc.get('monotonic') or 0),.75,now):return 'RC_INPUT_LOST'
+        if not self.gps.get('healthy') or not gps_is_healthy(self.gps,now,2.0):return 'GPS_INVALID_OR_STALE'
+        if self.mode in ('NAVIGATION','GROUND_TEST'):
+            reason=self._navigation_fault(now)
+            if reason:return reason
+        if self.propulsion.get('fault') or self.propulsion.get('blocked'):
+            return 'PROPULSION_FAULT'
+        if self.actuator.get('command_applied') is False:return 'ACTUATOR_ERROR'
+        if now-self.mode_since>1.5 and not fresh(float(self.actuator.get('monotonic') or 0),1.0,now):
+            return 'ACTUATOR_TIMEOUT'
+        throttle=(int(rospy.get_param('/rcboat/cruise_pwm',6650)) if self.mode=='AUTO'
+                  else int(self.nav.get('desired_throttle_pwm') or 6450))
+        if self.progress.update(now,self.gps,throttle,
+                enabled=self.mode in ('AUTO','NAVIGATION') and bool(self.gps.get('healthy')) and
+                       bool(rospy.get_param('/rcboat/no_progress_enabled',True)),
+                timeout=float(rospy.get_param('/rcboat/no_progress_timeout_s',15.0))):
+            return 'PROPULSION_NO_PROGRESS_SUSPECTED'
+        return ''
+
     def _command(self):
+        with self.lock:return self._command_locked()
+
+    def _command_locked(self):
         now=time.monotonic();source='AUTO_SAFE';s=SAFE_STEERING;t=SAFE_THROTTLE;lock=True
+        if self.mode in ('AUTO','NAVIGATION','REMOTE','GROUND_TEST'):
+            reason=self._fault(now)
+            if reason:
+                self._manual(reason)
+                return 'FAILSAFE_MANUAL',s,t,True
         self._gestures(now)
         # GPS hard faults must lock autonomous navigation, not physically safe manual takeover.
         if self.estop:return 'ESTOP',s,t,True
@@ -113,7 +187,7 @@ class Supervisor:
         elif self.mode=='REMOTE':
             if fresh(self.remote_stamp,float(rospy.get_param('/rcboat/remote_heartbeat_s',.7)),now):
                 s=self.remote['steering_pwm'];t=self.remote['throttle_pwm'];source='REMOTE';lock=False
-            else:self.mode='AUTO_SAFE';self.events.publish(pack(type='REMOTE_TIMEOUT',at=time.time()))
+            else:self._manual('REMOTE_TIMEOUT')
         elif self.mode=='NAVIGATION' and self.armed:
             if self.gps.get('healthy') and self.nav.get('valid') and fresh(float(self.nav.get('monotonic',0)),.75,now):
                 s=int(self.nav['desired_steering_pwm']);t=int(self.nav['desired_throttle_pwm']);source='NAVIGATION';lock=False
@@ -121,15 +195,19 @@ class Supervisor:
     def run(self):
         rate=rospy.Rate(10)
         while not rospy.is_shutdown():
-            source,s,t,lock=self._command()
-            msg=ControlCommand()
-            msg.header.stamp=rospy.Time.now();msg.mode=self.mode;msg.source=source
-            msg.steering_pwm=int(s);msg.throttle_pwm=int(t);msg.actuator_locked=lock
-            self.cmd.publish(msg)
-            self.state.publish(pack(mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
-                                    ground_test_actuation_enabled=self.ground_test_actuation_enabled,
-                                    throttle_locked=lock,
-                                    steering_test_enabled=self.mode=='GROUND_TEST' and source=='GROUND_TEST_NAVIGATION',
-                                    effective_source=source,steering_pwm=s,throttle_pwm=t))
+            with self.lock:
+                source,s,t,lock=self._command()
+                msg=ControlCommand()
+                msg.header.stamp=rospy.Time.now();msg.mode=self.mode;msg.source=source
+                msg.steering_pwm=int(s);msg.throttle_pwm=int(t);msg.actuator_locked=lock
+                self.cmd.publish(msg)
+                self.state.publish(pack(mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
+                                        ground_test_actuation_enabled=self.ground_test_actuation_enabled,
+                                        reason=self.reason,manual_rearm_pending=self.manual_rearm_pending,
+                                        rc_fresh=fresh(float(self.rc.get('monotonic') or 0),.75),
+                                        propulsion_feedback_status='fault' if self.propulsion.get('fault') or self.propulsion.get('blocked') else 'available' if self.propulsion else 'unsupported',
+                                        throttle_locked=lock,
+                                        steering_test_enabled=self.mode=='GROUND_TEST' and source=='GROUND_TEST_NAVIGATION',
+                                        effective_source=source,steering_pwm=s,throttle_pwm=t))
             rate.sleep()
 if __name__=='__main__':rospy.init_node('safety_supervisor_node');Supervisor().run()
