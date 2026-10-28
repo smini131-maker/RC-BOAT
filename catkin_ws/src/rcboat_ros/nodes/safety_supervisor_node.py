@@ -50,7 +50,7 @@ class Supervisor:
                 if mode not in MODES:raise ValueError('unknown mode')
                 if self.estop and mode not in ('AUTO_SAFE','MANUAL'):raise ValueError('E-STOP latched')
                 if mode in ('AUTO','NAVIGATION','REMOTE','GROUND_TEST'):
-                    reason=self._link_fault(time.monotonic())
+                    reason=self._link_fault(time.monotonic(),mode)
                     if reason:raise ValueError(reason)
                 if mode in ('AUTO','NAVIGATION','REMOTE','GROUND_TEST'):
                     if not self.gps.get('healthy') or not gps_is_healthy(self.gps,time.monotonic(),2.0):
@@ -115,11 +115,16 @@ class Supervisor:
         self.auto_gesture_since=self.manual_gesture_since=None
         self.progress.reset()
         self.events.publish(pack(type='FAILSAFE_MANUAL',reason=reason,previous_mode=previous,
-                                 mode='MANUAL',at=time.time(),monotonic=time.monotonic()))
+                                 mode='MANUAL',at=time.time(),monotonic=time.monotonic(),
+                                 gps_snapshot=dict(self.gps),navigation_snapshot=dict(self.nav),
+                                 link_snapshot=dict(self.link)))
 
-    def _link_fault(self,now):
+    def _link_fault(self,now,mode=None):
         if not fresh(float(self.link.get('monotonic') or 0),5.0,now):return 'GUI_LINK_TIMEOUT'
-        if not self.link.get('ssh_connected'):return 'SSH_DISCONNECTED'
+        # Walking tests use the ROS gateway lease. SSH is only a management
+        # channel; its loss must not interrupt an otherwise reachable test.
+        if (mode or self.mode)!='GROUND_TEST' and not self.link.get('ssh_connected'):
+            return 'SSH_DISCONNECTED'
         return ''
 
     def _navigation_fault(self,now):
@@ -201,7 +206,7 @@ class Supervisor:
                 msg.header.stamp=rospy.Time.now();msg.mode=self.mode;msg.source=source
                 msg.steering_pwm=int(s);msg.throttle_pwm=int(t);msg.actuator_locked=lock
                 self.cmd.publish(msg)
-                self.state.publish(pack(software_version="2.1.10",mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
+                self.state.publish(pack(software_version="2.1.11",mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
                                         ground_test_actuation_enabled=self.ground_test_actuation_enabled,
                                         reason=self.reason,manual_rearm_pending=self.manual_rearm_pending,
                                         rc_fresh=fresh(float(self.rc.get('monotonic') or 0),.75),

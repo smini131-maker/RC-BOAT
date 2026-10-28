@@ -16,7 +16,7 @@ import paramiko
 from PySide6.QtCore import QThread, Signal
 
 
-GUI_VERSION = "2.1.10"
+GUI_VERSION = "2.1.11"
 
 REMOTE_BRIDGE = r'''p=/home/jetson/rcboat_ros_ws/deployment/jetson/bridge_client.py
 [ -f "$p" ] && exec python3 "$p"
@@ -80,6 +80,7 @@ class SSHWorker(QThread):
         self._io_lock = threading.Lock()
         self._active_sockets = set()
         self._link_thread = None
+        self._ssh_health_thread = None
         self._host_key_event = threading.Event()
         self._host_key_accepted = False
         self._ssh_lock = threading.RLock()
@@ -202,7 +203,7 @@ class SSHWorker(QThread):
             "CANCEL_GPS_RECORDING": "record_cancel", "CONFIGURE_NTRIP": "configure",
             "SET_GPS_SETTINGS": "set_gps_settings", "START_GPS_LOGGING": "gps_log_start",
             "STOP_GPS_LOGGING": "gps_log_stop", "GROUND_TEST_START": "ground_start",
-            "GROUND_TEST_STOP": "ground_stop",
+            "GROUND_TEST_STOP": "ground_stop", "GROUND_TEST_RESUME": "ground_resume",
         }
         if command == "SET_MODE":
             mode = str(kwargs.get("mode", "AUTO")).upper()
@@ -315,7 +316,7 @@ class SSHWorker(QThread):
         }
         logger_state = str(ground.get("state") or ("recording" if ground.get("active") else "idle"))
         return {
-            "type": "telemetry", "software_version": response.get("version", "2.1.10"),
+            "type": "telemetry", "software_version": response.get("version", "2.1.11"),
             "backend": {"name": str(response.get("backend") or "ROS Noetic"),
                         "ready": bool(response.get("gateway_online", True)), "node_count": len(nodes),
                         "master_online": bool(response.get("master_online")),
@@ -372,6 +373,8 @@ class SSHWorker(QThread):
             "gps_logging": cache.get("gps_logging") or {"active": False, "samples": 0, "file_path": ""},
             "gps_recording": route.get("recording") or {"active": False, "point_count": 0},
             "ground_test": {"active": bool(ground.get("active")), "state": logger_state,
+                            "output_paused": bool(ground.get("output_paused")),
+                            "pause_reason": ground.get("pause_reason", ""),
                             "samples": ground.get("samples", 0), "error": ground.get("error", ""),
                             "folder": ground.get("folder", ""),
                             "actuator_locked": bool(safety.get("actuator_locked", True)),
@@ -424,7 +427,7 @@ class SSHWorker(QThread):
         ack = {"type": "ack", "request_id": request["request_id"],
                "command": command, "ok": False, "error": ""}
         try:
-            starts_motion = command == "GROUND_TEST_START" or (
+            starts_motion = command in {"GROUND_TEST_START", "GROUND_TEST_RESUME"} or (
                 command == "SET_MODE" and str(request.get("mode") or "").upper() in {"NAVIGATION", "REMOTE"})
             if starts_motion and self._backend_version != GUI_VERSION:
                 raise RuntimeError(f"Jetson v{self._backend_version or 'unknown'} / GUI v{GUI_VERSION}: 백엔드 업데이트 후 운항하세요")
@@ -494,7 +497,9 @@ class SSHWorker(QThread):
     def _operator_link_loop(self) -> None:
         while not self._stop_requested:
             try:
-                self._send_operator_link(self._update_ssh_health())
+                # Never wait for an SSH exec probe here: even a stalled SSH
+                # server must not delay the independent ROS safety lease.
+                self._send_operator_link(self._ssh_confirmed)
             except OSError:
                 pass  # The Jetson expires the lease independently.
             for _ in range(10):
@@ -505,6 +510,14 @@ class SSHWorker(QThread):
             self._send_operator_link(False)
         except OSError:
             pass
+
+    def _ssh_health_loop(self) -> None:
+        while not self._stop_requested:
+            self._update_ssh_health()
+            for _ in range(10):
+                if self._stop_requested:
+                    break
+                time.sleep(self.SSH_HEALTH_INTERVAL_S / 10)
 
     def run(self) -> None:
         reason="연결 작업 종료"
@@ -518,12 +531,15 @@ class SSHWorker(QThread):
             self._stop_requested=True
             self._close_ssh(reason,notify=False)
             if self._link_thread is not None:self._link_thread.join()
+            if self._ssh_health_thread is not None:self._ssh_health_thread.join()
             self.disconnected.emit(reason)
 
     def _run_connections(self) -> None:
         link_thread = threading.Thread(target=self._operator_link_loop, daemon=True)
         self._link_thread=link_thread
         link_thread.start()
+        self._ssh_health_thread = threading.Thread(target=self._ssh_health_loop, daemon=True)
+        self._ssh_health_thread.start()
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         self.connected.emit()
         self.log.emit("ROS gateway 직접 연결 시작 · SSH는 별도 관리 채널로 확인합니다")
@@ -621,7 +637,7 @@ class SSHWorker(QThread):
                         self._backend_error = ""
                     except Exception as exc:
                         message = str(exc)
-                        offline = {"success": True, "version": "2.1.10", "backend": "ROS Noetic",
+                        offline = {"success": True, "version": "2.1.11", "backend": "ROS Noetic",
                                    "master_online": False, "gateway_online": False, "telemetry": {}, "nodes": []}
                         self.telemetry.emit(self._normalize(offline, self._ssh_confirmed))
                         if message != self._backend_error or now - self._backend_error_at >= 15.0:
@@ -632,4 +648,5 @@ class SSHWorker(QThread):
             self._stop_requested = True
             self._close_ssh("SSH 터미널 연결 종료", notify=False)
             link_thread.join()
+            self._ssh_health_thread.join()
             self.terminal_state.emit(False, "SSH 터미널 연결 종료")

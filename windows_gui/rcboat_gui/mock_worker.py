@@ -75,7 +75,7 @@ class MockWorker(QThread):
         self.mode, self.operation_state = "MANUAL", "MANUAL_WAITING_NEUTRAL"
         self.steering, self.throttle = 6000, 6450
         self.failsafe_reason = reason
-        self.ground_test_active = self.ground_test_actuation_enabled = False
+        # Safety takeover stops test output, but the recording remains active.
 
     def stop(self) -> None:
         self._stop_requested = True
@@ -288,6 +288,13 @@ class MockWorker(QThread):
                 self.mode = "AUTO"
                 self.operation_state = "AUTO_SAFE"
                 self.steering, self.throttle = 6000, 6450
+            elif command == "GROUND_TEST_RESUME":
+                if not self.ground_test_active:
+                    raise ValueError("no active ground-test recording")
+                if self.estop or self.gps_scenario in {"NO_FIX", "GPS_STALE"}:
+                    raise ValueError("clear E-STOP and restore GPS before resuming")
+                self.mode = self.operation_state = "GROUND_TEST"
+                self.failsafe_reason = ""
             elif command == "DOWNLOAD_GROUND_RESULTS":
                 categories = list(kwargs.get("categories") or [])
                 if not categories:
@@ -362,7 +369,7 @@ class MockWorker(QThread):
                 self.gps_data_samples += 1
             if self.ground_test_active:
                 self.ground_test_samples += 1
-                if self.ground_test_actuation_enabled:
+                if self.ground_test_actuation_enabled and self.mode == "GROUND_TEST":
                     self.steering, self.throttle = 6000 + int(math.sin(t) * 500), self.auto_cruise_pwm
             selected = next(route for route in self.routes if route["id"] == self.selected_route_id)
             active = next(route for route in self.routes if route["id"] == self.active_route_id)
@@ -388,6 +395,8 @@ class MockWorker(QThread):
                     "ntrip": dict(self.ntrip),
                     "gps_settings": {"baudrate": 115200, "health_stale_s": 2.0, "navigation_max_hdop": self.gps_max_hdop, "rtk_required_for_navigation": not self.rtk_fallback_to_gps, "rtk_fallback_to_gps": self.rtk_fallback_to_gps, "rtk_correction_max_age_s": 10.0},
                     "ground_test": {"active": self.ground_test_active,
+                                    "output_paused": self.ground_test_active and self.mode != "GROUND_TEST",
+                                    "pause_reason": self.failsafe_reason if self.mode != "GROUND_TEST" else "",
                                     "state": "recording" if self.ground_test_active else "idle",
                                     "samples": self.ground_test_samples,
                                     "actuator_locked": not self.ground_test_actuation_enabled,

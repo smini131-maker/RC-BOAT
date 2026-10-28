@@ -20,7 +20,7 @@ from rcboat_ros.common import pack, unpack
 from rcboat_ros.corrections import refresh_transport_status,refresh_receiver_status
 
 
-VERSION = "2.1.10"
+VERSION = "2.1.11"
 SOCKET = os.path.expanduser("~/rcboat_ros_data/gui_bridge.sock")
 TOPICS = {
     "gps": "/rcboat/gps/status", "ntrip": "/rcboat/ntrip/status", "route": "/rcboat/route/state",
@@ -119,6 +119,8 @@ class Bridge:
         return detail
 
     def ground_start(self, args):
+        if self.cache.get("ground_test", {}).get("active"):
+            raise ValueError("ground test already recording; use resume or stop")
         target_type=str(args.get("target_type") or "multipath")
         target_id=str(args.get("target_id") or "")
         actuation_enabled=bool(args.get("actuation_enabled",False))
@@ -162,6 +164,19 @@ class Bridge:
             finally: self.service("/rcboat/route/execute", "set_test_route_set", {"route_ids": []})
             raise
 
+    def ground_resume(self):
+        ground = self.cache.get("ground_test", {})
+        if not ground.get("active"):
+            raise ValueError("no active ground-test recording")
+        # Do not reselect/restart the route or logger: elapsed time, frozen
+        # reference routes and samples stay in the original test folder.
+        result = self.service("/rcboat/safety/execute", "set_mode", {
+            "mode": "GROUND_TEST",
+            "ground_test_actuation_enabled": bool(ground.get("actuation_enabled"))})
+        self.events.publish(pack(type="GROUND_TEST_RESUME_REQUESTED", at=time.time(),
+                                 folder=ground.get("folder")))
+        return result
+
     def ground_stop(self):
         errors = []; result = {}
         # Stop propulsion before flushing/exporting potentially large logs.
@@ -204,6 +219,7 @@ class Bridge:
         if command == "list_ground_tests": return {"success": True, "response": {"ground_tests": self.tests()}}
         if command == "download_ground_test": return {"success": True, "response": self.download_test(args.get("test_id"))}
         if command == "ground_start": return {"success": True, "response": self.ground_start(args)}
+        if command == "ground_resume": return {"success": True, "response": self.ground_resume()}
         if command == "ground_stop": return {"success": True, "response": self.ground_stop()}
         if command == "set_gps_settings":
             if "navigation_max_hdop" in args: rospy.set_param("/rcboat/max_hdop", float(args["navigation_max_hdop"]))

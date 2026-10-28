@@ -48,7 +48,7 @@ from .ssh_worker import SSHWorker
 from .widgets import MetricCard, RoutePlot, StatusCard, TelemetryGraph
 
 
-APP_VERSION = "2.1.10"
+APP_VERSION = "2.1.11"
 
 
 STYLE = """
@@ -780,15 +780,19 @@ class MainWindow(QMainWindow):
         self.ground_stop_button.setIcon(self.style().standardIcon(QStyle.SP_MediaStop))
         self.ground_stop_button.setObjectName("safe")
         self.ground_stop_button.clicked.connect(lambda: self.command("GROUND_TEST_STOP"))
+        self.ground_resume_button = QPushButton("출력 재개 · 기록 유지")
+        self.ground_resume_button.setEnabled(False)
+        self.ground_resume_button.clicked.connect(self.resume_ground_test)
         self.ground_download_button = QPushButton("선택 결과 다운로드")
         self.ground_download_button.setIcon(self.style().standardIcon(QStyle.SP_DialogSaveButton))
         self.ground_download_button.clicked.connect(self.download_ground_results)
         self.ground_status = QLabel("도보 테스트 대기 · 출력 활성화는 매 시험마다 확인 필요")
         controls.addWidget(self.ground_start_button)
         controls.addWidget(self.ground_stop_button)
+        controls.addWidget(self.ground_resume_button)
         controls.addWidget(self.ground_download_button)
         controls.addStretch(1)
-        controls.addWidget(self.ground_status)
+        self.ground_status.setWordWrap(True)
         download_group = QGroupBox("완료된 시험 ZIP 가져오기")
         download_grid = QGridLayout(download_group)
         self.ground_test_combo = QComboBox(); self.ground_test_combo.addItem("최신 완료 시험", "")
@@ -819,6 +823,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(route_set_box)
         layout.addWidget(self.ground_actuation_enabled)
         layout.addLayout(controls)
+        layout.addWidget(self.ground_status)
         layout.addWidget(download_group)
         layout.addWidget(self.ground_download_hint)
         layout.addStretch(1)
@@ -1724,6 +1729,16 @@ class MainWindow(QMainWindow):
             # confirmed again for every new ground test.
             self.ground_actuation_enabled.setChecked(False)
 
+    def resume_ground_test(self) -> None:
+        answer = QMessageBox.warning(
+            self, "도보 테스트 출력 재개",
+            "GPS·통신 복구와 프로펠러 제거 상태를 확인하세요.\n"
+            "기존 시험 폴더에 기록을 이어가며, 처음 선택한 출력 설정으로 재개합니다.\n"
+            "출력 활성 시험이었다면 조향·스로틀이 다시 움직입니다.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if answer == QMessageBox.Yes:
+            self.command("GROUND_TEST_RESUME")
+
     def download_ground_results(self) -> None:
         categories = self._selected_ground_download_categories()
         if not categories:
@@ -2413,11 +2428,20 @@ class MainWindow(QMainWindow):
         ground = state.get("ground_test") or {}
         ground_active = bool(ground.get("active"))
         ground_actuation = bool(ground.get("actuation_enabled"))
+        ground_paused = bool(ground.get("output_paused"))
+        pause_reason = str(ground.get("pause_reason") or "")
+        previous_pause = getattr(self, "_ground_pause_notice", None)
+        current_pause = (ground_active, ground_paused, pause_reason)
+        if current_pause != previous_pause and ground_active:
+            self.log(f"도보 테스트: {'출력 중단 · 기록 계속 · ' + pause_reason if ground_paused else '시험 출력/기록 진행 중'}")
+        self._ground_pause_notice = current_pause
         self.ground_status.setText(
-            f"도보 테스트 중 · {int(ground.get('samples') or 0)} samples · "
-            f"{'자동주행 조향/스로틀 실제 출력' if ground_actuation else '중립 출력 잠금'}"
-            if ground_active else "도보 테스트 대기 · 출력 활성화는 매 시험마다 확인 필요"
+            (f"기록 계속 · {int(ground.get('samples') or 0)} samples · "
+             + (f"시험 출력 중단: {pause_reason} · 복구 후 출력 재개 버튼" if ground_paused else
+                "자동주행 조향/스로틀 실제 출력" if ground_actuation else "중립 출력 잠금"))
+            if ground_active else "도보 테스트 대기 · " + str(ground.get("error") or "출력 활성화는 매 시험마다 확인 필요")
         )
+        self.ground_resume_button.setEnabled(ground_active and ground_paused)
         self.ground_start_button.setEnabled(not ground_active)
         self.ground_stop_button.setEnabled(ground_active)
         self.ground_download_button.setEnabled(not ground_active)

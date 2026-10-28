@@ -8,16 +8,17 @@ import os
 import pathlib
 import shutil
 import time
+import threading
 
 import rospy
 from std_msgs.msg import String
 from rcboat_ros.srv import Execute, ExecuteResponse
 from rcboat_ros.corrections import refresh_transport_status,refresh_receiver_status
-from rcboat_ros.common import pack, unpack
+from rcboat_ros.common import pack, unpack, gps_is_healthy
 from rcboat_ros.geo import enrich_waypoints
 
 
-VERSION = "2.1.10"
+VERSION = "2.1.11"
 CSV_FIELDS = [
     "sample_index", "sample_time_epoch_s", "logger_time_utc", "measurement_time_utc", "gps_received_time_utc",
     "output_time_utc", "elapsed_time_s", "latitude", "longitude", "utm_easting_m",
@@ -38,6 +39,8 @@ CSV_FIELDS = [
     "output_locked", "ground_test_actuation_enabled", "throttle_locked", "steering_test_enabled",
     "manual_intervention", "estop", "navigation_valid", "logger_state",
     "failsafe_reason", "manual_rearm_pending", "propulsion_feedback_status",
+    "test_output_paused", "test_pause_reason",
+    "ssh_connected", "ros_link_age_s", "output_confirmation_valid",
 ]
 
 ROUTE_METRIC_FIELDS = [
@@ -63,6 +66,10 @@ def json_dump(path, value):
 class Logger:
     def __init__(self):
         self.cache = {}
+        self.lock = threading.RLock()
+        self.output_paused = False
+        self.pause_reason = ""
+        self.output_pause_count = 0
         self.folder = None
         self.files = {}
         self.writer = None
@@ -85,6 +92,7 @@ class Logger:
             ("/rcboat/route/state", "route"), ("/rcboat/safety/state", "safety"),
             ("/rcboat/actuator/status", "actuator"), ("/rcboat/ntrip/status", "ntrip"),
             ("/rcboat/rc/input", "rc"),
+            ("/rcboat/gui/link", "link"),
         ]:
             rospy.Subscriber(topic, String, lambda message, name=key: self.cache.__setitem__(name, unpack(message)))
         rospy.Subscriber("/rcboat/events", String, self.on_event)
@@ -128,6 +136,7 @@ class Logger:
         self.pub.publish(pack(state=self.state, active=self.state == "recording",
                               folder=str(self.folder or ""), samples=self.count, error=self.last_error,
                               test_route_ids=self.test_route_ids,
+                              output_paused=self.output_paused, pause_reason=self.pause_reason,
                               actuation_enabled=self.actuation_enabled))
 
     def _write_jsonl(self, key, value):
@@ -137,6 +146,10 @@ class Logger:
             handle.flush()
 
     def on_event(self, message):
+        with self.lock:
+            self._on_event(message)
+
+    def _on_event(self, message):
         event = unpack(message)
         event.setdefault("event_time_utc", utc_now())
         event["elapsed_time_s"] = round(time.monotonic() - self.start_clock, 3) if self.folder else None
@@ -147,6 +160,10 @@ class Logger:
             self._write_jsonl("route_changes", snapshot)
 
     def execute(self, request):
+        with self.lock:
+            return self._execute(request)
+
+    def _execute(self, request):
         try:
             args = json.loads(request.arguments_json or "{}")
             if request.action == "start":
@@ -189,6 +206,8 @@ class Logger:
         return selected
 
     def start(self, route_ids, target_type="single_route", target_id="", actuation_enabled=False):
+        self.output_paused = False; self.pause_reason = ""
+        self.output_pause_count = 0
         safety = self.cache.get("safety", {})
         actuator = self.cache.get("actuator", {})
         gps = self.cache.get("gps", {})
@@ -302,27 +321,42 @@ class Logger:
         self.publish_status()
 
     def sample(self):
+        with self.lock:
+            self._sample()
+
+    def _sample(self):
         if not self.folder:
             return
         safety = self.cache.get("safety", {}); actuator = self.cache.get("actuator", {})
+        pause_reason = ""
         if safety.get("mode") != "GROUND_TEST" or bool(safety.get("ground_test_actuation_enabled")) != self.actuation_enabled:
-            normal_stop = safety.get("mode") == "MANUAL" and not safety.get("reason")
-            self.last_error = "" if normal_stop else str(safety.get("reason") or "ground-test safety mode or actuation acknowledgement lost")
-            self._write_jsonl("events", {"type": "GROUND_TEST_STOPPED_BY_MODE" if normal_stop else "LOGGER_FORCED_STOP", "event_time_utc": utc_now(),
-                                         "error": self.last_error, "safety": safety})
-            self.close(error=self.last_error); return
+            pause_reason = str(safety.get("reason") or "GROUND_TEST_MODE_INACTIVE")
         steering = actuator.get("actual_steering_pwm"); throttle = actuator.get("actual_throttle_pwm")
         confirmed = (actuator.get("command_applied") is True and steering is not None and throttle is not None and
                      4900 <= int(steering) <= 7300 and 5800 <= int(throttle) <= 7000 and
                      0 <= time.monotonic() - float(actuator.get("monotonic") or 0) <= 1.0)
-        if confirmed and not self.actuation_enabled:
+        if confirmed and not self.actuation_enabled and not pause_reason:
             confirmed = int(steering) == 6000 and int(throttle) == 6450
         if not confirmed:
-            self.last_error = "actuator confirmation lost, invalid or stale"
-            self._write_jsonl("events", {"type": "OUTPUT_ERROR", "event_time_utc": utc_now(),
-                                         "error": self.last_error})
-            self.close(error=self.last_error); return
+            pause_reason = pause_reason or "ACTUATOR_CONFIRMATION_LOST"
+        paused = bool(pause_reason)
+        if (paused, pause_reason) != (self.output_paused, self.pause_reason):
+            if paused and not self.output_paused:
+                self.output_pause_count += 1
+            self._write_jsonl("events", {
+                "type": "GROUND_TEST_OUTPUT_PAUSED" if paused else "GROUND_TEST_OUTPUT_RESUMED",
+                "event_time_utc": utc_now(), "elapsed_time_s": round(time.monotonic()-self.start_clock,3),
+                "reason": pause_reason, "safety": dict(safety), "actuator": dict(actuator)})
+        self.output_paused = paused; self.pause_reason = pause_reason
         gps = refresh_receiver_status(self.cache.get("gps", {}),time.monotonic()); nav = self.cache.get("nav", {}); route = self.cache.get("route", {})
+        now = time.monotonic()
+        gps["healthy"] = gps_is_healthy(gps, now, 2.0)
+        update = float(gps.get("last_update_monotonic") or 0)
+        gps["gps_data_age_s"] = round(now-update,3) if update and now>=update else None
+        if not gps["healthy"]:
+            gps["data_validity"] = "stale" if gps.get("fix") else "invalid"
+        link = self.cache.get("link", {})
+        link_stamp = float(link.get("monotonic") or 0)
         ntrip = refresh_transport_status(self.cache.get("ntrip", {}),time.monotonic())
         self.count += 1
         sample_utc = utc_now(); elapsed = round(time.monotonic() - self.start_clock, 3)
@@ -382,6 +416,10 @@ class Logger:
             "steering_test_enabled": safety.get("steering_test_enabled"),
             "manual_intervention": safety.get("effective_source") in {"MANUAL", "REMOTE"},
             "failsafe_reason": safety.get("reason"),
+            "test_output_paused": self.output_paused, "test_pause_reason": self.pause_reason,
+            "ssh_connected": link.get("ssh_connected"),
+            "ros_link_age_s": round(now-link_stamp,3) if link_stamp and now>=link_stamp else None,
+            "output_confirmation_valid": confirmed,
             "manual_rearm_pending": safety.get("manual_rearm_pending"),
             "propulsion_feedback_status": safety.get("propulsion_feedback_status") or "unsupported",
             "estop": safety.get("estop"), "navigation_valid": nav.get("valid"), "logger_state": self.state,
@@ -420,6 +458,10 @@ class Logger:
         return round((value - center) * 45.0 / span, 4) if span else None
 
     def close(self, error=""):
+        with self.lock:
+            self._close(error)
+
+    def _close(self, error=""):
         if not self.folder:
             return
         folder = self.folder; self.state = "stopping"; self.publish_status()
@@ -433,13 +475,16 @@ class Logger:
         try:
             metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
             metadata.update(stopped_at_utc=utc_now(), sample_count=self.count,
+                            output_pause_count=self.output_pause_count,
+                            had_output_interruptions=self.output_pause_count > 0,
                             final_state="error" if error else "complete", error=error or None)
             json_dump(metadata_path, metadata)
             self._manifest(folder)
             self.state = "error" if error else "idle"; self.last_error = error
         except Exception as exc:
             self.state = "error"; self.last_error = str(exc)
-        self.folder = None; self.actuation_enabled = False; self.publish_status()
+        self.folder = None; self.actuation_enabled = False
+        self.output_paused = False; self.pause_reason = ""; self.publish_status()
 
     def run(self):
         rate = rospy.Rate(rospy.get_param("/rcboat/log_rate_hz", 4.0))

@@ -1,0 +1,91 @@
+﻿RC BOAT ROS Noetic v2.1.11 — 카메라 없는 정식 버전
+Jetson IP: 10.227.56.215
+
+[실제 중단 원인]
+ground_test_20261028_053820/events.jsonl 확인:
+13:38:20.986 시험 시작 → 13:38:30.230 GPS_INVALID_OR_STALE 안전 수동 전환 →
+13:38:30.311 LOGGER_FORCED_STOP, 37 samples로 종료.
+사용자가 제시한 SSH 지연/회복(13:39:21~23)은 이보다 뒤입니다.
+기존 기록만으로 GPS FIX 소실/유효 위치 갱신 지연 중 어느 원인인지 더 세분할 수 없습니다.
+v2.1.11부터 안전 전환 이벤트에 원본 GPS/항법/링크 snapshot도 기록합니다.
+
+[바뀐 동작]
+- 도보 테스트에서 SSH 관리 채널만 끊겨도 ROS gateway heartbeat가 살아 있으면 시험 계속.
+- SSH 상태 점검과 ROS heartbeat 전송을 별도 스레드로 분리.
+- GPS 무효/유효 위치 2초 이상 갱신 중단, E-STOP, RC/항법/출력 오류,
+  목표 도착, GUI/네트워크 heartbeat 5초 소실은 안전 수동 전환.
+- 안전 수동 전환 후에도 logger는 recording을 유지. 오래된 GPS를 정상 데이터로 만들지 않음.
+- 중단/복구 시각, 원인, 출력/수동 상태를 같은 CSV/JSONL에 기록.
+- GPS/통신 복구 후 '출력 재개 · 기록 유지'를 눌러 사용자 확인 후 이어감.
+  자동 출력 재개 없음. 목표 도착이나 E-STOP이 남아 있으면 재개 거부.
+- 수동 전환 후 조종기 중립 확인을 거치면 수동 조종이 가능하며 해당 구간도 기록됨.
+- '도보 테스트 종료'로 출력 안전 전환, 로그 마감, ZIP 다운로드 가능.
+- 일반 자동/항법/원격 운항의 SSH 단절 시 수동 전환 동작은 유지.
+
+[1. 적용 전]
+추진 전원을 끄거나 프로펠러를 제거하고 구버전 Windows GUI를 종료합니다.
+Jetson의 다른 터미널에서 직접 roslaunch가 실행 중이면 해당 창에서 Ctrl+C로 종료합니다.
+기존 항로/로그/NTRIP 설정은 ~/rcboat_ros_data 에 보존합니다.
+
+[2. Windows PowerShell — 아래 순서대로]
+Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_Project"
+Test-NetConnection 10.227.56.215 -Port 22
+.\INSTALL_ROS.cmd -Destination "jetson@10.227.56.215"
+
+SSH 비밀번호와 sudo 비밀번호는 요청될 때 직접 입력합니다.
+INSTALL_ROS는 소스 전송, SHA-256 검증, ROS unit 정지, catkin 캐시 재생성/빌드,
+ROS unit 재시작, 실행 중 gateway 및 GPS/NTRIP/safety 버전 확인까지 수행합니다.
+'RUNNING GATEWAY VERIFIED: v2.1.11' 또는 v2.1.11 실행 검증 성공 출력을 확인합니다.
+DEPLOY_ROS만 실행하면 실행 중인 backend는 갱신되지 않습니다.
+
+같은 PowerShell에서 Windows GUI 실행:
+.\dist\RCBoatControl_ROS_v2.1.11.exe
+
+이미 EXE를 빌드했으므로 직접 빌드는 필요 없습니다. 소스를 다시 빌드할 때만:
+.\BUILD_ROS_GUI.cmd
+
+[3. Jetson SSH 안에서 확인할 명령 — 선택 진단]
+cd /home/jetson/rcboat_ros_ws
+cat VERSION
+source /opt/ros/noetic/setup.bash
+source /home/jetson/rcboat_ros_ws/catkin_ws/devel/setup.bash
+python3 deployment/jetson/verify_release.py --timeout 45
+bash deployment/jetson/check_ros.sh
+
+자동 실행 ROS unit을 사용하지 않고 직접 실행할 때만(중복 실행 금지):
+sudo systemctl stop rcboat_ros.service
+roslaunch rcboat_ros rcboat.launch
+
+[4. 도보 시험]
+1) GUI/ROS gateway 모두 v2.1.11, ROS master online 확인.
+2) GPS valid/RTK 상태 확인. RTK_FLOAT 전환만으로 중단하는 것은 아님.
+3) 도보 테스트 탭에서 기존 대루트 또는 단일 소루트 선택.
+4) 실제 조향/스로틀 출력 시험이면 프로펠러 제거 후 해당 체크 및 시작 확인.
+5) SSH 관리 채널만 종료되는 경우 ROS 연결과 logger recording이 유지되는지 확인.
+   GUI 전체 연결 해제 버튼은 heartbeat도 끊기므로 SSH만 끊는 시험이 아님.
+6) 안전 문제 발생 시 수동 전환 및 '시험 출력 중단: 원인 · 기록 계속' 표시 확인.
+7) 원인 복구 후 '출력 재개 · 기록 유지' 확인. samples와 경과시간이 이어져야 함.
+8) 목표 도착 시 수동 전환. 도보 테스트 종료로 마감 후 '선택 결과 다운로드'.
+9) 다운로드 ZIP의 events.jsonl, ground_test.csv에서 중단 전후를 비교.
+
+[5. 추가 분석 필드]
+ground_test.csv/jsonl:
+- test_output_paused / test_pause_reason: 시험 출력이 중단된 구간과 원인.
+- ssh_connected / ros_link_age_s: Jetson에 마지막 전달된 SSH 상태와 ROS heartbeat 경과.
+- output_confirmation_valid: 현재 출력 확인이 정상이고 최신인지 여부.
+- gps_healthy / gps_validity / gps_data_age_s: 오래된/무효 GPS 관측 구분.
+  위도·경도 숫자가 있어도 invalid/stale 구간은 새 위치 관측으로 해석하지 말 것.
+events.jsonl:
+- FAILSAFE_MANUAL: 안전 전환 시각, 원인, GPS/항법/연결 원본 snapshot.
+- GROUND_TEST_OUTPUT_PAUSED / RESUMED: 시험 출력 중단/재개 시각.
+- GROUND_TEST_RESUME_REQUESTED: 사용자가 ROS gateway로 재개한 기록.
+test_metadata.json:
+- output_pause_count / had_output_interruptions: 중단 횟수와 중단 포함 여부.
+  final_state=complete는 파일 마감 성공을 뜻하며 무중단 주행 성공을 뜻하지 않음.
+
+[6. 검증 범위]
+Windows에서 ROS stub을 이용해 실제 supervisor/logger 코드를 검증했습니다.
+GPS 오류 45초 동안 180회 추가 기록 후 같은 파일로 재개/마감/manifest 확인.
+SSH probe를 강제로 지연시켜도 ROS heartbeat 1초 주기가 유지되는 것을 확인.
+실물 Jetson의 catkin 빌드/설치는 위 INSTALL_ROS 명령 완료 후 확인해야 합니다.
+물리적 GPS 수신 불안정이나 Wi-Fi 자체의 장애를 제거하는 업데이트는 아닙니다.
