@@ -2,6 +2,12 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from rcboat_gui.runtime_logging import configure,install_qt_handler
+
+try:
+    LOG_DIRECTORY = configure()
+except (OSError,RuntimeError):
+    LOG_DIRECTORY = None  # A full/unwritable log directory must not prevent startup.
 
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
@@ -10,6 +16,7 @@ from rcboat_gui.main_window import MainWindow
 
 
 def main() -> int:
+    if LOG_DIRECTORY is not None:install_qt_handler()
     app = QApplication([sys.argv[0]] if "--smoke-test" in sys.argv else sys.argv)
     app.setApplicationName("RCBoatControl")
     app.setOrganizationName("AdventureDesign")

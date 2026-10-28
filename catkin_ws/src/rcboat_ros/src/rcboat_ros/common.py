@@ -5,6 +5,7 @@ import time
 
 SAFE_STEERING = 6000
 SAFE_THROTTLE = 6450
+PCA_OWNER_LOCK = '/tmp/rcboat_ros_pca_owner.lock'
 
 def pack(**kwargs):
     return json.dumps(kwargs, ensure_ascii=False, allow_nan=False, separators=(',', ':'))

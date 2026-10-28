@@ -4,11 +4,12 @@ import datetime as dt
 import html
 import json
 import math
+import logging
 import os
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QSettings, Qt
+from PySide6.QtCore import QEvent, QSettings, Qt, QTimer, Slot
 from PySide6.QtGui import QCloseEvent, QFontDatabase, QIcon, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
@@ -47,7 +48,7 @@ from .ssh_worker import SSHWorker
 from .widgets import MetricCard, RoutePlot, StatusCard, TelemetryGraph
 
 
-APP_VERSION = "2.1.9"
+APP_VERSION = "2.1.10"
 
 
 STYLE = """
@@ -100,6 +101,10 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(STYLE)
         self.settings = QSettings("AdventureDesign", "RCBoatControl")
         self.worker: SSHWorker | MockWorker | None = None
+        self._disconnecting = False
+        self._closing = False
+        self._gateway_online = False
+        self._ssh_online = False
         self.is_simulation = False
         self.last_event_timestamp = 0.0
         self.last_hardware_errors: tuple[str, ...] = ()
@@ -924,6 +929,7 @@ class MainWindow(QMainWindow):
         self.terminal_send.setEnabled(ready)
         self.terminal_interrupt.setEnabled(ready)
 
+    @Slot(str)
     def append_terminal_output(self, text: str) -> None:
         cursor = self.terminal_output.textCursor()
         cursor.movePosition(QTextCursor.End)
@@ -952,16 +958,17 @@ class MainWindow(QMainWindow):
             self.password.setText(stored)
             self.remember.setChecked(True)
 
+    @Slot(str)
     def log(self, text: str) -> None:
         stamp = dt.datetime.now().strftime("%H:%M:%S")
         self.logs.append(f"[{stamp}] {text}")
+        logging.getLogger("rcboat.gui").info("%s",text)
 
     def toggle_connection(self) -> None:
+        if self._disconnecting or self._closing:
+            return
         if self.worker and self.worker.isRunning():
-            self.worker.stop()
-            self.worker.wait(1500)
-            self.worker = None
-            self._set_connected(False)
+            self._request_worker_stop()
             return
         if self.simulation.isChecked():
             worker = MockWorker()
@@ -983,23 +990,29 @@ class MainWindow(QMainWindow):
                     QMessageBox.warning(self, "비밀번호 저장 실패", f"Windows 자격 증명 관리자에 저장하지 못했습니다: {exc}")
             else:
                 delete_password(self.host.text().strip(), self.username.text().strip())
-        worker.connected.connect(self.on_connected)
-        worker.disconnected.connect(self.on_disconnected)
-        worker.telemetry.connect(self.update_telemetry)
-        worker.acknowledgement.connect(self.on_ack)
-        worker.log.connect(self.log)
+        worker.setParent(self)
+        worker.finished.connect(self._on_worker_finished, Qt.QueuedConnection)
+        worker.connected.connect(self.on_connected, Qt.QueuedConnection)
+        worker.disconnected.connect(self.on_disconnected, Qt.QueuedConnection)
+        worker.telemetry.connect(self.update_telemetry, Qt.QueuedConnection)
+        worker.acknowledgement.connect(self.on_ack, Qt.QueuedConnection)
+        worker.log.connect(self.log, Qt.QueuedConnection)
         if isinstance(worker, SSHWorker):
-            worker.host_key_confirmation.connect(self.confirm_host_key)
-            worker.terminal_output.connect(self.append_terminal_output)
-            worker.terminal_state.connect(self.on_terminal_state)
+            worker.host_key_confirmation.connect(self.confirm_host_key, Qt.QueuedConnection)
+            worker.terminal_output.connect(self.append_terminal_output, Qt.QueuedConnection)
+            worker.terminal_state.connect(self.on_terminal_state, Qt.QueuedConnection)
         self.worker = worker
         self.connect_button.setText("연결 중...")
         self.connect_button.setEnabled(False)
         worker.start()
 
     def _set_connected(self, connected: bool) -> None:
-        self.connect_button.setEnabled(True)
-        self.connect_button.setText("연결 해제" if connected else "연결")
+        if not connected:
+            self._gateway_online = self._ssh_online = False
+            self.cards["ros_master"].set_value("offline",False)
+            self.cards["gps"].set_value("no_data",False)
+            self.cards["rtk"].set_value("no_data",False)
+        self._refresh_connection_button()
         self.simulation_badge.setVisible(connected and self.is_simulation)
         if connected and self.is_simulation:
             self.cards["ssh"].set_value("시뮬레이션", True)
@@ -1040,12 +1053,30 @@ class MainWindow(QMainWindow):
             )
             self._set_terminal_ready(False, message)
 
+    def _refresh_connection_button(self) -> None:
+        self.connect_button.setEnabled(not self._disconnecting and not self._closing)
+        if self._disconnecting:
+            text="연결 정리 중..."
+        elif self._closing:
+            text="종료 대기 중..."
+        elif self.worker is not None and self.worker.isRunning():
+            text="연결 해제" if self._gateway_online or self._ssh_online or self.is_simulation else "재연결 중 · 중지"
+        else:
+            text="연결"
+        self.connect_button.setText(text)
+
+    @Slot()
     def on_connected(self) -> None:
+        if self._disconnecting or self._closing:return
         self.password.clear()
         self._set_connected(True)
 
+    @Slot(bool,str)
     def on_terminal_state(self, ready: bool, message: str) -> None:
+        if self._disconnecting or self._closing:return
         self._set_terminal_ready(ready, message)
+        self._ssh_online = bool(ready)
+        self._refresh_connection_button()
         if not self.is_simulation:
             self.cards["ssh"].set_value("connected" if ready else "disconnected", ready)
         if ready:
@@ -1056,6 +1087,7 @@ class MainWindow(QMainWindow):
         elif message:
             self.append_terminal_output(f"\n--- {message} ---\n")
 
+    @Slot(str,str,str)
     def confirm_host_key(self, host: str, key_type: str, fingerprint: str) -> None:
         answer = QMessageBox.warning(
             self,
@@ -1069,6 +1101,7 @@ class MainWindow(QMainWindow):
         if isinstance(self.worker, SSHWorker):
             self.worker.respond_to_host_key(answer == QMessageBox.Yes)
 
+    @Slot(str)
     def on_disconnected(self, reason: str) -> None:
         self._release_remote_controls(send=False)
         self._pending_mode_request = None
@@ -1083,7 +1116,7 @@ class MainWindow(QMainWindow):
         self._set_connected(False)
 
     def command(self, command: str, **kwargs) -> str | None:
-        if not self.worker or not self.worker.isRunning():
+        if self._closing or self._disconnecting or not self.worker or not self.worker.isRunning():
             self.log("명령을 보내지 못했습니다: Jetson에 연결되어 있지 않습니다")
             return None
         return self.worker.send_command(command, **kwargs)
@@ -1339,7 +1372,7 @@ class MainWindow(QMainWindow):
     def _update_route_action_state(self) -> None:
         route = self._selected_route_payload()
         has_route = route is not None
-        connected = bool(self.worker and self.worker.isRunning())
+        connected = bool(self.worker and self.worker.isRunning() and not self._disconnecting and not self._closing)
         self.route_export_button.setEnabled(has_route)
         self.route_edit_button.setEnabled(connected and has_route and self.current_mode != "NAVIGATION")
         can_delete = (
@@ -1734,6 +1767,7 @@ class MainWindow(QMainWindow):
             self.pending_multipath_start_request = request_id
             self.log("대루트 구성을 확인한 뒤 GPS 운행을 시작합니다")
 
+    @Slot(dict)
     def on_ack(self, ack: dict) -> None:
         if ack.get("ok"):
             if (
@@ -1902,7 +1936,9 @@ class MainWindow(QMainWindow):
             return f"{value:.{digits}f}{suffix}"
         return f"{value}{suffix}"
 
+    @Slot(dict)
     def update_telemetry(self, state: dict) -> None:
+        if self._disconnecting or self._closing:return
         devices, gps, rc, pca = state.get("devices", {}), state.get("gps", {}), state.get("rc", {}), state.get("pca", {})
         mode = state.get("mode", "-")
         self.current_mode = str(mode)
@@ -1932,6 +1968,9 @@ class MainWindow(QMainWindow):
         self.cards["mode"].set_value(f"{mode_ko} · {operation_ko}", not state.get("estop", False))
         backend = state.get("backend") or {}
         backend_ready = bool(backend.get("ready", True))
+        self._gateway_online = bool(backend.get("gateway_online",backend_ready))
+        self._ssh_online = bool(backend.get("ssh_connected"))
+        self._refresh_connection_button()
         backend_name = str(backend.get("name") or ("SIM" if state.get("mock") else "ROS"))
         node_count = int(backend.get("node_count") or 0)
         backend_version = str(backend.get("version") or "unknown")
@@ -2537,9 +2576,31 @@ class MainWindow(QMainWindow):
                     self.log(f"하드웨어 오류: {error}")
             self.last_hardware_errors = current_errors
 
+    def _request_worker_stop(self) -> None:
+        # Keep the QThread parent/reference alive until its finished signal.
+        self._disconnecting = True
+        self._set_connected(False)
+        if self.worker is not None:
+            self.worker.stop()
+
+    @Slot()
+    def _on_worker_finished(self) -> None:
+        worker = self.sender()
+        if worker is not self.worker:
+            return
+        self.worker = None
+        self._disconnecting = False
+        self._set_connected(False)
+        worker.deleteLater()
+        if self._closing:
+            QTimer.singleShot(0,self.close)
+
     def closeEvent(self, event: QCloseEvent) -> None:
         self._release_remote_controls()
+        self._closing = True
         if self.worker and self.worker.isRunning():
-            self.worker.stop()
-            self.worker.wait(1200)
+            event.ignore()
+            self._request_worker_stop()
+            self.log("연결 작업 종료를 기다립니다. 완료 후 창이 닫힙니다.")
+            return
         event.accept()

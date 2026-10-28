@@ -201,7 +201,7 @@ class Supervisor:
                 msg.header.stamp=rospy.Time.now();msg.mode=self.mode;msg.source=source
                 msg.steering_pwm=int(s);msg.throttle_pwm=int(t);msg.actuator_locked=lock
                 self.cmd.publish(msg)
-                self.state.publish(pack(software_version="2.1.9",mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
+                self.state.publish(pack(software_version="2.1.10",mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
                                         ground_test_actuation_enabled=self.ground_test_actuation_enabled,
                                         reason=self.reason,manual_rearm_pending=self.manual_rearm_pending,
                                         rc_fresh=fresh(float(self.rc.get('monotonic') or 0),.75),

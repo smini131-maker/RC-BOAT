@@ -1,0 +1,65 @@
+RC BOAT v2.1.10 — Windows 앱 종료 / Jetson 부팅 화면 점검
+2026-10-28
+
+확인된 증상
+사용자 확인: Windows 관제 앱 창이 종료됨. Jetson 전원 차단으로 단정하지 않음.
+Windows Application Error 이벤트 1000에서 v2.1.9의 Qt6Core.dll 충돌 4건 확인.
+시각: 11:08:50 / 11:13:30 / 12:00:50 / 12:01:54 (2026-10-28)
+예외 코드 c0000409. 이 코드만으로 정확한 소스 행이나 개별 충돌 원인을 확정할 수는 없음.
+
+발견한 위험 코드와 수정
+1. main_window.toggle_connection은 stop 후 1.5초 대기만 하고 worker 참조를 버렸음.
+   closeEvent도 1.2초 후 창 종료를 허용했음. SSH/gateway 작업은 이보다 오래 걸릴 수 있음.
+   수정: finished 전까지 worker 소유권 유지, 정리 중 재연결 차단, 비동기 창 닫기.
+2. 연결 중 SSH client는 아직 등록되지 않아 stop이 닫지 못할 수 있었음.
+   수정: 연결 중 client 추적/취소, 대기 중 gateway 소켓 취소.
+3. GUI 콜백에 @Slot 및 QueuedConnection을 적용해 메인 스레드에서 화면을 갱신함.
+4. 기존 버튼은 연결 시도 작업이 실행 중이면 두 연결이 모두 없어도 '연결 해제'였음.
+   수정: 두 연결이 모두 끊기면 '재연결 중 · 중지', 정리 중에는 버튼 비활성화.
+   SSH만 끊기고 ROS가 살아 있으면 ROS 연결을 유지하며 카드에 별도 표시함.
+5. 부팅 서비스: 재시도 간격 10초, 120초 안의 시작 횟수 3회로 제한.
+6. 안전 PWM 보조 도구: actuator와 동일 lock 사용. 다른 주인이 있으면 I2C writer를 추가하지 않음.
+   I2C 초기화 오류 시 descriptor를 정리하며 보조 도구에 실행 timeout을 적용함.
+   기존 PWM 보정값과 채널은 유지함.
+
+사진의 부팅 로그
+- 1~2초대 tegra-i2c / IMX219 probe(-121): 센서 초기화/응답 실패.
+  카메라 미장착 Nano에서도 같은 IMX219 로그 사례가 있음.
+  사진의 RCBoat 서비스 시작보다 앞서 발생하므로 GUI의 SSH 코드만으로 설명할 수 없음.
+- EDID read failed / 주소 0x50 no ACK: 디스플레이/해당 I2C 버스 확인 필요.
+  프로젝트 PCA 기본 주소는 0x40이므로 0x50 메시지만으로 PCA 고장을 단정하지 않음.
+- SQUASHFS Xattrs / xattr id index: 이미지/커널 기능 또는 읽기 문제 확인 필요.
+  커널의 XATTR 미지원 경로에서도 Xattrs 경고가 발생함. 사진만으로 SD 카드 고장을 확정하지 않음.
+- /etc/resolv.conf dangling symlink: DNS 설정 파일 연결이 깨졌을 가능성.
+  도메인 이름을 쓰는 통신에 영향을 줄 수 있으므로 링크 대상과 resolved 서비스를 진단 로그에 수집함.
+- Failed to start RCBoat ROS: 서비스 기동 실패는 분명하나 상세 이유는 journalctl이 필요함.
+  USB 장치 경로/권한, I2C, 빌드/실행 경로 등을 확인해야 함.
+- 정식 실행 소스에서 Jetson OS 전원을 끄거나 재부팅하는 명령은 발견하지 못함.
+  actuator.shutdown은 PWM 정리 함수임.
+
+검증
+- 회귀 테스트 66개 통과.
+- 실제 Qt/QThread로 1.9초 SSH 지연을 만들고 연결 해제 3회 반복, 재클릭, 창 닫기를 검증.
+- 응답 없는 gateway recv를 stop으로 취소하는지 검증.
+- UI 로그 갱신 스레드가 GUI 메인 스레드인지 확인.
+- 모든 native 충돌 원인이 해결됐다는 의미는 아님. 현장 재현 시 새 로그로 확정해야 함.
+
+Windows 앱 로그
+파일 탐색기 주소창: %LOCALAPPDATA%\RCBoatControl\logs
+app.log: 연결/정리/Qt 경고/예외. 최대 2MB, 이전 3개 순환 보관.
+native_crash.log: faulthandler가 잡을 수 있는 native 종료 흔적.
+비밀번호와 SSH 터미널 입력은 기록하지 않음. 과거 충돌의 stack을 소급 생성할 수는 없음.
+
+Jetson 진단 (새 소스 전송 후 Jetson 터미널)
+cd /home/jetson/rcboat_ros_ws
+sudo python3 deployment/jetson/collect_diagnostics.py
+
+출력된 rcboat_ros_data/diagnostics/boot_날짜_시각.txt를 확인.
+도구는 로그/버전/메모리/마운트/온도를 읽고 파일만 생성함. I2C 스캔/서비스 변경은 하지 않음.
+이전 부팅 journal이 보존되지 않았으면 해당 부분은 unavailable임.
+
+참고 원문
+Qt QThread 수명: https://doc.qt.io/qt-6/qthread.html#dtor.QThread
+Qt Python thread affinity: https://doc.qt.io/qtforpython-6/tutorials/basictutorial/signals_and_slots.html#thread-affinity
+카메라 미장착 로그: https://forums.developer.nvidia.com/t/jetson-nano-cannot-start-camera-and-freezes/109752
+SquashFS XATTR 코드: https://github.com/torvalds/linux/blob/v4.9/fs/squashfs/xattr.h

@@ -108,35 +108,35 @@ class DeploymentTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.root=Path(self.temp.name)
-        (self.root/'VERSION').write_text('2.1.9\n')
+        (self.root/'VERSION').write_text('2.1.10\n')
         source=self.root/'catkin_ws/src/rcboat_ros/nodes/gui_bridge_node.py'
-        source.parent.mkdir(parents=True);source.write_text('VERSION="2.1.9"\n')
-        (source.parents[1]/'package.xml').write_text('<package><version>2.1.9</version></package>')
+        source.parent.mkdir(parents=True);source.write_text('VERSION="2.1.10"\n')
+        (source.parents[1]/'package.xml').write_text('<package><version>2.1.10</version></package>')
         self.name=str(source.relative_to(self.root)).replace('\\','/')
-        self.manifest={'version':'2.1.9','files':{self.name:self.module.file_hash(source)}}
+        self.manifest={'version':'2.1.10','files':{self.name:self.module.file_hash(source)}}
         (self.root/'deployment_manifest.json').write_text(json.dumps(self.manifest))
-        self.result=dict(version='2.1.9',master_online=True,runtime_identity=dict(
+        self.result=dict(version='2.1.10',master_online=True,runtime_identity=dict(
             source=str(source),source_sha256=self.manifest['files'][self.name]),
-            telemetry={k:{'software_version':'2.1.9'} for k in ('gps','ntrip','safety')})
+            telemetry={k:{'software_version':'2.1.10'} for k in ('gps','ntrip','safety')})
 
     def test_source_and_runtime_identity_match(self):
-        self.assertEqual(self.module.verify_sources(self.root)[0],'2.1.9')
-        self.module.verify_runtime(self.result,'2.1.9',self.manifest,self.root)
+        self.assertEqual(self.module.verify_sources(self.root)[0],'2.1.10')
+        self.module.verify_runtime(self.result,'2.1.10',self.manifest,self.root)
 
     def test_old_running_gateway_is_rejected(self):
         self.result['version']='2.1.3'
         with self.assertRaisesRegex(RuntimeError,'RUNNING gateway'):
-            self.module.verify_runtime(self.result,'2.1.9',self.manifest,self.root)
+            self.module.verify_runtime(self.result,'2.1.10',self.manifest,self.root)
 
     def test_matching_label_but_wrong_source_is_rejected(self):
         self.result['runtime_identity']['source_sha256']='oldhash'
         with self.assertRaisesRegex(RuntimeError,'source hash mismatch'):
-            self.module.verify_runtime(self.result,'2.1.9',self.manifest,self.root)
+            self.module.verify_runtime(self.result,'2.1.10',self.manifest,self.root)
 
     def test_old_ntrip_node_is_rejected(self):
         self.result['telemetry']['ntrip']['software_version']='2.1.3'
         with self.assertRaisesRegex(RuntimeError,'ntrip node runtime version'):
-            self.module.verify_runtime(self.result,'2.1.9',self.manifest,self.root)
+            self.module.verify_runtime(self.result,'2.1.10',self.manifest,self.root)
 
     def test_partial_source_transfer_is_rejected(self):
         (self.root/self.name).write_text('old source')

@@ -19,7 +19,7 @@ GUI gateway transports the same newline-delimited JSON over:
 - `JETSON_IP:8765` for the ROS-independent-of-SSH Windows connection
 
 Important actions: `status`, subroute CRUD (`upsert_route`, `delete_route`, `select_route`), named Multi-Path CRUD (`upsert_multipath`, `delete_multipath`, `select_multipath`), `ground_start` with `{target_type: multipath|single_route, target_id}`, idempotent `ground_stop`, `list_ground_tests`, and `download_ground_test` (base64 ZIP with SHA-256).
-# v2.1.9 safety additions
+# v2.1.10 safety additions
 
 `/rcboat/gui/link` (`std_msgs/String`): gateway-stamped Jetson monotonic time and
 `ssh_connected`; gateway action `operator_link` updates it. Missing updates for
@@ -32,7 +32,7 @@ may report `blocked` or `fault` booleans. No shaft/current sensor is bundled.
 `propulsion_feedback_status` expose takeover cause and neutral interlock.
 Every takeover emits `FAILSAFE_MANUAL` on `/rcboat/events`.
 
-NTRIP v2.1.9: `last_rtcm_monotonic`, `correction_age_source`,
+NTRIP v2.1.10: `last_rtcm_monotonic`, `correction_age_source`,
 `correction_age_status`, `rtcm_frames_received`, `rtcm_bytes_received`, `rtcm_crc_errors`.
 `bytes_received` is TCP payload traffic; only CRC-verified RTCM3 frames update reception age.
 GPS `receiver_correction_age_s/status` report GGA differential age separately.

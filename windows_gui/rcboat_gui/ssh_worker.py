@@ -16,7 +16,7 @@ import paramiko
 from PySide6.QtCore import QThread, Signal
 
 
-GUI_VERSION = "2.1.9"
+GUI_VERSION = "2.1.10"
 
 REMOTE_BRIDGE = r'''p=/home/jetson/rcboat_ros_ws/deployment/jetson/bridge_client.py
 [ -f "$p" ] && exec python3 "$p"
@@ -76,6 +76,10 @@ class SSHWorker(QThread):
         self._stop_requested = False
         self._client: paramiko.SSHClient | None = None
         self._shell_channel = None
+        self._connecting_client = None
+        self._io_lock = threading.Lock()
+        self._active_sockets = set()
+        self._link_thread = None
         self._host_key_event = threading.Event()
         self._host_key_accepted = False
         self._ssh_lock = threading.RLock()
@@ -91,6 +95,8 @@ class SSHWorker(QThread):
         """Release both SSH channels before publishing the disconnected state."""
         with self._ssh_lock:
             client, shell = self._client, self._shell_channel
+            connecting = self._connecting_client
+            self._connecting_client = None
             self._client = None
             self._shell_channel = None
             self._ssh_confirmed = False
@@ -106,6 +112,9 @@ class SSHWorker(QThread):
                 client.close()
             except Exception:
                 pass
+        if connecting is not None and connecting is not client:
+            try:connecting.close()
+            except Exception:pass
         if notify:
             self.terminal_state.emit(False, message)
 
@@ -155,6 +164,13 @@ class SSHWorker(QThread):
     def stop(self) -> None:
         self._stop_requested = True
         self._host_key_event.set()
+        with self._io_lock:
+            sockets=list(self._active_sockets)
+        for connection in sockets:
+            try:connection.shutdown(socket.SHUT_RDWR)
+            except OSError:pass
+            try:connection.close()
+            except OSError:pass
         self._close_ssh("SSH disconnected", notify=False)
 
     def respond_to_host_key(self, accepted: bool) -> None:
@@ -234,6 +250,9 @@ class SSHWorker(QThread):
             request["token"] = self.gateway_token
         try:
             with socket.create_connection((self.host, self.gateway_port), timeout=3.0) as connection:
+                with self._io_lock:
+                    if self._stop_requested:raise InterruptedError('connection cancelled')
+                    self._active_sockets.add(connection)
                 connection.settimeout(15.0)
                 connection.sendall((json.dumps(request, ensure_ascii=False) + "\n").encode("utf-8"))
                 data = b""
@@ -249,12 +268,15 @@ class SSHWorker(QThread):
             return json.loads(data.decode("utf-8"))
         except (OSError, ValueError, json.JSONDecodeError) as direct_error:
             # Compatibility fallback for installations not yet exposing the LAN gateway.
-            if self._client is not None:
+            if self._client is not None and not self._stop_requested:
                 try:
                     return self._ssh_bridge(payload)
                 except Exception:
                     pass
             raise ConnectionError(f"ROS gateway offline: {direct_error}") from direct_error
+        finally:
+            with self._io_lock:
+                self._active_sockets={s for s in self._active_sockets if s.fileno()>=0}
 
     @staticmethod
     def _normalize(response: dict[str, Any], ssh_connected: bool = False) -> dict[str, Any]:
@@ -293,7 +315,7 @@ class SSHWorker(QThread):
         }
         logger_state = str(ground.get("state") or ("recording" if ground.get("active") else "idle"))
         return {
-            "type": "telemetry", "software_version": response.get("version", "2.1.9"),
+            "type": "telemetry", "software_version": response.get("version", "2.1.10"),
             "backend": {"name": str(response.get("backend") or "ROS Noetic"),
                         "ready": bool(response.get("gateway_online", True)), "node_count": len(nodes),
                         "master_online": bool(response.get("master_online")),
@@ -485,7 +507,22 @@ class SSHWorker(QThread):
             pass
 
     def run(self) -> None:
+        reason="연결 작업 종료"
+        try:
+            self._run_connections()
+        except Exception as exc:
+            reason="연결 작업 오류: " + str(exc)
+            __import__('logging').getLogger('rcboat.worker').exception('connection worker failed')
+            self.log.emit(reason)
+        finally:
+            self._stop_requested=True
+            self._close_ssh(reason,notify=False)
+            if self._link_thread is not None:self._link_thread.join()
+            self.disconnected.emit(reason)
+
+    def _run_connections(self) -> None:
         link_thread = threading.Thread(target=self._operator_link_loop, daemon=True)
+        self._link_thread=link_thread
         link_thread.start()
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         self.connected.emit()
@@ -498,18 +535,25 @@ class SSHWorker(QThread):
                     last_ssh_attempt = now
                     client = None
                     try:
-                        client = paramiko.SSHClient(); client.load_system_host_keys()
+                        client = paramiko.SSHClient()
+                        with self._ssh_lock:self._connecting_client=client
+                        client.load_system_host_keys()
                         if self.known_hosts_path.exists(): client.load_host_keys(str(self.known_hosts_path))
                         client.set_missing_host_key_policy(ConfirmHostKeyPolicy(self))
                         client.connect(self.host, port=self.port, username=self.username,
                                        password=self._password or None, timeout=3, auth_timeout=4,
                                        banner_timeout=4, look_for_keys=True, allow_agent=True)
+                        if self._stop_requested:
+                            client.close();break
                         transport = client.get_transport()
                         if transport is None: raise ConnectionError("SSH transport unavailable")
                         shell = transport.open_session(timeout=4); shell.get_pty(term="xterm-256color", width=120, height=32)
                         shell.invoke_shell(); shell.settimeout(0.0)
                         transport.set_keepalive(3)
                         with self._ssh_lock:
+                            if self._stop_requested:
+                                client.close();break
+                            self._connecting_client=None
                             self._shell_channel = shell
                             self._ssh_health_failed.clear()
                             self._ssh_health_failures = 0
@@ -577,7 +621,7 @@ class SSHWorker(QThread):
                         self._backend_error = ""
                     except Exception as exc:
                         message = str(exc)
-                        offline = {"success": True, "version": "2.1.9", "backend": "ROS Noetic",
+                        offline = {"success": True, "version": "2.1.10", "backend": "ROS Noetic",
                                    "master_online": False, "gateway_online": False, "telemetry": {}, "nodes": []}
                         self.telemetry.emit(self._normalize(offline, self._ssh_confirmed))
                         if message != self._backend_error or now - self._backend_error_at >= 15.0:
@@ -586,6 +630,6 @@ class SSHWorker(QThread):
                 self.msleep(50)
         finally:
             self._stop_requested = True
-            link_thread.join(timeout=2.5)
             self._close_ssh("SSH 터미널 연결 종료", notify=False)
+            link_thread.join()
             self.terminal_state.emit(False, "SSH 터미널 연결 종료")

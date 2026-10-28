@@ -1,4 +1,4 @@
-# RC-BOAT ROS Noetic v2.1.9 architecture
+# RC-BOAT ROS Noetic v2.1.10 architecture
 
 ```text
 Windows GUI
@@ -20,7 +20,7 @@ Routes are an initially empty user-owned collection. A subroute owns waypoints; 
 
 The logger subscribes only. It does not own GPS, I2C, serial, or output control. `GROUND_TEST` starts neutral by default. A non-persistent GUI acknowledgement that the propellers have been removed can enable navigation-equivalent steering and throttle PWM for that one test; E-STOP, GPS health, freshness and command-range gates remain active. CSV/JSONL distinguish command write confirmation from unsupported physical feedback. `route_metrics.csv` is a long-format sample-by-subroute table for post-processing heading-error and route-selection graphs.
 
-In v2.1.9 the GUI sends an authenticated `operator_link` heartbeat on a separate TCP
+In v2.1.10 the GUI sends an authenticated `operator_link` heartbeat on a separate TCP
 connection; the gateway stamps `/rcboat/gui/link` with Jetson monotonic time. SSH
 loss forces MANUAL; missing heartbeats expire after 5 s even if the GUI has crashed.
 This does not gate status queries, E-STOP or ground-stop behind an SSH session.

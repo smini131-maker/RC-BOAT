@@ -7,12 +7,12 @@ import datetime as dt
 import rospy
 from std_msgs.msg import String
 from rcboat_ros.msg import ControlCommand
-from rcboat_ros.common import SAFE_STEERING,SAFE_THROTTLE,pack
+from rcboat_ros.common import SAFE_STEERING,SAFE_THROTTLE,pack,PCA_OWNER_LOCK
 from rcboat_ros.direct_pca import DirectLinuxPCA9685
 
 class Actuator:
     def __init__(self):
-        self.lockfd=open('/tmp/rcboat_ros_pca_owner.lock','w')
+        self.lockfd=open(PCA_OWNER_LOCK,'w')
         fcntl.flock(self.lockfd,fcntl.LOCK_EX|fcntl.LOCK_NB)
         self.pca=DirectLinuxPCA9685(rospy.get_param('/rcboat/pca_bus',1),rospy.get_param('/rcboat/pca_address',64),rospy.get_param('/rcboat/pca_frequency',60))
         self.steer_ch=int(rospy.get_param('/rcboat/steering_channel',0))

@@ -25,6 +25,7 @@ fi
 (cd catkin_ws && catkin_make)
 sudo cp systemd/rcboat_ros.service /etc/systemd/system/rcboat_ros.service
 sudo systemctl daemon-reload
+sudo systemctl reset-failed rcboat_ros.service
 sudo systemctl enable --now rcboat_ros.service
 sleep 3
 sudo systemctl is-active --quiet rcboat_ros.service || {
@@ -32,4 +33,4 @@ sudo systemctl is-active --quiet rcboat_ros.service || {
   exit 4
 }
 python3 deployment/jetson/verify_release.py --timeout 45
-echo 'RCBoat ROS Noetic v2.1.9 source AND running gateway verified.'
+echo 'RCBoat ROS Noetic v2.1.10 source AND running gateway verified.'

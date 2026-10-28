@@ -2,6 +2,8 @@
 Description=RCBoat ROS Noetic production backend
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=120
+StartLimitBurst=3
 [Service]
 Type=simple
 User=jetson
@@ -12,9 +14,10 @@ Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=-/home/jetson/rcboat_ros_data/ntrip.env
 ExecStartPre=/bin/bash /home/jetson/rcboat_ros_ws/deployment/jetson/hardware_gate.sh
 ExecStart=/bin/bash -lc 'source /opt/ros/noetic/setup.bash; source /home/jetson/rcboat_ros_ws/catkin_ws/devel/setup.bash; exec roslaunch rcboat_ros rcboat.launch'
-ExecStopPost=/usr/bin/python3 /home/jetson/rcboat_ros_ws/deployment/jetson/set_safe_pwm.py
+ExecStopPost=/usr/bin/timeout 5s /usr/bin/python3 /home/jetson/rcboat_ros_ws/deployment/jetson/set_safe_pwm.py
 Restart=on-failure
-RestartSec=3
+RestartSec=10
+TimeoutStartSec=30
 TimeoutStopSec=15
 KillMode=control-group
 # Optional boot integration for the ROS-only release.
