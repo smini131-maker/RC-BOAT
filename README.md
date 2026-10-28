@@ -1,6 +1,6 @@
-# RC-BOAT ROS Noetic v2.1.11
+# RC-BOAT ROS Noetic v2.1.12
 
-v2.1.11은 도보 테스트 기록과 시험 출력을 분리합니다. 안전 수동 전환 후에도 기록을 유지하고, GPS/통신 복구 후 **출력 재개 · 기록 유지**로 같은 시험을 이어갑니다. SSH 점검과 ROS heartbeat는 별도 스레드로 실행합니다. 자세한 적용·시험 순서는 [v2.1.11 안내](배포_및_시험_순서_v2.1.11.txt)를 보세요.
+v2.1.12는 도보 테스트에 **GPS 복구 유예 5초**를 추가합니다. GPS 이상 감지 후 중립 출력(조향 6000/스로틀 6450)과 기록을 유지하며, 유예 안에 유효 FIX와 복구된 FIX로 새로 계산한 항법 명령을 받으면 자동으로 시험을 이어갑니다. 만료되거나 다른 안전 오류가 발생하면 수동 전환하며 기록은 계속합니다. 적용·시험 순서는 [v2.1.12 안내](배포_및_시험_순서_v2.1.12.txt)를 보세요.
 
 v2.1.10에서 수정한 반복 연결·해제와 창 닫기 시 QThread 수명, 연결 중 client/socket 취소,
 GUI 메인 스레드 갱신 보강도 유지합니다. 두 연결이 모두 끊기면 `재연결 중 · 중지`로 표시합니다.
@@ -9,7 +9,7 @@ GUI 메인 스레드 갱신 보강도 유지합니다. 두 연결이 모두 끊�
 
 정식 실행 구조는 ROS Noetic뿐입니다. Jetson backend는 `roslaunch rcboat_ros rcboat.launch`, Windows GUI는 ROS gateway TCP(기본 `8765`)로 통신합니다. SSH는 배포·터미널용 보조 채널이며, SSH가 끊겨도 ROS gateway가 살아 있으면 상태 조회와 `GROUND_TEST_STOP`이 동작합니다.
 
-카메라 없는 정식 버전은 v2.1.11입니다. 설치·수동 전환 시험은 [배포_및_시험_순서_v2.1.11.txt](배포_및_시험_순서_v2.1.11.txt)를 따릅니다. 이전 소스는 Git 이력에서 확인할 수 있습니다.
+카메라 없는 정식 버전은 v2.1.12입니다. 설치·수동 전환 시험은 [배포_및_시험_순서_v2.1.12.txt](배포_및_시험_순서_v2.1.12.txt)를 따릅니다. 이전 소스는 Git 이력에서 확인할 수 있습니다.
 
 버전은 `MAJOR.MINOR.PATCH` 형식을 사용합니다. 호환성이 깨지는 구조 변경은 MAJOR, 기능 추가는 MINOR, 수정·정리는 PATCH를 올립니다. GUI 제목, ROS 응답, `VERSION`, EXE와 배포 ZIP 파일명은 항상 같은 버전으로 맞춥니다.
 
@@ -93,11 +93,11 @@ EXE 빌드:
 .\build.bat
 ```
 
-결과: `dist\RCBoatControl_ROS_v2.1.11.exe`
+결과: `dist\RCBoatControl_ROS_v2.1.12.exe`
 
 GUI 상단 상태는 서로 독립입니다: `SSH connected/disconnected`, `ROS master online/offline`, `ROS gateway online/offline`, `logger idle/recording/stopping/error`, `GPS valid/invalid/stale`, `RTK fix/float/dgps/no_fix/no_data`.
 
-SSH 표시는 전용 스레드 한 곳에서 실제 SSH 채널 응답을 확인합니다. 2초 제한을 2회 연속 넘기면 단절로 판정하고, 1회 지연 후 회복하면 연결을 유지합니다. 터미널 `exit`나 transport 종료는 즉시 반영하며, ROS gateway가 살아 있으면 조회·정지는 계속 동작합니다. 일반 운항은 SSH 단절 시 MANUAL로 전환합니다. 도보 테스트는 SSH와 독립적인 ROS gateway heartbeat가 살아 있으면 계속합니다. 전체 GUI/네트워크 단절(5초), GPS 무효/오래된 FIX, E-STOP 등은 계속 안전 수동 전환합니다.
+SSH 표시는 전용 스레드 한 곳에서 실제 SSH 채널 응답을 확인합니다. 2초 제한을 2회 연속 넘기면 단절로 판정하고, 1회 지연 후 회복하면 연결을 유지합니다. 터미널 `exit`나 transport 종료는 즉시 반영하며, ROS gateway가 살아 있으면 조회·정지는 계속 동작합니다. 일반 운항은 SSH 단절 시 MANUAL로 전환합니다. 도보 테스트는 SSH와 독립적인 ROS gateway heartbeat가 살아 있으면 계속합니다. 전체 GUI/네트워크 단절(5초), E-STOP 등은 계속 안전 수동 전환합니다. 도보 테스트 GPS 이상에는 아래의 5초 중립 유예를 적용합니다.
 
 ## 항로와 Ground Test 사용 순서
 
@@ -195,12 +195,12 @@ GUI에서 비밀번호를 한 번 입력하고 `설정 저장 · 연결`을 눌�
 - `actual_*_pwm`은 PCA에 전송한 명령이지 물리 위치 센서 피드백이 아닙니다.
 - 지상 도보 시험 통과는 수상 자율운항 안전 승인을 의미하지 않습니다.
 
-## v2.1.11 안전 수동 전환
+## v2.1.12 안전 수동 전환
 
 비상정지, 목표 도착, 일반 운항 중 SSH 단절, GUI 링크 만료, GPS FIX 소실/2초 이상 데이터 갱신 중단,
-항법 오류, 출력 오류, 추진 고장 입력 시 MANUAL로 전환합니다. 원인은 GUI와 `/rcboat/events`에 표시합니다.
+항법 오류, 출력 오류, 추진 고장 입력 시 MANUAL로 전환합니다. 도보 테스트의 GPS 이상만 아래의 5초 중립 유예를 거칩니다. 원인은 GUI와 `/rcboat/events`에 표시합니다.
 전환 직후 조향 6000 / 스로틀 6450으로 정지하고 RC 스로틀 1500±30 µs를 0.3초 유지해야 수동 조종이 가능합니다.
-GPS/SSH 없이도 유효한 RC 입력으로 수동 조종할 수 있습니다. 자동주행은 명시적으로 다시 시작해야 합니다.
+GPS/SSH 없이도 유효한 RC 입력으로 수동 조종할 수 있습니다. 수동 전환 후 자동주행은 명시적으로 다시 시작해야 합니다. 도보 테스트 GPS 유예 안에서의 정상 복구는 자동 재개합니다.
 비상정지는 MANUAL 표시와 별개로 해제 전까지 모든 출력을 잠급니다.
 
 PC에서 별도 작업 스레드가 약 1초 주기로 SSH 실제 응답을 확인해 ROS gateway에 전달합니다.
@@ -215,7 +215,7 @@ GROUND_TEST에는 이 의심 감지를 적용하지 않습니다. 실제 걸림�
 센서와 `/rcboat/propulsion/status`의 `{"blocked":true}` 또는 `{"fault":true}` 송신부가 필요합니다.
 센서가 없으면 상태는 unsupported입니다. `boat.yaml`의 no_progress 설정으로 의심 감지를 조절합니다.
 
-## v2.1.11 보정 진단 및 설치 검증
+## v2.1.12 보정 진단 및 설치 검증
 
 RTCM 수신 후 경과는 마지막 CRC 정상 RTCM3 수신 시각부터 Jetson monotonic 시간으로 계산합니다.
 수신 대기 중에도 0.5초마다 갱신하며 gateway/logger도 타임스탬프를 다시 계산합니다.
@@ -226,13 +226,24 @@ RTCM 수신 후 경과는 마지막 CRC 정상 RTCM3 수신 시각부터 Jetson 
 배포 시 VERSION과 파일별 SHA-256 manifest를 함께 전송합니다. 설치는 ROS unit 정지,
 수동 실행 잔존 검사, build/devel 재생성, ROS unit 시작 후 `verify_release.py`로
 실행 중인 gateway 버전/소스 경로/해시 및 GPS/NTRIP/safety 실행 버전을 확인합니다.
-`RUNNING GATEWAY VERIFIED: v2.1.11`가 나오기 전에는 최신 적용 성공으로 판단하지 마세요.
+`RUNNING GATEWAY VERIFIED: v2.1.12`가 나오기 전에는 최신 적용 성공으로 판단하지 마세요.
 GUI gateway 카드에도 Jetson 버전이 표시되며 버전 불일치 시 신규 운항 시작을 차단합니다.
 
-## 도보 테스트 기록 유지 (v2.1.11)
+## 도보 테스트 기록 유지 (v2.1.12)
 
-SSH 관리 채널 단절은 도보 테스트 출력을 멈추지 않습니다. ROS gateway heartbeat가 5초 이상 끊기면 안전 수동 전환합니다. GPS 무효/갱신 중단, 항법/RC/출력 오류, 목표 도착 및 E-STOP도 안전 전환하며 출력은 자동으로 재개하지 않습니다.
+SSH 관리 채널 단절은 도보 테스트 출력을 멈추지 않습니다. ROS gateway heartbeat가 5초 이상 끊기면 안전 수동 전환합니다. GPS 무효/갱신 중단은 최대 5초간 중립 상태로 복구를 기다립니다. 유예 만료, 항법/RC/출력 오류, 목표 도착 및 E-STOP은 안전 수동 전환하며 수동 전환 뒤의 출력은 자동으로 재개하지 않습니다.
 
 이 경우 logger는 `recording`을 유지하며 CSV/JSONL에 중단 구간과 유효성을 남깁니다. GUI에서 원인을 확인하고 GPS·통신 복구 후 **출력 재개 · 기록 유지**를 눌러 이어갑니다. 목표 도착 상태라면 재개가 거부됩니다. 시험 종료 버튼만 누르면 같은 폴더를 마감하고 ZIP으로 가져올 수 있습니다.
 
 추가 CSV 열: `test_output_paused`, `test_pause_reason`, `ssh_connected`, `ros_link_age_s`, `output_confirmation_valid`. `events.jsonl`의 `GROUND_TEST_OUTPUT_PAUSED/RESUMED`, `FAILSAFE_MANUAL`에 시각과 원인, GPS·항법·연결 snapshot을 보존합니다. 오래된 GPS 좌표는 새 관측값으로 간주하지 말고 `gps_healthy`, `gps_validity`, `gps_data_age_s`로 걸러 분석하세요.
+
+## 도보 테스트 GPS 복구 유예 (v2.1.12)
+
+`catkin_ws/src/rcboat_ros/config/boat.yaml`의 `ground_test_gps_grace_s: 5.0`으로 설정합니다(0~30초, 0은 유예 없음). 일반 AUTO/NAVIGATION/REMOTE에는 적용하지 않습니다. 기존 GPS stale 기준 2초는 유지하며, 유예는 supervisor가 GPS 무효/오래된 FIX를 감지한 시각부터 추가로 계산합니다.
+
+- 유예 중 GROUND_TEST 모드와 원래 출력 활성화 선택을 유지하되 조향 6000/스로틀 6450으로 잠급니다. 마지막 조향/스로틀을 유지하거나 좌표를 추정하지 않습니다.
+- 유효하고 최신인 FIX와 그 FIX를 사용한 새 항법 계산이 만료 전에 도착하면 자동 재개합니다. 잠깐 FIX만 돌아왔다가 다시 끊겨도 진행 중인 5초 타이머를 연장하지 않습니다.
+- 5초 만료 시 MANUAL/중립 대기로 전환하고 기록은 유지합니다. 이후 복구 시 기존 **출력 재개 · 기록 유지**를 사용합니다.
+- E-STOP, 수동 조작, 목표 도착, RC/출력/추진 오류, 실제 ROS 링크·항법·항로 응답 소실은 유예 중에도 우선 적용합니다. 유예를 이유로 기다리지 않습니다.
+- GUI 도보 탭에 남은 초와 중립 출력/자동 재개 안내를 표시합니다. 유예 중에는 수동 재개 버튼을 비활성화합니다.
+- CSV/JSONL의 `gps_grace_active`, `gps_grace_remaining_s`, `test_pause_reason`과 events.jsonl의 `GROUND_TEST_GPS_GRACE_STARTED/RECOVERED/EXPIRED/ABORTED`로 유예 구간과 결과를 분석합니다. GPS 무효/stale 구간은 정상 측정으로 간주하지 않습니다.

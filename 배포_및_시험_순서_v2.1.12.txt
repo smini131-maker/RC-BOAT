@@ -1,0 +1,78 @@
+﻿RC BOAT ROS Noetic v2.1.12 — 도보 테스트 GPS 유예
+Jetson: 10.227.56.215 / 카메라 없는 정식 버전
+
+[동작]
+1. GPS 무효 또는 오래된 FIX 감지 후 최대 5초 동안 GROUND_TEST 모드를 유지.
+2. 유예 중 조향 6000 / 스로틀 6450 중립 잠금. 기록은 같은 시험 폴더에 계속 저장.
+3. 5초 안에 유효한 최신 FIX와 복구 FIX로 새로 계산된 항법 명령을 받으면 자동 재개.
+   끊기기 전 명령을 재사용하지 않음. FIX만 잠깐 돌아와도 기존 타이머는 연장하지 않음.
+4. 유예 만료 시 수동 전환. 기록은 계속 저장. 복구 후 '출력 재개 · 기록 유지'를 눌러 이어감.
+5. E-STOP/수동 조작/목표 도착/RC·출력·추진 오류/ROS 링크·항법·항로 응답 소실은 즉시 우선 적용.
+6. 일반 AUTO/NAVIGATION/REMOTE의 GPS 안전 전환 조건은 유지.
+7. SSH 관리 채널만 끊기고 ROS gateway가 살아 있으면 도보 테스트 계속.
+
+시간 설정: catkin_ws/src/rcboat_ros/config/boat.yaml
+  ground_test_gps_grace_s: 5.0
+허용 범위 0~30초. 0은 유예 없음. 설정 변경 후 INSTALL_ROS로 다시 적용.
+기존 GPS stale 기준 2초는 유지. 5초는 GPS 이상 감지 후 추가 유예이므로,
+수신 갱신이 완전히 끊긴 경우 마지막 유효 FIX부터 수동 전환까지 약 7초가 될 수 있음.
+GPS FIX 자체가 무효로 바뀐 경우에는 무효 감지부터 약 5초.
+
+[적용 전]
+프로펠러를 제거하거나 추진 전원을 끄고 기존 Windows GUI를 종료.
+Jetson에 직접 roslaunch가 켜져 있다면 그 터미널에서 Ctrl+C로 종료하여 중복 실행 방지.
+기존 ~/rcboat_ros_data 항로, NTRIP 로컬 설정, 시험 로그는 보존됨.
+
+[Windows PowerShell — 아래 순서대로 실행]
+Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_Project"
+Test-NetConnection 10.227.56.215 -Port 22
+.\INSTALL_ROS.cmd -Destination "jetson@10.227.56.215"
+
+비밀번호 요청 시 SSH/sudo 비밀번호 직접 입력.
+INSTALL_ROS가 소스 전송, SHA-256 검증, ROS unit 정지, catkin 캐시 재생성/빌드,
+ROS unit 시작 후 실행 중 gateway 및 GPS/NTRIP/safety 버전까지 검증.
+반드시 'RUNNING GATEWAY VERIFIED: v2.1.12' 출력 확인.
+DEPLOY_ROS만 실행하면 실행 중 backend는 갱신되지 않음.
+
+설치 성공 후 같은 PowerShell에서 GUI 실행:
+.\dist\RCBoatControl_ROS_v2.1.12.exe
+
+EXE는 이미 빌드됨. 직접 다시 빌드할 때만:
+.\BUILD_ROS_GUI.cmd
+
+[Jetson SSH 안에서 확인 — 선택 진단]
+cd /home/jetson/rcboat_ros_ws
+cat VERSION
+source /opt/ros/noetic/setup.bash
+source /home/jetson/rcboat_ros_ws/catkin_ws/devel/setup.bash
+python3 deployment/jetson/verify_release.py --timeout 45
+rosparam get /rcboat/ground_test_gps_grace_s
+bash deployment/jetson/check_ros.sh
+
+자동 실행 unit을 대신하여 직접 ROS 실행할 때만(중복 실행 금지):
+sudo systemctl stop rcboat_ros.service
+roslaunch rcboat_ros rcboat.launch
+
+[도보 시험]
+1. GUI/ROS gateway v2.1.12와 master online, GPS valid 확인.
+2. 도보 테스트 탭에서 대루트 또는 소루트 선택. 실제 출력 시 프로펠러 제거 확인 후 시작.
+3. GPS 이상 발생 시 'GPS 복구 유예 N초 · 중립 출력 · 복구 시 자동 재개' 표시 확인.
+4. 5초 내 FIX/항법 복구 시 같은 samples/경과시간으로 자동 재개되는지 확인.
+5. 5초 초과 시 MANUAL로 전환되고 기록 samples가 계속 증가하는지 확인.
+6. 이때는 원인 복구 후 '출력 재개 · 기록 유지'로 명시적 재개.
+7. 도보 테스트 종료 → 선택 결과 다운로드. 한 ZIP에 유예 전후 전체가 들어감.
+
+[로그]
+ground_test.csv/jsonl:
+  gps_grace_active / gps_grace_remaining_s: 유예 구간과 남은 시간
+  test_output_paused / test_pause_reason: 시험 출력 중단 여부와 원인
+  gps_healthy / gps_validity / gps_data_age_s: 유효/무효/오래된 GPS 구분
+  ssh_connected / ros_link_age_s / output_confirmation_valid: 연결/출력 확인
+events.jsonl:
+  GROUND_TEST_GPS_GRACE_STARTED / RECOVERED / EXPIRED / ABORTED
+  FAILSAFE_MANUAL: 시각, GPS/항법/링크 snapshot
+  GROUND_TEST_OUTPUT_PAUSED / RESUMED: 중단/재개 시각
+test_metadata.json: 설정값과 중단 횟수. complete는 파일 마감 성공이며 무중단 주행 판정이 아님.
+
+실제 GPS 수신 장애나 Wi-Fi 불량을 없애는 변경은 아님.
+유예 중 무효/stale 위치를 정상 위치 관측으로 그래프에 사용하지 말 것.

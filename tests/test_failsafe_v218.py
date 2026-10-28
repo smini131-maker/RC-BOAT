@@ -149,6 +149,9 @@ class SupervisorTests(unittest.TestCase):
     def test_ground_test_fault_disables_output_opt_in(self):
         self.s.mode = 'GROUND_TEST'; self.s.ground_test_actuation_enabled = True
         self.s.gps['healthy'] = False
+        self.assertEqual(self.s._command(), ('GROUND_TEST_GPS_GRACE',6000,6450,True))
+        self.now += 5.0
+        self.refresh();self.s.gps['healthy'] = False
         self.assert_manual_stop('GPS_INVALID_OR_STALE')
         self.assertFalse(self.s.ground_test_actuation_enabled)
 

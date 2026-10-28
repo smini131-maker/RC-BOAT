@@ -16,7 +16,7 @@ import paramiko
 from PySide6.QtCore import QThread, Signal
 
 
-GUI_VERSION = "2.1.11"
+GUI_VERSION = "2.1.12"
 
 REMOTE_BRIDGE = r'''p=/home/jetson/rcboat_ros_ws/deployment/jetson/bridge_client.py
 [ -f "$p" ] && exec python3 "$p"
@@ -316,7 +316,7 @@ class SSHWorker(QThread):
         }
         logger_state = str(ground.get("state") or ("recording" if ground.get("active") else "idle"))
         return {
-            "type": "telemetry", "software_version": response.get("version", "2.1.11"),
+            "type": "telemetry", "software_version": response.get("version", "2.1.12"),
             "backend": {"name": str(response.get("backend") or "ROS Noetic"),
                         "ready": bool(response.get("gateway_online", True)), "node_count": len(nodes),
                         "master_online": bool(response.get("master_online")),
@@ -375,6 +375,8 @@ class SSHWorker(QThread):
             "ground_test": {"active": bool(ground.get("active")), "state": logger_state,
                             "output_paused": bool(ground.get("output_paused")),
                             "pause_reason": ground.get("pause_reason", ""),
+                            "gps_grace_active": bool(safety.get("gps_grace_active")),
+                            "gps_grace_remaining_s": safety.get("gps_grace_remaining_s"),
                             "samples": ground.get("samples", 0), "error": ground.get("error", ""),
                             "folder": ground.get("folder", ""),
                             "actuator_locked": bool(safety.get("actuator_locked", True)),
@@ -637,7 +639,7 @@ class SSHWorker(QThread):
                         self._backend_error = ""
                     except Exception as exc:
                         message = str(exc)
-                        offline = {"success": True, "version": "2.1.11", "backend": "ROS Noetic",
+                        offline = {"success": True, "version": "2.1.12", "backend": "ROS Noetic",
                                    "master_online": False, "gateway_online": False, "telemetry": {}, "nodes": []}
                         self.telemetry.emit(self._normalize(offline, self._ssh_confirmed))
                         if message != self._backend_error or now - self._backend_error_at >= 15.0:

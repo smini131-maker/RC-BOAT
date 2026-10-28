@@ -56,7 +56,7 @@ with patch.object(MainWindow, '_load_settings', lambda self: None):
     for index in range(window.tabs.count()):
         if '도보' in window.tabs.tabText(index): window.tabs.setCurrentIndex(index)
     app.processEvents()
-    target = ROOT / 'release/v2.1.11/gui_ground_pause.png'
+    target = ROOT / 'release/v2.1.12/gui_ground_pause.png'
     target.parent.mkdir(parents=True, exist_ok=True)
     assert window.grab().save(str(target))
     response['telemetry']['ground_test'].update(output_paused=False, pause_reason='')
@@ -64,5 +64,14 @@ with patch.object(MainWindow, '_load_settings', lambda self: None):
     window.update_telemetry(SSHWorker._normalize(response, False)); app.processEvents()
     assert not window.ground_resume_button.isEnabled()
     assert window.ground_stop_button.isEnabled()
+    response['telemetry']['safety'].update(gps_grace_active=True,gps_grace_remaining_s=3.2,
+        actuator_locked=True,reason='GROUND_TEST_GPS_GRACE')
+    response['telemetry']['ground_test'].update(output_paused=True,pause_reason='GROUND_TEST_GPS_GRACE')
+    window.update_telemetry(SSHWorker._normalize(response, False)); app.processEvents()
+    assert 'GPS 복구 유예 3.2초' in window.ground_status.text()
+    assert '중립 출력' in window.ground_status.text()
+    assert not window.ground_resume_button.isEnabled()
+    assert window.ground_stop_button.isEnabled()
+    assert window.grab().save(str(target.with_name('gui_gps_grace.png')))
     window.close(); app.processEvents()
-print('PASS: blocked SSH probe does not delay ROS heartbeat; recording/pause/resume UI; resume confirmation and translation; same recording controls')
+print('PASS: independent heartbeat; pause/resume UI and confirmation; GPS grace countdown/neutral output; manual resume disabled during grace')

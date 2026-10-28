@@ -1,4 +1,4 @@
-version: '2.1.10'
+version: '2.1.12'
 gui_gateway_bind: '0.0.0.0'
 gui_gateway_port: 8765
 ground_test_log_root: '~/rcboat_ros_data/logs/ground_tests'
@@ -7,6 +7,10 @@ gps_port: '/dev/serial/by-id/usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver
 arduino_baudrate: 9600
 gps_baudrate: 115200
 gps_stale_s: 2.0
+# Additional grace after GPS becomes invalid/stale, for GROUND_TEST only.
+# Neutral locked output during grace; recover automatically with a fresh FIX
+# and newly calculated navigation command. 0 disables grace; allowed 0..30 s.
+ground_test_gps_grace_s: 5.0
 # Diagnostic warning reference only. It does not lock navigation.
 max_hdop: 3.0
 steering_low: 4900

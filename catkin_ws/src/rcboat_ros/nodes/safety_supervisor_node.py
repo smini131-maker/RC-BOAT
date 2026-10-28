@@ -3,6 +3,7 @@
 import json
 import time
 import threading
+import math
 import rospy
 from std_msgs.msg import String
 from rcboat_ros.msg import ControlCommand
@@ -18,6 +19,12 @@ class Supervisor:
         self.lock=threading.RLock();self.reason='';self.link={};self.actuator={};self.propulsion={}
         self.progress=ProgressMonitor();self.mode_since=time.monotonic()
         self.ground_test_actuation_enabled=False
+        grace=float(rospy.get_param('/rcboat/ground_test_gps_grace_s',5.0))
+        if not math.isfinite(grace) or not 0<=grace<=30:
+            raise ValueError('ground_test_gps_grace_s must be between 0 and 30 seconds')
+        self.ground_gps_grace_s=grace
+        self.ground_gps_gap_since=None;self.ground_gps_recovery_stamp=None
+        self.ground_gps_grace_remaining_s=0.0
         self.gps={};self.rc={};self.nav={};self.remote={};self.remote_stamp=0
         self.auto_gesture_since=None;self.manual_gesture_since=None;self.manual_rearm_since=None;self.manual_rearm_pending=False
         self.cmd=rospy.Publisher('/rcboat/safety/final_command',ControlCommand,queue_size=4)
@@ -58,6 +65,7 @@ class Supervisor:
                 if mode in ('NAVIGATION','GROUND_TEST'):
                     reason=self._navigation_fault(time.monotonic())
                     if reason:raise ValueError(reason)
+                self._clear_gps_grace('ABORTED','MODE_CHANGED')
                 self.mode=mode;self.mode_since=time.monotonic();self.reason='';self.progress.reset()
                 self.ground_test_actuation_enabled=(
                     mode=='GROUND_TEST' and bool(args.get('ground_test_actuation_enabled',False))
@@ -109,6 +117,7 @@ class Supervisor:
             else:self.manual_rearm_since=None
     def _manual(self,reason):
         previous=self.mode
+        self._clear_gps_grace('ABORTED',reason)
         self.mode='MANUAL';self.armed=False;self.reason=reason
         self.ground_test_actuation_enabled=False
         self.manual_rearm_pending=True;self.manual_rearm_since=None
@@ -127,27 +136,68 @@ class Supervisor:
             return 'SSH_DISCONNECTED'
         return ''
 
-    def _navigation_fault(self,now):
-        if not self.gps.get('healthy') or not gps_is_healthy(self.gps,now,2.0):return 'GPS_INVALID_OR_STALE'
+    def _navigation_fault(self,now,allow_gps_gap=False):
+        if not allow_gps_gap and (not self.gps.get('healthy') or not gps_is_healthy(self.gps,now,2.0)):
+            return 'GPS_INVALID_OR_STALE'
         if not fresh(float(self.nav.get('monotonic') or 0),.75,now):return 'NAVIGATION_TIMEOUT'
         if not fresh(float(self.nav.get('route_monotonic') or 0),1.0,now):return 'ROUTE_TIMEOUT'
         if self.nav.get('route_complete'):return 'TARGET_ARRIVED'
-        if not self.nav.get('valid'):return 'NAVIGATION_INVALID'
+        if not allow_gps_gap and not self.nav.get('valid'):return 'NAVIGATION_INVALID'
+        return ''
+
+    def _clear_gps_grace(self,outcome,reason=''):
+        if self.ground_gps_gap_since is not None:
+            self.events.publish(pack(type='GROUND_TEST_GPS_GRACE_'+outcome,
+                at=time.time(),monotonic=time.monotonic(),reason=reason,
+                elapsed_s=max(0,time.monotonic()-self.ground_gps_gap_since)))
+        self.ground_gps_gap_since=None;self.ground_gps_recovery_stamp=None
+        self.ground_gps_grace_remaining_s=0.0
+        if self.reason=='GROUND_TEST_GPS_GRACE':self.reason=''
+
+    def _ground_gps_grace(self,now):
+        gps_ok=bool(self.gps.get('healthy')) and gps_is_healthy(self.gps,now,2.0)
+        if self.ground_gps_gap_since is None:
+            self.ground_gps_gap_since=now
+            self.events.publish(pack(type='GROUND_TEST_GPS_GRACE_STARTED',at=time.time(),
+                monotonic=now,grace_s=self.ground_gps_grace_s,gps_snapshot=dict(self.gps)))
+        elapsed=max(0,now-self.ground_gps_gap_since)
+        self.ground_gps_grace_remaining_s=max(0,self.ground_gps_grace_s-elapsed)
+        if elapsed>=self.ground_gps_grace_s:
+            reason='NAVIGATION_INVALID' if gps_ok else 'GPS_INVALID_OR_STALE'
+            self._clear_gps_grace('EXPIRED',reason)
+            return reason
+        if gps_ok:
+            if self.ground_gps_recovery_stamp is None:
+                self.ground_gps_recovery_stamp=float(self.gps.get('last_valid_monotonic') or 0)
+            # Wait for a navigation result calculated from the recovered FIX,
+            # never apply the cached command from before the GPS interruption.
+            if (self.nav.get('valid') and
+                    float(self.nav.get('gps_solution_monotonic') or 0)>=self.ground_gps_recovery_stamp):
+                self._clear_gps_grace('RECOVERED')
+                return ''
+        else:
+            self.ground_gps_recovery_stamp=None
+        self.reason='GROUND_TEST_GPS_GRACE'
         return ''
 
     def _fault(self,now):
         reason=self._link_fault(now)
         if reason:return reason
         if not fresh(float(self.rc.get('monotonic') or 0),.75,now):return 'RC_INPUT_LOST'
-        if not self.gps.get('healthy') or not gps_is_healthy(self.gps,now,2.0):return 'GPS_INVALID_OR_STALE'
-        if self.mode in ('NAVIGATION','GROUND_TEST'):
-            reason=self._navigation_fault(now)
-            if reason:return reason
         if self.propulsion.get('fault') or self.propulsion.get('blocked'):
             return 'PROPULSION_FAULT'
         if self.actuator.get('command_applied') is False:return 'ACTUATOR_ERROR'
         if now-self.mode_since>1.5 and not fresh(float(self.actuator.get('monotonic') or 0),1.0,now):
             return 'ACTUATOR_TIMEOUT'
+        gps_ok=bool(self.gps.get('healthy')) and gps_is_healthy(self.gps,now,2.0)
+        gps_gap=self.mode=='GROUND_TEST' and (not gps_ok or self.ground_gps_gap_since is not None)
+        if not gps_ok and not gps_gap:return 'GPS_INVALID_OR_STALE'
+        if self.mode in ('NAVIGATION','GROUND_TEST'):
+            reason=self._navigation_fault(now,allow_gps_gap=gps_gap)
+            if reason:return reason
+        if gps_gap:
+            reason=self._ground_gps_grace(now)
+            if reason:return reason
         throttle=(int(rospy.get_param('/rcboat/cruise_pwm',6650)) if self.mode=='AUTO'
                   else int(self.nav.get('desired_throttle_pwm') or 6450))
         if self.progress.update(now,self.gps,throttle,
@@ -168,9 +218,12 @@ class Supervisor:
                 self._manual(reason)
                 return 'FAILSAFE_MANUAL',s,t,True
         self._gestures(now)
+        if self.mode!='GROUND_TEST':self._clear_gps_grace('ABORTED','MODE_CHANGED')
         # GPS hard faults must lock autonomous navigation, not physically safe manual takeover.
         if self.estop:return 'ESTOP',s,t,True
         if self.mode=='GROUND_TEST':
+            if self.ground_gps_gap_since is not None:
+                return 'GROUND_TEST_GPS_GRACE',SAFE_STEERING,SAFE_THROTTLE,True
             # Full navigation-equivalent output is allowed only for the explicit,
             # non-persistent ground-test opt-in. E-STOP, GPS and freshness gates still win.
             if (self.ground_test_actuation_enabled and self.gps.get('healthy') and
@@ -206,8 +259,11 @@ class Supervisor:
                 msg.header.stamp=rospy.Time.now();msg.mode=self.mode;msg.source=source
                 msg.steering_pwm=int(s);msg.throttle_pwm=int(t);msg.actuator_locked=lock
                 self.cmd.publish(msg)
-                self.state.publish(pack(software_version="2.1.11",mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
+                self.state.publish(pack(software_version="2.1.12",mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
                                         ground_test_actuation_enabled=self.ground_test_actuation_enabled,
+                                        gps_grace_active=self.ground_gps_gap_since is not None,
+                                        gps_grace_remaining_s=round(self.ground_gps_grace_remaining_s,2),
+                                        gps_grace_s=self.ground_gps_grace_s,
                                         reason=self.reason,manual_rearm_pending=self.manual_rearm_pending,
                                         rc_fresh=fresh(float(self.rc.get('monotonic') or 0),.75),
                                         propulsion_feedback_status='fault' if self.propulsion.get('fault') or self.propulsion.get('blocked') else 'available' if self.propulsion else 'unsupported',

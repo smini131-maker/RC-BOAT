@@ -20,7 +20,7 @@ from rcboat_ros.common import pack, unpack
 from rcboat_ros.corrections import refresh_transport_status,refresh_receiver_status
 
 
-VERSION = "2.1.11"
+VERSION = "2.1.12"
 SOCKET = os.path.expanduser("~/rcboat_ros_data/gui_bridge.sock")
 TOPICS = {
     "gps": "/rcboat/gps/status", "ntrip": "/rcboat/ntrip/status", "route": "/rcboat/route/state",

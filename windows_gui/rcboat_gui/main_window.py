@@ -48,7 +48,7 @@ from .ssh_worker import SSHWorker
 from .widgets import MetricCard, RoutePlot, StatusCard, TelemetryGraph
 
 
-APP_VERSION = "2.1.11"
+APP_VERSION = "2.1.12"
 
 
 STYLE = """
@@ -2050,6 +2050,7 @@ class MainWindow(QMainWindow):
             "SSH_DISCONNECTED": "SSH 단절 → 수동 전환 · 중립 후 조종",
             "GUI_LINK_TIMEOUT": "GUI/통신 응답 소실 → 수동 전환",
             "GPS_INVALID_OR_STALE": "GPS 무효/갱신 중단 → 수동 전환",
+            "GROUND_TEST_GPS_GRACE": "GPS 복구 유예 · 중립 출력 · 기록 계속",
             "TARGET_ARRIVED": "목표 도착 → 수동 전환",
             "NAVIGATION_TIMEOUT": "항법 응답 소실 → 수동 전환",
             "NAVIGATION_INVALID": "항법 계산 불가 → 수동 전환",
@@ -2429,6 +2430,8 @@ class MainWindow(QMainWindow):
         ground_active = bool(ground.get("active"))
         ground_actuation = bool(ground.get("actuation_enabled"))
         ground_paused = bool(ground.get("output_paused"))
+        gps_grace = bool(ground.get("gps_grace_active"))
+        grace_remaining = max(0.0,float(ground.get("gps_grace_remaining_s") or 0.0))
         pause_reason = str(ground.get("pause_reason") or "")
         previous_pause = getattr(self, "_ground_pause_notice", None)
         current_pause = (ground_active, ground_paused, pause_reason)
@@ -2437,11 +2440,12 @@ class MainWindow(QMainWindow):
         self._ground_pause_notice = current_pause
         self.ground_status.setText(
             (f"기록 계속 · {int(ground.get('samples') or 0)} samples · "
-             + (f"시험 출력 중단: {pause_reason} · 복구 후 출력 재개 버튼" if ground_paused else
+             + (f"GPS 복구 유예 {grace_remaining:.1f}초 · 중립 출력 · 복구 시 자동 재개" if gps_grace else
+                f"시험 출력 중단: {pause_reason} · 복구 후 출력 재개 버튼" if ground_paused else
                 "자동주행 조향/스로틀 실제 출력" if ground_actuation else "중립 출력 잠금"))
             if ground_active else "도보 테스트 대기 · " + str(ground.get("error") or "출력 활성화는 매 시험마다 확인 필요")
         )
-        self.ground_resume_button.setEnabled(ground_active and ground_paused)
+        self.ground_resume_button.setEnabled(ground_active and ground_paused and not gps_grace)
         self.ground_start_button.setEnabled(not ground_active)
         self.ground_stop_button.setEnabled(ground_active)
         self.ground_download_button.setEnabled(not ground_active)

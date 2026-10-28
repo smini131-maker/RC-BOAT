@@ -115,7 +115,7 @@ class Ntrip:
         with self.status_lock:
             now=time.monotonic()
             age,validity=reception_status(self.last_correction,now)
-            self.status.publish(pack(software_version="2.1.11",enabled=self.enabled,connected=self.connected,
+            self.status.publish(pack(software_version="2.1.12",enabled=self.enabled,connected=self.connected,
                 host=self.host,port=self.port,mountpoint=self.mount,tls=self.tls,
                 bytes_received=self.received,rtcm_bytes_received=self.rtcm_bytes,
                 rtcm_frames_received=self.rtcm_frames,rtcm_crc_errors=self.rtcm_crc_errors,
@@ -139,7 +139,7 @@ class Ntrip:
                 if self.tls:sock=ssl.create_default_context().wrap_socket(sock,server_hostname=self.host)
                 sock.settimeout(7)
                 token=base64.b64encode((self.user+':'+self.password).encode()).decode()
-                req=('GET /%s HTTP/1.1\r\nHost: %s\r\nUser-Agent: NTRIP RCBoatROS/2.1.11\r\nNtrip-Version: Ntrip/2.0\r\nAuthorization: Basic %s\r\nConnection: close\r\n\r\n'%(self.mount,self.host,token)).encode()
+                req=('GET /%s HTTP/1.1\r\nHost: %s\r\nUser-Agent: NTRIP RCBoatROS/2.1.12\r\nNtrip-Version: Ntrip/2.0\r\nAuthorization: Basic %s\r\nConnection: close\r\n\r\n'%(self.mount,self.host,token)).encode()
                 sock.sendall(req)
                 header=b''
                 while b'\r\n\r\n' not in header and len(header)<8192:

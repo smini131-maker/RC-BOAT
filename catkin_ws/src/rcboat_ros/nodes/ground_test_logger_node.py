@@ -18,7 +18,7 @@ from rcboat_ros.common import pack, unpack, gps_is_healthy
 from rcboat_ros.geo import enrich_waypoints
 
 
-VERSION = "2.1.11"
+VERSION = "2.1.12"
 CSV_FIELDS = [
     "sample_index", "sample_time_epoch_s", "logger_time_utc", "measurement_time_utc", "gps_received_time_utc",
     "output_time_utc", "elapsed_time_s", "latitude", "longitude", "utm_easting_m",
@@ -41,6 +41,7 @@ CSV_FIELDS = [
     "failsafe_reason", "manual_rearm_pending", "propulsion_feedback_status",
     "test_output_paused", "test_pause_reason",
     "ssh_connected", "ros_link_age_s", "output_confirmation_valid",
+    "gps_grace_active", "gps_grace_remaining_s",
 ]
 
 ROUTE_METRIC_FIELDS = [
@@ -137,6 +138,8 @@ class Logger:
                               folder=str(self.folder or ""), samples=self.count, error=self.last_error,
                               test_route_ids=self.test_route_ids,
                               output_paused=self.output_paused, pause_reason=self.pause_reason,
+                              gps_grace_active=bool(self.cache.get('safety',{}).get('gps_grace_active')),
+                              gps_grace_remaining_s=self.cache.get('safety',{}).get('gps_grace_remaining_s'),
                               actuation_enabled=self.actuation_enabled))
 
     def _write_jsonl(self, key, value):
@@ -331,6 +334,8 @@ class Logger:
         pause_reason = ""
         if safety.get("mode") != "GROUND_TEST" or bool(safety.get("ground_test_actuation_enabled")) != self.actuation_enabled:
             pause_reason = str(safety.get("reason") or "GROUND_TEST_MODE_INACTIVE")
+        elif safety.get("gps_grace_active"):
+            pause_reason = "GROUND_TEST_GPS_GRACE"
         steering = actuator.get("actual_steering_pwm"); throttle = actuator.get("actual_throttle_pwm")
         confirmed = (actuator.get("command_applied") is True and steering is not None and throttle is not None and
                      4900 <= int(steering) <= 7300 and 5800 <= int(throttle) <= 7000 and
@@ -420,6 +425,8 @@ class Logger:
             "ssh_connected": link.get("ssh_connected"),
             "ros_link_age_s": round(now-link_stamp,3) if link_stamp and now>=link_stamp else None,
             "output_confirmation_valid": confirmed,
+            "gps_grace_active": bool(safety.get("gps_grace_active")),
+            "gps_grace_remaining_s": safety.get("gps_grace_remaining_s"),
             "manual_rearm_pending": safety.get("manual_rearm_pending"),
             "propulsion_feedback_status": safety.get("propulsion_feedback_status") or "unsupported",
             "estop": safety.get("estop"), "navigation_valid": nav.get("valid"), "logger_state": self.state,

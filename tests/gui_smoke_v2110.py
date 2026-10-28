@@ -40,7 +40,7 @@ assert SSHWorker._translate({'command': 'SET_MODE', 'mode': 'AUTO'}) == {
     'action': 'set_mode', 'arguments': {'mode': 'AUTO_SAFE', 'armed': False}}
 window = MainWindow()
 window.show()
-response = dict(success=True, version='2.1.11', master_online=True, gateway_online=True,
+response = dict(success=True, version='2.1.12', master_online=True, gateway_online=True,
                 nodes=['/safety_supervisor_node'], telemetry={'safety': dict(
                     mode='MANUAL', reason='SSH_DISCONNECTED', armed=False,
                     manual_rearm_pending=True, rc_fresh=True, actuator_locked=True),
@@ -61,7 +61,7 @@ legacy=dict(response,version='2.1.3',telemetry={'ntrip':{'last_correction_age_s'
 assert SSHWorker._normalize(legacy)['ntrip']['last_correction_age_s'] is None
 window.tabs.setCurrentIndex(1)
 app.processEvents()
-target = ROOT / 'release/v2.1.11/gui_failsafe_v2.1.11.png'
+target = ROOT / 'release/v2.1.12/gui_failsafe_v2.1.12.png'
 target.parent.mkdir(parents=True, exist_ok=True)
 assert window.grab().save(str(target))
 response['telemetry']['safety'].update(estop=True)
