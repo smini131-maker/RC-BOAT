@@ -8,8 +8,13 @@ set -u
 command -v catkin_make >/dev/null || { echo 'catkin_make is unavailable'; exit 3; }
 ROOT=/home/jetson/rcboat_ros_ws
 cd "$ROOT"
+python3 deployment/jetson/normalize_line_endings.py
+python3 deployment/jetson/verify_release.py --sources-only
 chmod +x catkin_ws/src/rcboat_ros/nodes/*.py deployment/jetson/*.sh deployment/jetson/*.py
-sudo systemctl stop rcboat_ros.service >/dev/null 2>&1 || true
+if systemctl cat rcboat_ros.service >/dev/null 2>&1; then
+  sudo systemctl stop rcboat_ros.service
+fi
+python3 deployment/jetson/verify_release.py --sources-only --idle --clean-build
 mkdir -p /home/jetson/rcboat_ros_data/logs/ground_tests /home/jetson/rcboat_ros_data/gps_logs
 if [[ -f /home/jetson/rcboat_ros_data/ntrip.env ]]; then
   chmod 600 /home/jetson/rcboat_ros_data/ntrip.env
@@ -26,4 +31,5 @@ sudo systemctl is-active --quiet rcboat_ros.service || {
   echo 'rcboat_ros.service failed. Inspect: journalctl -u rcboat_ros.service -n 100 --no-pager' >&2
   exit 4
 }
-echo 'RCBoat ROS Noetic v2.1.8 installed and running.'
+python3 deployment/jetson/verify_release.py --timeout 45
+echo 'RCBoat ROS Noetic v2.1.9 source AND running gateway verified.'

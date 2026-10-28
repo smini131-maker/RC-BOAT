@@ -4,6 +4,7 @@ set +u
 source /opt/ros/noetic/setup.bash
 source /home/jetson/rcboat_ros_ws/catkin_ws/devel/setup.bash
 set -u
+python3 /home/jetson/rcboat_ros_ws/deployment/jetson/verify_release.py --timeout 5
 printf 'Checking ROS master...\n'
 rosnode list >/dev/null
 printf 'Topics:\n'

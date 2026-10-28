@@ -11,6 +11,8 @@ class MixedGpsParser:
                     'hdop':99.99,'pdop':None,'vdop':None,'hacc_m':None,'rtk_state':'NO_RTK',
                     'satellites':0,'cno_dbhz':None,'fix_type':0,'last_valid_monotonic':0,
                     'last_update_monotonic':0,'utc_time':None,'utc_status':'no_data',
+                    'receiver_correction_age_s':None,'receiver_correction_age_status':'unsupported',
+                    'receiver_correction_age_monotonic':None,'nav_pvt_count':0,
                     'heading_source':'unsupported','ubx_count':0,'nmea_count':0,'error_count':0}
         self.snrs=[]
         self.last_pvt=0.0
@@ -61,6 +63,19 @@ class MixedGpsParser:
         cells=payload.split(','); kind=cells[0][-3:]
         a=self.state; a['nmea_count']+=1; a['last_update_monotonic']=time.monotonic()
         if kind=='GGA' and len(cells)>9:
+            # NMEA GGA field 13 is receiver-reported age of differential data.
+            # Blank means unavailable; never replace it with NTRIP receive age.
+            raw_age=cells[13] if len(cells)>13 else ''
+            a['receiver_correction_age_s']=None
+            a['receiver_correction_age_status']='no_data'
+            a['receiver_correction_age_monotonic']=time.monotonic()
+            if raw_age:
+                try:
+                    age=float(raw_age)
+                    if not math.isfinite(age) or age<0:raise ValueError('invalid differential age')
+                    a['receiver_correction_age_s']=age
+                    a['receiver_correction_age_status']='valid'
+                except ValueError:a['receiver_correction_age_status']='invalid'
             fix=int(cells[6] or 0)
             use_nmea_solution=(time.monotonic()-self.last_pvt)>1.5
             if use_nmea_solution:a['fix']=fix>0
@@ -97,6 +112,7 @@ class MixedGpsParser:
                 if len(self.snrs)>128:self.snrs=self.snrs[-64:]
     def _nav_pvt(self,p):
         self.last_pvt=time.monotonic()
+        self.state['nav_pvt_count']+=1
         a=self.state
         # u-blox UBX-NAV-PVT payload offsets, units from Interface Description.
         fix=p[20]; flags=p[21]; flags2=p[22]; sats=p[23]

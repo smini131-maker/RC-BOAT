@@ -8,6 +8,7 @@ from std_msgs.msg import String, UInt8MultiArray
 from rcboat_ros.gps_mix import MixedGpsParser
 from rcboat_ros.common import pack,gps_is_healthy,cno_quality
 from rcboat_ros.geo import latlon_to_utm
+from rcboat_ros.corrections import refresh_receiver_status
 
 def main():
     rospy.init_node('gps_node')
@@ -31,7 +32,7 @@ def main():
                 parser.feed(data)
             except Exception as exc:
                 rospy.logerr('GPS read fault %s',exc)
-                pub.publish(pack(fix=False,healthy=False,data_validity='invalid',error=str(exc)))
+                pub.publish(pack(software_version="2.1.9",fix=False,healthy=False,data_validity='invalid',error=str(exc)))
                 raise  # roslaunch respawns GPS only; manual RC control stays alive.
             now=time.monotonic()
             if now-last_poll>=1.0:
@@ -40,7 +41,8 @@ def main():
                 except Exception as exc:rospy.logwarn('NAV-PVT polling failed %s',exc)
                 last_poll=now
             if now-last_publish>=.25:
-                result=dict(parser.state)
+                result=refresh_receiver_status(parser.state,now)
+                result["software_version"]="2.1.9"
                 update=float(result.get('last_update_monotonic') or 0)
                 result['gps_data_age_s']=round(now-update,3) if update and now>=update else None
                 result['age_s']=result['gps_data_age_s']

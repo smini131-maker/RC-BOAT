@@ -4,6 +4,7 @@ import base64
 import csv
 import datetime as dt
 import io
+import hashlib
 import json
 import os
 import pathlib
@@ -16,9 +17,10 @@ import rospy
 from std_msgs.msg import String
 from rcboat_ros.srv import Execute
 from rcboat_ros.common import pack, unpack
+from rcboat_ros.corrections import refresh_transport_status,refresh_receiver_status
 
 
-VERSION = "2.1.8"
+VERSION = "2.1.9"
 SOCKET = os.path.expanduser("~/rcboat_ros_data/gui_bridge.sock")
 TOPICS = {
     "gps": "/rcboat/gps/status", "ntrip": "/rcboat/ntrip/status", "route": "/rcboat/route/state",
@@ -31,6 +33,10 @@ TOPICS = {
 class Bridge:
     def __init__(self):
         self.cache = {}
+        source=pathlib.Path(__file__).resolve()
+        self.runtime_identity={'source':str(source),
+            'source_sha256':hashlib.sha256(source.read_bytes().replace(b'\r\n',b'\n')).hexdigest(),
+            'started_at_utc':dt.datetime.now(dt.timezone.utc).isoformat()}
         self.gps_log_file = None; self.gps_log_writer = None; self.gps_log_samples = 0; self.gps_log_path = ""
         self.test_root = pathlib.Path(os.path.expanduser(rospy.get_param(
             "/rcboat/ground_test_log_root", "~/rcboat_ros_data/logs/ground_tests")))
@@ -185,10 +191,12 @@ class Bridge:
             except Exception:
                 nodes = []; master_online = False
             telemetry = dict(self.cache)
+            telemetry['ntrip']=refresh_transport_status(self.cache.get('ntrip',{}),time.monotonic())
+            telemetry['gps']=refresh_receiver_status(self.cache.get('gps',{}),time.monotonic())
             telemetry["gps_logging"] = {"active": self.gps_log_file is not None, "file_path": self.gps_log_path,
                                         "samples": self.gps_log_samples}
             return {"success": True, "version": VERSION, "backend": "ROS Noetic", "master_online": master_online,
-                    "gateway_online": True, "telemetry": telemetry, "nodes": nodes, "ground_tests": self.tests()}
+                    "gateway_online": True, "runtime_identity": self.runtime_identity, "telemetry": telemetry, "nodes": nodes, "ground_tests": self.tests()}
         if command == "gps_log_start": self.start_gps_log(); return {"success": True, "response": {"file_path": self.gps_log_path}}
         if command == "gps_log_stop":
             path = self.gps_log_path; samples = self.gps_log_samples; self.close_gps_log()

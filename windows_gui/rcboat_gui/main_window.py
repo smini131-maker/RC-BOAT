@@ -47,7 +47,7 @@ from .ssh_worker import SSHWorker
 from .widgets import MetricCard, RoutePlot, StatusCard, TelemetryGraph
 
 
-APP_VERSION = "2.1.8"
+APP_VERSION = "2.1.9"
 
 
 STYLE = """
@@ -176,7 +176,7 @@ class MainWindow(QMainWindow):
 
         connect_group = QGroupBox("Jetson ROS gateway / SSH 연결")
         connect_layout = QHBoxLayout(connect_group)
-        self.host = QLineEdit("10.122.105.215")
+        self.host = QLineEdit("10.227.56.215")
         self.host.setMinimumWidth(150)
         self.port = QSpinBox(); self.port.setRange(1, 65535); self.port.setValue(22)
         self.username = QLineEdit("jetson")
@@ -526,7 +526,8 @@ class MainWindow(QMainWindow):
             ("GPS 데이터 지연", "age", "≤2 s 정상"),
             ("UTM 좌표", "utm", "좌표 기반 미터 단위 위치"),
             ("RTK 해 상태", "rtk_state", "FIXED / FLOAT / DGPS 실시간 표시"),
-            ("보정 데이터 지연", "correction_age", "≤5 s 좋음 · ≤10 s 허용"),
+            ("RTCM 수신 후 경과", "correction_age", "Jetson CRC 검증 수신 기준 · 위치 FIX와 별도"),
+            ("수신기 보정 나이", "receiver_correction_age", "수신기 GGA 보고값 · 미제공 시 no_data/unsupported"),
         )
         for index, (title, key, hint) in enumerate(detail_fields):
             card = MetricCard(title, hint)
@@ -622,7 +623,7 @@ class MainWindow(QMainWindow):
         self.ntrip_link_card = MetricCard("보정 서버", "NTRIP caster 연결")
         self.ntrip_solution_card = MetricCard("현재 위치 해", "FIXED / FLOAT / DGPS")
         self.ntrip_bytes_card = MetricCard("RTCM 누적 수신", "수신량이 증가하면 보정 데이터 유입 중")
-        self.ntrip_age_card = MetricCard("보정 지연", "≤5 s 좋음 · ≤10 s 허용")
+        self.ntrip_age_card = MetricCard("RTCM 수신 후 경과", "Jetson 수신 기준 · 실제 수신기 보정 나이와 다름")
         ntrip_cards.addWidget(self.ntrip_link_card, 0, 0)
         ntrip_cards.addWidget(self.ntrip_solution_card, 0, 1)
         ntrip_cards.addWidget(self.ntrip_bytes_card, 0, 2)
@@ -942,7 +943,7 @@ class MainWindow(QMainWindow):
             self.worker.interrupt_terminal()
 
     def _load_settings(self) -> None:
-        self.host.setText(self.settings.value("host", "10.122.105.215"))
+        self.host.setText(self.settings.value("host", "10.227.56.215"))
         self.port.setValue(int(self.settings.value("port", 22)))
         self.username.setText(self.settings.value("username", "jetson"))
         self.ntrip_username.setText(self.settings.value("ntrip_username", ""))
@@ -1933,8 +1934,13 @@ class MainWindow(QMainWindow):
         backend_ready = bool(backend.get("ready", True))
         backend_name = str(backend.get("name") or ("SIM" if state.get("mock") else "ROS"))
         node_count = int(backend.get("node_count") or 0)
-        backend_text = (f"online · {node_count} nodes" if backend_ready else "offline")
-        self.cards["backend"].set_value(backend_text, backend_ready)
+        backend_version = str(backend.get("version") or "unknown")
+        version_match = backend_version == APP_VERSION or bool(state.get("mock"))
+        backend_text = (f"online · v{backend_version} · {node_count} nodes" if backend_ready else "offline")
+        if backend_ready and not version_match:
+            backend_text = f"online · v{backend_version} · 버전 불일치"
+        self.cards["backend"].set_value(backend_text, backend_ready and version_match)
+        self.cards["backend"].setToolTip(f"GUI v{APP_VERSION} / Jetson v{backend_version}")
         self.cards["ssh"].set_value("connected" if backend.get("ssh_connected") else "disconnected",
                                     bool(backend.get("ssh_connected")))
         self.cards["ros_master"].set_value("online" if backend.get("master_online") else "offline",
@@ -2190,9 +2196,16 @@ class MainWindow(QMainWindow):
             else "BAD"
         )
         self.gps_metric_cards["correction_age"].set_value(
-            self._fmt(correction_age, 1, " s") if correction_age is not None else
-            ("unsupported" if not ntrip.get("enabled") else "no_data"), correction_level
+            (self._fmt(correction_age, 2, " s") +
+             (" · stale" if ntrip.get("correction_age_status")=="stale" else ""))
+            if correction_age is not None else str(ntrip.get("correction_age_status") or "no_data"), correction_level
         )
+
+        receiver_age = gps.get("receiver_correction_age_s")
+        receiver_status = str(gps.get("receiver_correction_age_status") or "unsupported")
+        self.gps_metric_cards["receiver_correction_age"].set_value(
+            (self._fmt(receiver_age, 2, " s") + (" · stale" if receiver_status=="stale" else "")) if receiver_age is not None else receiver_status,
+            "INFO" if receiver_age is None else "WARNING" if receiver_status=="stale" else "GOOD")
 
         ntrip_error = str(ntrip.get("last_error") or "")
         ntrip_error_hint = self._ntrip_error_hint(
@@ -2253,7 +2266,8 @@ class MainWindow(QMainWindow):
             "GOOD" if received > 0 and ntrip_connected else "INFO",
         )
         self.ntrip_age_card.set_value(
-            self._fmt(correction_age, 1, " s"), correction_level
+            (self._fmt(correction_age, 2, " s") + (" · stale" if ntrip.get("correction_age_status")=="stale" else ""))
+            if correction_age is not None else str(ntrip.get("correction_age_status") or "no_data"), correction_level
         )
         self.ntrip_status.setText(
             f"{ntrip.get('host') or '-'}:{ntrip.get('port') or '-'}"

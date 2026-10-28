@@ -12,17 +12,19 @@ import time
 import rospy
 from std_msgs.msg import String
 from rcboat_ros.srv import Execute, ExecuteResponse
+from rcboat_ros.corrections import refresh_transport_status,refresh_receiver_status
 from rcboat_ros.common import pack, unpack
 from rcboat_ros.geo import enrich_waypoints
 
 
-VERSION = "2.1.8"
+VERSION = "2.1.9"
 CSV_FIELDS = [
     "sample_index", "sample_time_epoch_s", "logger_time_utc", "measurement_time_utc", "gps_received_time_utc",
     "output_time_utc", "elapsed_time_s", "latitude", "longitude", "utm_easting_m",
     "utm_northing_m", "utm_zone", "heading_deg", "heading_source", "speed_mps",
     "course_deg", "gps_fix", "rtk_state", "gps_validity", "gps_healthy", "gps_data_age_s",
-    "correction_age_s", "satellites", "hdop", "pdop", "vdop", "hacc_m", "cno_dbhz",
+    "correction_age_s", "correction_age_source", "correction_age_status",
+    "receiver_correction_age_s", "receiver_correction_age_status", "satellites", "hdop", "pdop", "vdop", "hacc_m", "cno_dbhz",
     "course_quality", "gps_quality_used_json", "execution_target_type", "execution_target_id",
     "execution_target_name", "selected_route_id", "active_route_id", "previous_active_route_id",
     "test_route_ids", "target_waypoint_number", "target_waypoint_index", "distance_to_waypoint_m",
@@ -320,8 +322,8 @@ class Logger:
             self._write_jsonl("events", {"type": "OUTPUT_ERROR", "event_time_utc": utc_now(),
                                          "error": self.last_error})
             self.close(error=self.last_error); return
-        gps = self.cache.get("gps", {}); nav = self.cache.get("nav", {}); route = self.cache.get("route", {})
-        ntrip = self.cache.get("ntrip", {})
+        gps = refresh_receiver_status(self.cache.get("gps", {}),time.monotonic()); nav = self.cache.get("nav", {}); route = self.cache.get("route", {})
+        ntrip = refresh_transport_status(self.cache.get("ntrip", {}),time.monotonic())
         self.count += 1
         sample_utc = utc_now(); elapsed = round(time.monotonic() - self.start_clock, 3)
         quality = {key: gps.get(key) for key in ("hdop", "pdop", "vdop", "hacc_m", "cno_dbhz",
@@ -338,6 +340,10 @@ class Logger:
             "course_deg": gps.get("heading_deg"), "gps_fix": gps.get("fix"), "rtk_state": gps.get("rtk_state") or "no_data",
             "gps_validity": gps.get("data_validity") or "no_data", "gps_healthy": gps.get("healthy"),
             "gps_data_age_s": gps.get("gps_data_age_s"), "correction_age_s": ntrip.get("last_correction_age_s"),
+            "correction_age_source": ntrip.get("correction_age_source") or "unsupported",
+            "correction_age_status": ntrip.get("correction_age_status") or "no_data",
+            "receiver_correction_age_s": gps.get("receiver_correction_age_s"),
+            "receiver_correction_age_status": gps.get("receiver_correction_age_status") or "unsupported",
             "satellites": gps.get("satellites"), "hdop": gps.get("hdop"), "pdop": gps.get("pdop"),
             "vdop": gps.get("vdop"), "hacc_m": gps.get("hacc_m"), "cno_dbhz": gps.get("cno_dbhz"),
             "course_quality": gps.get("course_quality"), "gps_quality_used_json": json.dumps(quality, separators=(",", ":")),
