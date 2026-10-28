@@ -63,7 +63,7 @@ sudo systemctl start rcboat_ros.service
 5. Windows PowerShell — GUI 실행 / 필요할 때 재빌드
 
 Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_Project"
-& ".\windows_gui\dist\RCBoatControl_ROS_v2.1.8.exe"
+& ".\dist\RCBoatControl_ROS_v2.1.8.exe"
 
 EXE는 빌드해서 제공하며 다시 빌드할 때만:
 .\BUILD_ROS_GUI.cmd

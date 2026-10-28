@@ -84,7 +84,7 @@ EXE 빌드:
 .\build.bat
 ```
 
-결과: `windows_gui\dist\RCBoatControl_ROS_v2.1.8.exe`
+결과: `dist\RCBoatControl_ROS_v2.1.8.exe`
 
 GUI 상단 상태는 서로 독립입니다: `SSH connected/disconnected`, `ROS master online/offline`, `ROS gateway online/offline`, `logger idle/recording/stopping/error`, `GPS valid/invalid/stale`, `RTK fix/float/dgps/no_fix/no_data`.
 
