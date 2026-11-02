@@ -21,3 +21,26 @@ gps_*.csv
 
 # Generated release bundles and Windows binaries
 release/v*/
+
+# Local analysis, documents and attachments
+/.codex-remote-attachments/
+/analysis/
+/output/
+/ppt_build/
+/ppt_output/
+/qgis/
+/tmp/
+
+# ROS/catkin output and local deployment state
+/catkin_ws/devel/
+/catkin_ws/install/
+/catkin_ws/logs/
+/deployment_manifest.json
+/logs/
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini

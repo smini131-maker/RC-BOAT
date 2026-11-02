@@ -1,9 +1,12 @@
-name: ROS Noetic v2.1.0 regression
+name: Tests
 
 on:
   push:
-    branches: [main, release/2.1.0]
+    branches: [main, 'release/**']
   pull_request:
+
+permissions:
+  contents: read
 
 jobs:
   python-regression:

@@ -4,7 +4,7 @@ cd /d "%~dp0" || exit /b 2
 echo RC BOAT WINDOWS OPTIONAL SETUP
 echo This helper is only needed when CHECK_WINDOWS.cmd reports a missing requirement.
 echo Python 3.11, 3.12, or 3.13 x64 is supported; do not install another Python if 3.13 works.
-echo Git is needed only for UPLOAD_GITHUB.cmd. OpenSSH is needed only for Jetson commands.
+echo Git is needed to clone or update the repository. OpenSSH is needed for Jetson commands.
 echo.
 where winget.exe >nul 2>&1
 if errorlevel 1 (
