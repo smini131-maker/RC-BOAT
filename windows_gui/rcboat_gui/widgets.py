@@ -6,7 +6,7 @@ from typing import Iterable
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget,QSizePolicy
 
 
 EARTH_RADIUS_M = 6_371_000.0
@@ -21,10 +21,15 @@ class StatusCard(QFrame):
         title_label = QLabel(title)
         title_label.setObjectName("cardTitle")
         self.value_label = QLabel(value)
+        self.value_label.setWordWrap(True);self.value_label.setMinimumWidth(0);self.value_label.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred)
         self.value_label.setObjectName("cardValue")
         self._rendered: tuple[str, bool | None] | None = None
         layout.addWidget(title_label)
         layout.addWidget(self.value_label)
+        self.hint_label=QLabel('');self.hint_label.setObjectName('metricHint');self.hint_label.setWordWrap(True);self.hint_label.hide();layout.addWidget(self.hint_label)
+
+    def set_hint(self,text):
+        self.hint_label.setText(text);self.hint_label.setVisible(bool(text))
 
     def set_value(self, value: str, ok: bool | None = None) -> None:
         rendered = (str(value), ok)
@@ -32,7 +37,9 @@ class StatusCard(QFrame):
             return
         self._rendered = rendered
         self.value_label.setText(value)
-        if ok is None:
+        if isinstance(ok,str):
+            color={'GOOD':'#38d996','WARNING':'#f8bd58','BAD':'#ff6474','NO_DATA':'#7f93ac','INFO':'#8dcde8'}.get(ok,'#e8eef8')
+        elif ok is None:
             color = "#e8eef8"
         else:
             color = "#38d996" if ok else "#ff6474"
@@ -53,10 +60,12 @@ class MetricCard(QFrame):
         self.title_label.setObjectName("metricTitle")
         self.value_label = QLabel("-")
         self.value_label.setObjectName("metricValue")
+        self.value_label.setWordWrap(True);self.value_label.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred)
         self.value_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.hint_label = QLabel(hint)
         self.hint_label.setObjectName("metricHint")
         self.hint_label.setWordWrap(True)
+        self.hint_label.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred)
         self._rendered: tuple[str, str | None] | None = None
 
         layout.addWidget(self.title_label)
@@ -75,6 +84,7 @@ class MetricCard(QFrame):
             "WARNING": "#f8bd58",
             "BAD": "#ff6474",
             "INFO": "#61caff",
+            "NO_DATA": "#7f93ac",
         }
         color = colors.get(str(level or "").upper(), "#edf4ff")
         self.value_label.setStyleSheet(f"color:{color}; font-weight:800;")
@@ -91,8 +101,8 @@ class TelemetryGraph(QWidget):
         self.setMinimumHeight(180)
 
     def append(self, first: float | None, second: float | None) -> None:
-        self.series[0].append(float(first) if first is not None else self.min_value)
-        self.series[1].append(float(second) if second is not None else self.min_value)
+        self.series[0].append(float(first) if first is not None and math.isfinite(float(first)) else None)
+        self.series[1].append(float(second) if second is not None and math.isfinite(float(second)) else None)
         if self.isVisible():
             self.update()
 
@@ -115,11 +125,14 @@ class TelemetryGraph(QWidget):
             if len(series) < 2:
                 continue
             path = QPainterPath()
+            connected=False
             for idx, value in enumerate(series):
+                if value is None:connected=False;continue
                 x = area.left() + area.width() * idx / max(1, series.maxlen - 1)
                 y = area.bottom() - area.height() * (value - self.min_value) / span
-                if idx == 0:
+                if not connected:
                     path.moveTo(x, y)
+                    connected=True
                 else:
                     path.lineTo(x, y)
             painter.setPen(QPen(color, 2))
@@ -146,11 +159,16 @@ class RoutePlot(QWidget):
         self._auto_fit_pending = True
         self._dragging = False
         self._last_mouse = QPointF()
-        self.setMinimumHeight(360)
+        from .map_tiles import TileLayer
+        self.tile_layer=TileLayer(self)
+        self.setMinimumHeight(240)
         self.setMouseTracking(True)
         self.setToolTip(
-            "마우스 왼쪽 드래그: 지도 이동 · 휠: 확대/축소 · 더블클릭: 전체 경로 맞춤"
+            "마우스 왼쪽 드래그: 지도 이동 · Ctrl+휠: 확대/축소 · 더블클릭: 전체 경로 맞춤"
         )
+
+    def set_basemap_enabled(self,enabled):
+        self.tile_layer.set_enabled(enabled)
 
     @staticmethod
     def is_training_route(route: dict) -> bool:
@@ -295,6 +313,8 @@ class RoutePlot(QWidget):
         if self._auto_fit_pending:
             self._fit(area, origin)
 
+        self.tile_layer.draw(painter,area,origin,self._center_m,self._pixels_per_meter)
+
         visible = self._visible_routes()
         has_data = bool(visible or self.position)
         if not has_data:
@@ -392,8 +412,11 @@ class RoutePlot(QWidget):
         painter.setFont(QFont("Malgun Gothic", 8))
         painter.drawText(
             QPointF(area.left(), self.rect().bottom() - 10),
-            "동일 축척 미터 좌표 · 드래그 이동 · 휠 확대/축소 · 더블클릭 전체 맞춤",
+            "동일 축척 미터 좌표 · 드래그 이동 · Ctrl+휠 확대/축소 · 더블클릭 전체 맞춤",
         )
+
+    def zoom_by(self,factor):
+        self._pixels_per_meter=max(.02,min(40,self._pixels_per_meter*factor));self._auto_fit_pending=False;self.update()
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
@@ -429,6 +452,9 @@ class RoutePlot(QWidget):
         super().mouseReleaseEvent(event)
 
     def wheelEvent(self, event) -> None:
+        if not (event.modifiers() & Qt.ControlModifier):
+            event.ignore()
+            return
         if event.angleDelta().y() == 0:
             return
         area = QRectF(self.rect()).adjusted(36, 34, -26, -38)

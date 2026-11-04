@@ -1,0 +1,25 @@
+{
+  "model": "YOLOv8n",
+  "training_epochs_requested": 70,
+  "training_seconds": 1788.1,
+  "input_size": 320,
+  "validation_images": 199,
+  "metrics": {
+    "metrics/precision(B)": 0.7774109922191977,
+    "metrics/recall(B)": 0.6502932762123973,
+    "metrics/mAP50(B)": 0.7168772907168043,
+    "metrics/mAP50-95(B)": 0.5143725265548662,
+    "fitness": 0.53462300297106
+  },
+  "held_out_test_images": 244,
+  "test_metrics": {
+    "metrics/precision(B)": 0.7391050295701297,
+    "metrics/recall(B)": 0.559228650137741,
+    "metrics/mAP50(B)": 0.6526665846898662,
+    "metrics/mAP50-95(B)": 0.48460943807362034,
+    "fitness": 0.501415152735245
+  },
+  "hardware": "RTX 4060 Laptop GPU; not Jetson",
+  "actual_competition_test": false,
+  "jetson_benchmark": false
+}

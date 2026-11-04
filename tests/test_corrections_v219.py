@@ -99,6 +99,33 @@ class CorrectionTests(unittest.TestCase):
             self.assertEqual(parser.state['receiver_correction_age_status'],'invalid')
 
 
+class PersistedProfileTests(unittest.TestCase):
+    def test_local_profile_public_fields_and_empty_password_retention(self):
+        class Publisher:
+            def __init__(self,*a,**k):self.messages=[]
+            def publish(self,value):self.messages.append(value)
+        class Response:
+            def __init__(self,success,response_json):self.success=success;self.response_json=response_json
+        ros=types.SimpleNamespace(Service=lambda *a:None,Subscriber=lambda *a:None,
+            Publisher=Publisher,Timer=lambda *a:None,Duration=lambda v:v)
+        modules={'rospy':ros,'std_msgs.msg':types.SimpleNamespace(String=str,UInt8MultiArray=object),
+            'rcboat_ros.srv':types.SimpleNamespace(Execute=object,ExecuteResponse=Response)}
+        spec=importlib.util.spec_from_file_location('ntrip_profile_test',ROOT/'catkin_ws/src/rcboat_ros/nodes/ntrip_node.py')
+        m=importlib.util.module_from_spec(spec)
+        with patch.dict(sys.modules,modules):spec.loader.exec_module(m)
+        with tempfile.TemporaryDirectory() as directory,patch.dict(m.os.environ,{},clear=True):
+            path=Path(directory)/'ntrip.env';m.NTRIP_ENV_PATH=path
+            values={'ENABLED':'true','HOST':'caster.example.invalid','PORT':'2101','MOUNTPOINT':'SAVED',
+                    'USERNAME':'fixture-user','PASSWORD':'fixture-secret'}
+            path.write_text(''.join('RCBOAT_NTRIP_'+k+'='+json.dumps(v)+'\n' for k,v in values.items()),encoding='utf-8')
+            n=m.Ntrip();n.publish_status();public=json.loads(n.status.messages[-1])
+            self.assertEqual(public['username'],'fixture-user');self.assertEqual(public['host'],'caster.example.invalid')
+            self.assertTrue(public['credentials_saved']);self.assertNotIn('fixture-secret',n.status.messages[-1])
+            answer=n.execute(types.SimpleNamespace(action='configure',arguments_json=json.dumps({'enabled':True})))
+            self.assertTrue(answer.success);self.assertEqual(n.password,'fixture-secret')
+            self.assertEqual(m.load_local_env(path)['RCBOAT_NTRIP_PASSWORD'],'fixture-secret')
+            self.assertNotIn('fixture-secret',''.join(n.events.messages))
+
 class DeploymentTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -137,6 +164,13 @@ class DeploymentTests(unittest.TestCase):
         self.result['telemetry']['ntrip']['software_version']='2.1.3'
         with self.assertRaisesRegex(RuntimeError,'ntrip node runtime version'):
             self.module.verify_runtime(self.result,'2.1.10',self.manifest,self.root)
+
+    def test_camera_release_requires_running_vision_status(self):
+        self.manifest['files']['catkin_ws/src/rcboat_ros/nodes/balloon_vision_node.py']='fixture'
+        with self.assertRaisesRegex(RuntimeError,'vision node runtime version'):
+            self.module.verify_runtime(self.result,'2.1.10',self.manifest,self.root)
+        self.result['telemetry']['vision']={'software_version':'2.1.10'}
+        self.module.verify_runtime(self.result,'2.1.10',self.manifest,self.root)
 
     def test_partial_source_transfer_is_rejected(self):
         (self.root/self.name).write_text('old source')

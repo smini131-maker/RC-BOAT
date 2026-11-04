@@ -8,14 +8,20 @@ import rospy
 from std_msgs.msg import String
 from rcboat_ros.msg import ControlCommand
 from rcboat_ros.srv import Execute,ExecuteResponse
-from rcboat_ros.common import unpack,pack,clamp,lerp,fresh,SAFE_STEERING,SAFE_THROTTLE,gps_is_healthy
+from rcboat_ros.common import unpack,pack,clamp,lerp,fresh,SAFE_STEERING,SAFE_THROTTLE,gps_is_healthy,finite_coordinate
 from rcboat_ros.failsafe import ProgressMonitor
+from rcboat_ros.control_config import load_rc,load_output,rc_valid,neutral,normalized,map_axis,validate_cruise,output_in_range
 
-MODES={'AUTO_SAFE','AUTO','MANUAL','REMOTE','NAVIGATION','GROUND_TEST'}
+MODES={'AUTO_SAFE','AUTO','MANUAL','REMOTE','NAVIGATION','GROUND_TEST','BALLOON'}
+
+from rcboat_ros.balloon_tracking import safe_balloon_output
 
 class Supervisor:
     def __init__(self):
+        self.rc_calibration=load_rc(rospy.get_param)
+        self.output_calibration=load_output(rospy.get_param)
         self.mode='AUTO_SAFE';self.armed=False;self.estop=False
+        self.vision={};self.vision_desired={};self.balloon_gps_gap_since=None
         self.lock=threading.RLock();self.reason='';self.link={};self.actuator={};self.propulsion={}
         self.progress=ProgressMonitor();self.mode_since=time.monotonic()
         self.ground_test_actuation_enabled=False
@@ -23,6 +29,11 @@ class Supervisor:
         if not math.isfinite(grace) or not 0<=grace<=30:
             raise ValueError('ground_test_gps_grace_s must be between 0 and 30 seconds')
         self.ground_gps_grace_s=grace
+        self.navigation_gps_grace_s=float(rospy.get_param('/rcboat/navigation_gps_grace_s',5.0))
+        if not math.isfinite(self.navigation_gps_grace_s) or not 0<=self.navigation_gps_grace_s<=30:
+            raise ValueError('navigation_gps_grace_s must be between 0 and 30 seconds')
+        self.navigation_gps_grace_pwm=validate_cruise(rospy.get_param('/rcboat/navigation_gps_grace_pwm',6650))
+        self.gps_grace_mode=None
         self.ground_gps_gap_since=None;self.ground_gps_recovery_stamp=None
         self.ground_gps_grace_remaining_s=0.0
         self.gps={};self.rc={};self.nav={};self.remote={};self.remote_stamp=0
@@ -36,6 +47,8 @@ class Supervisor:
         rospy.Subscriber('/rcboat/gui/link',String,lambda m:setattr(self,'link',unpack(m)))
         rospy.Subscriber('/rcboat/actuator/status',String,lambda m:setattr(self,'actuator',unpack(m)))
         rospy.Subscriber('/rcboat/propulsion/status',String,lambda m:setattr(self,'propulsion',unpack(m)))
+        rospy.Subscriber('/rcboat/vision/status',String,lambda m:setattr(self,'vision',unpack(m)))
+        rospy.Subscriber('/rcboat/vision/desired',String,lambda m:setattr(self,'vision_desired',unpack(m)))
         rospy.Service('/rcboat/safety/execute',Execute,self.execute)
     def execute(self,req):
         with self.lock:return self._execute(req)
@@ -56,15 +69,18 @@ class Supervisor:
                 mode=str(args['mode'])
                 if mode not in MODES:raise ValueError('unknown mode')
                 if self.estop and mode not in ('AUTO_SAFE','MANUAL'):raise ValueError('E-STOP latched')
-                if mode in ('AUTO','NAVIGATION','REMOTE','GROUND_TEST'):
+                if mode in ('AUTO','NAVIGATION','REMOTE','GROUND_TEST','BALLOON'):
                     reason=self._link_fault(time.monotonic(),mode)
                     if reason:raise ValueError(reason)
-                if mode in ('AUTO','NAVIGATION','REMOTE','GROUND_TEST'):
+                if mode in ('AUTO','NAVIGATION','REMOTE','GROUND_TEST','BALLOON'):
                     if not self.gps.get('healthy') or not gps_is_healthy(self.gps,time.monotonic(),2.0):
                         raise ValueError('GPS_INVALID_OR_STALE')
                 if mode in ('NAVIGATION','GROUND_TEST'):
                     reason=self._navigation_fault(time.monotonic())
                     if reason:raise ValueError(reason)
+                if mode=='BALLOON' and safe_balloon_output(self.vision,self.vision_desired,time.monotonic()) is None:
+                    raise ValueError('BALLOON_NOT_READY: live camera and acquired pink target required')
+                self.balloon_gps_gap_since=None
                 self._clear_gps_grace('ABORTED','MODE_CHANGED')
                 self.mode=mode;self.mode_since=time.monotonic();self.reason='';self.progress.reset()
                 self.ground_test_actuation_enabled=(
@@ -73,13 +89,13 @@ class Supervisor:
                 self.auto_gesture_since=None;self.manual_gesture_since=None
                 self.manual_rearm_pending=mode=='MANUAL'
                 self.manual_rearm_since=None
-                self.armed=bool(args.get('armed',False)) if mode=='NAVIGATION' else False
+                self.armed=bool(args.get('armed',False)) if mode in ('NAVIGATION','BALLOON') else False
                 if mode=='REMOTE':self.remote_stamp=0
                 self.events.publish(pack(type='MODE_CHANGED',mode=mode,at=time.time()))
             elif req.action=='set_remote_pwm':
                 if self.mode!='REMOTE':raise ValueError('not in REMOTE mode')
-                steer=int(args['steering_pwm']);throttle=int(args['throttle_pwm'])
-                if not 4900<=steer<=7300 or not 5800<=throttle<=7000:raise ValueError('PWM outside calibration')
+                steer=args['steering_pwm'];throttle=args['throttle_pwm']
+                if not output_in_range(steer,throttle,self.output_calibration):raise ValueError('PWM outside calibration')
                 self.remote={'steering_pwm':steer,'throttle_pwm':throttle}
                 self.remote_stamp=time.monotonic()
             elif req.action=='heartbeat':
@@ -90,18 +106,20 @@ class Supervisor:
             return ExecuteResponse(True,pack(mode=self.mode,estop=self.estop,armed=self.armed))
         except Exception as e:return ExecuteResponse(False,pack(error=str(e)))
     def _gestures(self,now):
-        if self.estop or not fresh(float(self.rc.get('monotonic',0)),.75,now):
+        if self.estop or not rc_valid(self.rc,self.rc_calibration,now):
             self.auto_gesture_since=self.manual_gesture_since=self.manual_rearm_since=None
             if self.mode=='MANUAL':self.manual_rearm_pending=True
             return
-        steer=int(self.rc['steering_us']);throttle=int(self.rc['throttle_us'])
-        if self.mode=='MANUAL' and steer>=1950 and abs(throttle-1500)<=30:
+        steer=self.rc['steering_us'];throttle=self.rc['throttle_us']
+        throttle_neutral=neutral(throttle,self.rc_calibration['throttle'])
+        # Numeric high-end gestures; manual direction is not nav_invert_steering.
+        if self.mode=='MANUAL' and normalized(steer,self.rc_calibration['steering'])>=.85 and throttle_neutral:
             if self.auto_gesture_since is None:self.auto_gesture_since=now
             elif now-self.auto_gesture_since>=3.0:
                 self.mode='AUTO_SAFE';self.armed=False;self.auto_gesture_since=None
                 self.events.publish(pack(type='RC_GESTURE_AUTO_SAFE',at=time.time()))
         else:self.auto_gesture_since=None
-        if self.mode in ('AUTO_SAFE','AUTO','NAVIGATION','REMOTE','GROUND_TEST') and throttle>=1850:
+        if self.mode in ('AUTO_SAFE','AUTO','NAVIGATION','REMOTE','GROUND_TEST','BALLOON') and normalized(throttle,self.rc_calibration['throttle'])>=.90:
             if self.manual_gesture_since is None:self.manual_gesture_since=now
             elif now-self.manual_gesture_since>=.5:
                 self.mode='MANUAL';self.armed=False;self.manual_rearm_pending=True
@@ -109,7 +127,7 @@ class Supervisor:
                 self.events.publish(pack(type='RC_GESTURE_MANUAL_PENDING_NEUTRAL',at=time.time()))
         else:self.manual_gesture_since=None
         if self.manual_rearm_pending:
-            if abs(throttle-1500)<=30:
+            if throttle_neutral:
                 if self.manual_rearm_since is None:self.manual_rearm_since=now
                 elif now-self.manual_rearm_since>=.3:
                     self.manual_rearm_pending=False;self.manual_rearm_since=None
@@ -117,6 +135,7 @@ class Supervisor:
             else:self.manual_rearm_since=None
     def _manual(self,reason):
         previous=self.mode
+        self.balloon_gps_gap_since=None
         self._clear_gps_grace('ABORTED',reason)
         self.mode='MANUAL';self.armed=False;self.reason=reason
         self.ground_test_actuation_enabled=False
@@ -143,26 +162,31 @@ class Supervisor:
         if not fresh(float(self.nav.get('route_monotonic') or 0),1.0,now):return 'ROUTE_TIMEOUT'
         if self.nav.get('route_complete'):return 'TARGET_ARRIVED'
         if not allow_gps_gap and not self.nav.get('valid'):return 'NAVIGATION_INVALID'
+        if self.nav.get('valid') and not output_in_range(self.nav.get('desired_steering_pwm'),
+                self.nav.get('desired_throttle_pwm'),self.output_calibration):return 'NAVIGATION_PWM_OUT_OF_RANGE'
         return ''
 
     def _clear_gps_grace(self,outcome,reason=''):
         if self.ground_gps_gap_since is not None:
-            self.events.publish(pack(type='GROUND_TEST_GPS_GRACE_'+outcome,
+            self.events.publish(pack(type=(self.gps_grace_mode or 'GROUND_TEST')+'_GPS_GRACE_'+outcome,
                 at=time.time(),monotonic=time.monotonic(),reason=reason,
                 elapsed_s=max(0,time.monotonic()-self.ground_gps_gap_since)))
         self.ground_gps_gap_since=None;self.ground_gps_recovery_stamp=None
         self.ground_gps_grace_remaining_s=0.0
-        if self.reason=='GROUND_TEST_GPS_GRACE':self.reason=''
+        self.gps_grace_mode=None
+        if self.reason in ('GROUND_TEST_GPS_GRACE','NAVIGATION_GPS_GRACE'):self.reason=''
 
     def _ground_gps_grace(self,now):
         gps_ok=bool(self.gps.get('healthy')) and gps_is_healthy(self.gps,now,2.0)
+        grace=self.ground_gps_grace_s if self.mode=='GROUND_TEST' else self.navigation_gps_grace_s
         if self.ground_gps_gap_since is None:
             self.ground_gps_gap_since=now
-            self.events.publish(pack(type='GROUND_TEST_GPS_GRACE_STARTED',at=time.time(),
-                monotonic=now,grace_s=self.ground_gps_grace_s,gps_snapshot=dict(self.gps)))
+            self.gps_grace_mode=self.mode
+            self.events.publish(pack(type=self.mode+'_GPS_GRACE_STARTED',at=time.time(),
+                monotonic=now,grace_s=grace,gps_snapshot=dict(self.gps)))
         elapsed=max(0,now-self.ground_gps_gap_since)
-        self.ground_gps_grace_remaining_s=max(0,self.ground_gps_grace_s-elapsed)
-        if elapsed>=self.ground_gps_grace_s:
+        self.ground_gps_grace_remaining_s=max(0,grace-elapsed)
+        if elapsed>=grace:
             reason='NAVIGATION_INVALID' if gps_ok else 'GPS_INVALID_OR_STALE'
             self._clear_gps_grace('EXPIRED',reason)
             return reason
@@ -177,20 +201,40 @@ class Supervisor:
                 return ''
         else:
             self.ground_gps_recovery_stamp=None
-        self.reason='GROUND_TEST_GPS_GRACE'
+        self.reason=self.mode+'_GPS_GRACE'
         return ''
 
     def _fault(self,now):
         reason=self._link_fault(now)
         if reason:return reason
-        if not fresh(float(self.rc.get('monotonic') or 0),.75,now):return 'RC_INPUT_LOST'
+        if not rc_valid(self.rc,self.rc_calibration,now):return 'RC_INPUT_LOST'
+        try:validate_cruise(rospy.get_param('/rcboat/cruise_pwm',6650))
+        except ValueError:return 'CRUISE_PWM_INVALID'
+        if self.mode in ('NAVIGATION','GROUND_TEST'):
+            # Cruise setting is distinct from reduced turn/feedback output PWM.
+            if 'auto_cruise_pwm' in self.nav:
+                try:validate_cruise(self.nav['auto_cruise_pwm'])
+                except ValueError:return 'CRUISE_PWM_INVALID'
         if self.propulsion.get('fault') or self.propulsion.get('blocked'):
             return 'PROPULSION_FAULT'
         if self.actuator.get('command_applied') is False:return 'ACTUATOR_ERROR'
         if now-self.mode_since>1.5 and not fresh(float(self.actuator.get('monotonic') or 0),1.0,now):
             return 'ACTUATOR_TIMEOUT'
         gps_ok=bool(self.gps.get('healthy')) and gps_is_healthy(self.gps,now,2.0)
-        gps_gap=self.mode=='GROUND_TEST' and (not gps_ok or self.ground_gps_gap_since is not None)
+        if self.gps.get('transport_connected') is False or self.gps.get('error'):
+            return 'GPS_DISCONNECTED'
+        nav_delay=(finite_coordinate(self.gps.get('latitude'),self.gps.get('longitude')) and
+                   (self.gps.get('data_validity')=='stale' or
+                    (bool(self.gps.get('fix')) and not fresh(float(self.gps.get('last_valid_monotonic') or 0),2.0,now))))
+        # Invalid/missing FIX is not a mere delay. Only NAVIGATION stale data is
+        # eligible; Ground Test retains its established broader recovery policy.
+        if self.mode=='BALLOON':
+            reason=self._balloon_fault(now,gps_ok,nav_delay)
+            if reason:return reason
+            gps_ok=True  # The separate balloon GPS lease has already been checked.
+        if self.mode=='NAVIGATION' and not gps_ok and not nav_delay:
+            return 'GPS_INVALID_OR_STALE'
+        gps_gap=(self.mode=='GROUND_TEST' or (self.mode=='NAVIGATION' and (nav_delay or self.ground_gps_gap_since is not None))) and (not gps_ok or self.ground_gps_gap_since is not None)
         if not gps_ok and not gps_gap:return 'GPS_INVALID_OR_STALE'
         if self.mode in ('NAVIGATION','GROUND_TEST'):
             reason=self._navigation_fault(now,allow_gps_gap=gps_gap)
@@ -199,12 +243,30 @@ class Supervisor:
             reason=self._ground_gps_grace(now)
             if reason:return reason
         throttle=(int(rospy.get_param('/rcboat/cruise_pwm',6650)) if self.mode=='AUTO'
-                  else int(self.nav.get('desired_throttle_pwm') or 6450))
+                  else int((self.vision_desired if self.mode=='BALLOON' else self.nav).get('desired_throttle_pwm') or 6450))
         if self.progress.update(now,self.gps,throttle,
-                enabled=self.mode in ('AUTO','NAVIGATION') and bool(self.gps.get('healthy')) and
+                enabled=self.mode in ('AUTO','NAVIGATION','BALLOON') and not gps_gap and bool(self.gps.get('healthy')) and
                        bool(rospy.get_param('/rcboat/no_progress_enabled',True)),
                 timeout=float(rospy.get_param('/rcboat/no_progress_timeout_s',15.0))):
             return 'PROPULSION_NO_PROGRESS_SUSPECTED'
+        return ''
+
+    def _balloon_fault(self,now,gps_ok,delay):
+        if not gps_ok:
+            if not delay:return 'GPS_INVALID_OR_STALE'
+            if self.balloon_gps_gap_since is None:
+                self.balloon_gps_gap_since=now
+                self.events.publish(pack(type='BALLOON_GPS_GRACE_STARTED',at=time.time(),monotonic=now))
+            if now-self.balloon_gps_gap_since>=self.navigation_gps_grace_s:return 'GPS_INVALID_OR_STALE'
+            self.reason='BALLOON_GPS_GRACE'
+        else:
+            if self.balloon_gps_gap_since is not None:self.events.publish(pack(type='BALLOON_GPS_GRACE_RECOVERED',at=time.time(),monotonic=now))
+            self.balloon_gps_gap_since=None
+            if self.reason=='BALLOON_GPS_GRACE':self.reason=''
+        if safe_balloon_output(self.vision,self.vision_desired,now,self.mode_since) is None:
+            # Wait briefly for the first inference tagged with this new arming session.
+            if now-self.mode_since<2 and safe_balloon_output(self.vision,self.vision_desired,now) is not None:return ''
+            return 'BALLOON_TARGET_OR_CAMERA_LOST'
         return ''
 
     def _command(self):
@@ -212,15 +274,17 @@ class Supervisor:
 
     def _command_locked(self):
         now=time.monotonic();source='AUTO_SAFE';s=SAFE_STEERING;t=SAFE_THROTTLE;lock=True
-        if self.mode in ('AUTO','NAVIGATION','REMOTE','GROUND_TEST'):
+        if self.mode in ('AUTO','NAVIGATION','REMOTE','GROUND_TEST','BALLOON'):
             reason=self._fault(now)
             if reason:
                 self._manual(reason)
                 return 'FAILSAFE_MANUAL',s,t,True
         self._gestures(now)
-        if self.mode!='GROUND_TEST':self._clear_gps_grace('ABORTED','MODE_CHANGED')
+        if self.mode not in ('GROUND_TEST','NAVIGATION'):self._clear_gps_grace('ABORTED','MODE_CHANGED')
         # GPS hard faults must lock autonomous navigation, not physically safe manual takeover.
         if self.estop:return 'ESTOP',s,t,True
+        if self.mode=='NAVIGATION' and self.armed and self.ground_gps_gap_since is not None:
+            return 'NAVIGATION_GPS_GRACE',SAFE_STEERING,self.navigation_gps_grace_pwm,False
         if self.mode=='GROUND_TEST':
             if self.ground_gps_gap_since is not None:
                 return 'GROUND_TEST_GPS_GRACE',SAFE_STEERING,SAFE_THROTTLE,True
@@ -228,26 +292,31 @@ class Supervisor:
             # non-persistent ground-test opt-in. E-STOP, GPS and freshness gates still win.
             if (self.ground_test_actuation_enabled and self.gps.get('healthy') and
                     self.nav.get('valid') and fresh(float(self.nav.get('monotonic',0)),.75,now)):
-                s=int(clamp(int(self.nav['desired_steering_pwm']),4900,7300))
-                t=int(clamp(int(self.nav['desired_throttle_pwm']),5800,7000))
+                s=self.nav['desired_steering_pwm']
+                t=self.nav['desired_throttle_pwm']
                 return 'GROUND_TEST_NAVIGATION',s,t,False
             return 'GROUND_TEST',s,SAFE_THROTTLE,True
+        if self.mode=='BALLOON' and self.armed:
+            pair=safe_balloon_output(self.vision,self.vision_desired,now,self.mode_since)
+            if pair is not None:return 'BALLOON',pair[0],pair[1],False
         if self.mode=='AUTO':
             return 'AUTO',s,int(rospy.get_param('/rcboat/cruise_pwm',6650)),False
         if self.mode=='MANUAL' and not self.manual_rearm_pending:
-            if fresh(float(self.rc.get('monotonic',0)),.75,now):
+            if rc_valid(self.rc,self.rc_calibration,now):
                 us_s=float(self.rc['steering_us']);us_t=float(self.rc['throttle_us'])
-                s=round(lerp(us_s,1214,1640,4900,6000)) if us_s<=1640 else round(lerp(us_s,1640,2000,6000,7300))
-                if 1470<=us_t<=1530:t=6450
-                elif us_t<1470:t=round(lerp(us_t,1106,1500,5800,6450))
-                else:t=round(lerp(us_t,1500,1888,6450,7000))
+                out=self.output_calibration
+                s=map_axis(us_s,self.rc_calibration['steering'],out['steering_low'],out['steering_center'],out['steering_high'])
+                t=map_axis(us_t,self.rc_calibration['throttle'],out['throttle_reverse_max'],out['throttle_stop'],out['throttle_forward_max'])
                 source='MANUAL';lock=False
         elif self.mode=='REMOTE':
             if fresh(self.remote_stamp,float(rospy.get_param('/rcboat/remote_heartbeat_s',.7)),now):
                 s=self.remote['steering_pwm'];t=self.remote['throttle_pwm'];source='REMOTE';lock=False
             else:self._manual('REMOTE_TIMEOUT')
         elif self.mode=='NAVIGATION' and self.armed:
-            if self.gps.get('healthy') and self.nav.get('valid') and fresh(float(self.nav.get('monotonic',0)),.75,now):
+            # A cached pre-start command must not bypass the new-session ramp.
+            ramp_ready=(self.nav.get('ramp_active') is True and
+                        self.nav.get('ramp_session_monotonic')==self.mode_since)
+            if ramp_ready and self.gps.get('healthy') and self.nav.get('valid') and fresh(float(self.nav.get('monotonic',0)),.75,now):
                 s=int(self.nav['desired_steering_pwm']);t=int(self.nav['desired_throttle_pwm']);source='NAVIGATION';lock=False
         return source,s,t,lock
     def run(self):
@@ -259,13 +328,17 @@ class Supervisor:
                 msg.header.stamp=rospy.Time.now();msg.mode=self.mode;msg.source=source
                 msg.steering_pwm=int(s);msg.throttle_pwm=int(t);msg.actuator_locked=lock
                 self.cmd.publish(msg)
-                self.state.publish(pack(software_version="2.1.12",mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
+                self.state.publish(pack(software_version="2.3.1",mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
+                                        mode_since_monotonic=self.mode_since,
                                         ground_test_actuation_enabled=self.ground_test_actuation_enabled,
-                                        gps_grace_active=self.ground_gps_gap_since is not None,
-                                        gps_grace_remaining_s=round(self.ground_gps_grace_remaining_s,2),
-                                        gps_grace_s=self.ground_gps_grace_s,
+                                        gps_grace_active=self.ground_gps_gap_since is not None or self.balloon_gps_gap_since is not None,
+                                        balloon_armed=self.mode=='BALLOON' and self.armed,
+                                        gps_grace_remaining_s=round(max(0,self.navigation_gps_grace_s-(time.monotonic()-self.balloon_gps_gap_since)),2) if self.balloon_gps_gap_since is not None else round(self.ground_gps_grace_remaining_s,2),
+                                        gps_grace_s=self.navigation_gps_grace_s if self.mode=='NAVIGATION' else self.ground_gps_grace_s,
+                                        gps_grace_mode='BALLOON' if self.balloon_gps_gap_since is not None else self.gps_grace_mode,
                                         reason=self.reason,manual_rearm_pending=self.manual_rearm_pending,
-                                        rc_fresh=fresh(float(self.rc.get('monotonic') or 0),.75),
+                                        rc_fresh=rc_valid(self.rc,self.rc_calibration,time.monotonic()),
+                                        rc_input_calibration=self.rc_calibration,pca_output_calibration=self.output_calibration,
                                         propulsion_feedback_status='fault' if self.propulsion.get('fault') or self.propulsion.get('blocked') else 'available' if self.propulsion else 'unsupported',
                                         throttle_locked=lock,
                                         steering_test_enabled=self.mode=='GROUND_TEST' and source=='GROUND_TEST_NAVIGATION',

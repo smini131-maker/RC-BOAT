@@ -1,0 +1,105 @@
+{
+  "model_sha256": "75487e7a11d600412e34b1ca49e80935225d5106ff7184614e37116d9deeacbe",
+  "backend": "ONNX Runtime CPU, 2 threads",
+  "device": "Windows PC; not Jetson Nano",
+  "input_size": 320,
+  "test_images": 244,
+  "ground_truth_boxes": 1089,
+  "confidence": 0.35,
+  "iou_threshold": 0.5,
+  "true_positive_boxes": 638,
+  "false_positive_boxes": 223,
+  "precision": 0.7409988385598142,
+  "recall": 0.5858585858585859,
+  "large_boxes_area_at_least_1pct": 566,
+  "large_box_recall": 0.8215547703180212,
+  "pink_colour_proxy_ground_truth_boxes": 433,
+  "pink_colour_proxy_matches": 191,
+  "pink_detections": 255,
+  "mean_inference_ms": 16.22,
+  "p95_inference_ms": 18.8,
+  "checks": {
+    "decoder_geometry": true,
+    "nms": true,
+    "pink_green_filter": true,
+    "model_hash": true,
+    "opencv_fallback_loaded": true
+  },
+  "examples": [
+    {
+      "image_id": "0035747f89c50622",
+      "ground_truth_boxes": 9,
+      "detected": 5,
+      "pink_detected": 1
+    },
+    {
+      "image_id": "00375bd54c79dfb6",
+      "ground_truth_boxes": 3,
+      "detected": 1,
+      "pink_detected": 0
+    },
+    {
+      "image_id": "006ff1da108ef307",
+      "ground_truth_boxes": 2,
+      "detected": 2,
+      "pink_detected": 0
+    },
+    {
+      "image_id": "01119d5193801092",
+      "ground_truth_boxes": 1,
+      "detected": 13,
+      "pink_detected": 0
+    },
+    {
+      "image_id": "025dac586b7273b2",
+      "ground_truth_boxes": 3,
+      "detected": 2,
+      "pink_detected": 0
+    },
+    {
+      "image_id": "02a0508fa75a5ce8",
+      "ground_truth_boxes": 2,
+      "detected": 2,
+      "pink_detected": 0
+    },
+    {
+      "image_id": "02cfea5f3a6285a4",
+      "ground_truth_boxes": 1,
+      "detected": 1,
+      "pink_detected": 1
+    },
+    {
+      "image_id": "02df1bb9612ea407",
+      "ground_truth_boxes": 1,
+      "detected": 1,
+      "pink_detected": 0
+    },
+    {
+      "image_id": "02ef596e372f4cab",
+      "ground_truth_boxes": 1,
+      "detected": 1,
+      "pink_detected": 0
+    },
+    {
+      "image_id": "032408f04d85440f",
+      "ground_truth_boxes": 2,
+      "detected": 2,
+      "pink_detected": 0
+    },
+    {
+      "image_id": "03b0a8314fc75105",
+      "ground_truth_boxes": 6,
+      "detected": 7,
+      "pink_detected": 4
+    },
+    {
+      "image_id": "062f38b15ded6d7a",
+      "ground_truth_boxes": 18,
+      "detected": 18,
+      "pink_detected": 8
+    }
+  ],
+  "actual_competition_test": false,
+  "jetson_benchmark": false,
+  "limitation": "Public balloon images. Pink subset is an HSV proxy, not independent human colour labels. No no-balloon marine negative set; false-positive rate in water scenes is not established."
+}

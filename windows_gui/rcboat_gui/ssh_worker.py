@@ -14,9 +14,10 @@ from typing import Any
 
 import paramiko
 from PySide6.QtCore import QThread, Signal
+from rcboat_ros.control_config import validate_cruise,output_in_range
 
 
-GUI_VERSION = "2.1.12"
+GUI_VERSION = "2.3.1"
 
 REMOTE_BRIDGE = r'''p=/home/jetson/rcboat_ros_ws/deployment/jetson/bridge_client.py
 [ -f "$p" ] && exec python3 "$p"
@@ -50,7 +51,7 @@ class SSHWorker(QThread):
     SSH_RETRY_INTERVAL_S = 10.0
     SSH_HEALTH_INTERVAL_S = 1.0
     SSH_HEALTH_TIMEOUT_S = 2.0
-    SSH_FAILURE_LIMIT = 2
+    SSH_DELAY_GRACE_S = 5.0
 
     connected = Signal()
     disconnected = Signal(str)
@@ -86,6 +87,7 @@ class SSHWorker(QThread):
         self._ssh_lock = threading.RLock()
         self._ssh_confirmed = False
         self._ssh_health_failures = 0
+        self._ssh_delay_since = None
         self._ssh_health_failed = threading.Event()
         self._ssh_probe_error = ""
         self._backend_version = ""
@@ -102,6 +104,7 @@ class SSHWorker(QThread):
             self._shell_channel = None
             self._ssh_confirmed = False
             self._ssh_health_failures = 0
+            self._ssh_delay_since = None
             self._ssh_health_failed.clear()
         if shell is not None:
             try:
@@ -192,7 +195,10 @@ class SSHWorker(QThread):
     def _translate(request: dict[str, Any]) -> dict[str, Any]:
         command = str(request["command"]).upper()
         kwargs = {k: v for k, v in request.items() if k not in {"command", "request_id"}}
+        if command=='REMOTE_CONTROL' and not output_in_range(kwargs.get('steering_pwm'),kwargs.get('throttle_pwm')):
+            raise ValueError('remote PWM outside calibration')
         direct = {
+            "VISION_ENABLE":"vision_enable", "VISION_CONFIGURE":"vision_configure", "VISION_RESET_TRACKING":"vision_reset_tracking",
             "REMOTE_CONTROL": "set_remote_pwm", "HEARTBEAT": "heartbeat",
             "EMERGENCY_STOP": "estop", "CLEAR_ESTOP": "reset_estop",
             "SELECT_ROUTE": "select_route", "DELETE_ROUTE": "delete_route",
@@ -209,7 +215,7 @@ class SSHWorker(QThread):
             mode = str(kwargs.get("mode", "AUTO")).upper()
             return {"action": "set_mode", "arguments": {
                 "mode": "AUTO_SAFE" if mode == "AUTO" else mode,
-                "armed": mode == "NAVIGATION",
+                "armed": mode in {"NAVIGATION","BALLOON"},
             }}
         if command == "START_GPS_RECORDING":
             return {"action": "record_start", "arguments": kwargs}
@@ -219,7 +225,7 @@ class SSHWorker(QThread):
                 "endpoint_tolerance_m": kwargs.get("endpoint_tolerance_m", 0.75),
             }}
         if command == "SET_AUTO_CRUISE_PWM":
-            return {"action": "set_auto_cruise_pwm", "arguments": {"value": kwargs.get("value")}}
+            return {"action": "set_auto_cruise_pwm", "arguments": {"value": validate_cruise(kwargs.get("value"))}}
         if command == "DISABLE_NTRIP":
             return {"action": "configure", "arguments": {"enabled": False}}
         if command == "REFRESH_NTRIP":
@@ -316,23 +322,32 @@ class SSHWorker(QThread):
         }
         logger_state = str(ground.get("state") or ("recording" if ground.get("active") else "idle"))
         return {
-            "type": "telemetry", "software_version": response.get("version", "2.1.12"),
+            "type": "telemetry", "software_version": response.get("version", "2.3.1"),
             "backend": {"name": str(response.get("backend") or "ROS Noetic"),
                         "ready": bool(response.get("gateway_online", True)), "node_count": len(nodes),
                         "master_online": bool(response.get("master_online")),
                         "gateway_online": bool(response.get("gateway_online", True)),
                         "ssh_connected": bool(ssh_connected), "logger_state": logger_state,
+                        "ssh_state": (cache.get('operator_link',{}).get('ssh_state','connected') if ssh_connected else 'disconnected'),
                         "version": response.get("version") or "unknown",
                         "runtime_identity": response.get("runtime_identity") or {}},
             "timestamp": time.time(), "mode": mode, "operation_state": (
                 "EMERGENCY_STOP" if safety.get("estop") else
+                "NAVIGATION_GPS_GRACE" if ros_mode=='NAVIGATION' and safety.get('gps_grace_active') else
                 "MANUAL_WAITING_RC" if mode == "MANUAL" and not safety.get("rc_fresh") else
                 "MANUAL_WAITING_NEUTRAL" if mode == "MANUAL" and safety.get("manual_rearm_pending") else
                 "MANUAL_ACTIVE" if mode == "MANUAL" else ros_mode),
-            "navigation_active": ros_mode == "NAVIGATION" and bool(safety.get("armed")),
+            "navigation_active": ros_mode == "NAVIGATION" and bool(safety.get("armed")) and not safety.get('gps_grace_active'),
             "estop": bool(safety.get("estop")), "failsafe_reason": safety.get("reason") or "",
             "manual_waiting_for_neutral": bool(safety.get("manual_rearm_pending")),
-            "auto_cruise_pwm": int(nav.get("auto_cruise_pwm") or 6650), "mock": False,
+            "auto_cruise_pwm": nav.get("auto_cruise_pwm") if nav.get('fresh',False) else None,
+            "ramp_throttle_pwm": nav.get('ramp_throttle_pwm') if nav.get('fresh',False) else None,
+            "final_throttle_pwm": safety.get('throttle_pwm'),
+            "vision":cache.get("vision") or {}, "vision_desired":cache.get("vision_desired") or {},
+            "balloon_armed":ros_mode=="BALLOON" and bool(safety.get("armed")),
+            "cruise_applied_monotonic": nav.get('cruise_applied_monotonic'), "mock": False,
+            "rc_input_calibration": safety.get('rc_input_calibration'),
+            "pca_output_calibration": safety.get('pca_output_calibration'),
             "devices": {"arduino": bool(rc) or "/rc_input_node" in nodes,
                         "gps": bool(gps) or "/gps_node" in nodes,
                         "pca9685": bool(actuator) or "/actuator_node" in nodes},
@@ -368,8 +383,7 @@ class SSHWorker(QThread):
                     "nmea_sentence_count": gps.get("nmea_count"),
                     "parser_error_count": gps.get("parser_error_count", 0)},
             "ntrip": ntrip,
-            "gps_settings": {"navigation_max_hdop": 3.0, "rtk_fallback_to_gps": True,
-                             "rtk_required_for_navigation": False},
+            "gps_settings": dict(response.get('gps_settings') or {}),
             "gps_logging": cache.get("gps_logging") or {"active": False, "samples": 0, "file_path": ""},
             "gps_recording": route.get("recording") or {"active": False, "point_count": 0},
             "ground_test": {"active": bool(ground.get("active")), "state": logger_state,
@@ -430,10 +444,18 @@ class SSHWorker(QThread):
                "command": command, "ok": False, "error": ""}
         try:
             starts_motion = command in {"GROUND_TEST_START", "GROUND_TEST_RESUME"} or (
-                command == "SET_MODE" and str(request.get("mode") or "").upper() in {"NAVIGATION", "REMOTE"})
+                command == "SET_MODE" and str(request.get("mode") or "").upper() in {"NAVIGATION", "REMOTE", "BALLOON"})
             if starts_motion and self._backend_version != GUI_VERSION:
                 raise RuntimeError(f"Jetson v{self._backend_version or 'unknown'} / GUI v{GUI_VERSION}: 백엔드 업데이트 후 운항하세요")
-            if command == "DOWNLOAD_GROUND_RESULTS":
+            if command=='DOWNLOAD_VISION_LOG':
+                response=self._bridge({'action':'download_vision_log','arguments':{}})
+                if not response.get('success'):raise RuntimeError(response.get('error') or 'vision download failed')
+                detail=response['response'];raw=base64.b64decode(detail['zip_base64']);name=str(detail['filename'])
+                if Path(name).name!=name or not name.endswith('.zip'):raise ValueError('invalid export filename')
+                if hashlib.sha256(raw).hexdigest()!=detail['sha256']:raise ValueError('vision export hash mismatch')
+                destination=Path(str(request['destination']));destination.mkdir(parents=True,exist_ok=True)
+                target=destination/name;target.write_bytes(raw);ack.update(ok=True,path=str(target),bytes=len(raw))
+            elif command == "DOWNLOAD_GROUND_RESULTS":
                 result = self._download_results(
                     str(request["destination"]), list(request.get("categories") or []),
                     str(request.get("test_id") or "")
@@ -452,7 +474,10 @@ class SSHWorker(QThread):
         self.acknowledgement.emit(ack)
 
     def _send_operator_link(self, ssh_connected: bool) -> None:
-        payload = {"action": "operator_link", "arguments": {"ssh_connected": ssh_connected}}
+        payload = {"action": "operator_link", "arguments": {
+            "ssh_connected": ssh_connected,
+            "ssh_state": 'delayed' if ssh_connected and self._ssh_delay_since is not None else
+                         'connected' if ssh_connected else 'disconnected'}}
         if self.gateway_token:
             payload["token"] = self.gateway_token
         # Separate short-lived connection: ZIP downloads and status queries cannot
@@ -478,15 +503,21 @@ class SSHWorker(QThread):
         with self._ssh_lock:
             if self._client is not client:
                 return self._ssh_confirmed
+            # A transport can close while the channel probe is waiting.
+            ended=(ended or not transport.is_active() or not transport.is_authenticated()
+                   or shell is None or shell.closed or shell.exit_status_ready())
+            if ended:healthy=False
             if healthy:
                 if self._ssh_health_failures:
                     self.log.emit("SSH 지연 회복 · 기존 연결 유지")
                 self._ssh_health_failures = 0
+                self._ssh_delay_since = None
                 if not self._ssh_health_failed.is_set():
                     self._ssh_confirmed = True
             else:
                 self._ssh_health_failures += 1
-                if ended or self._ssh_health_failures >= self.SSH_FAILURE_LIMIT:
+                if self._ssh_delay_since is None:self._ssh_delay_since=time.monotonic()
+                if ended or time.monotonic()-self._ssh_delay_since>=self.SSH_DELAY_GRACE_S:
                     if not self._ssh_health_failed.is_set():
                         self.log.emit("SSH 단절 확정: " + ("세션 종료" if ended else self._ssh_probe_error))
                         self.terminal_state.emit(False, "SSH disconnected · 응답 확인 실패")
@@ -575,6 +606,7 @@ class SSHWorker(QThread):
                             self._shell_channel = shell
                             self._ssh_health_failed.clear()
                             self._ssh_health_failures = 0
+                            self._ssh_delay_since = None
                             self._ssh_confirmed = True
                             self._client = client
                         self.terminal_state.emit(True, f"{self.username}@{self.host}")
@@ -639,7 +671,7 @@ class SSHWorker(QThread):
                         self._backend_error = ""
                     except Exception as exc:
                         message = str(exc)
-                        offline = {"success": True, "version": "2.1.12", "backend": "ROS Noetic",
+                        offline = {"success": True, "version": "2.3.1", "backend": "ROS Noetic",
                                    "master_online": False, "gateway_online": False, "telemetry": {}, "nodes": []}
                         self.telemetry.emit(self._normalize(offline, self._ssh_confirmed))
                         if message != self._backend_error or now - self._backend_error_at >= 15.0:

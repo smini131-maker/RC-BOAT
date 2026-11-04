@@ -17,7 +17,7 @@ from rcboat_ros.path_tracking import RouteManager
 
 class ReleaseV210(unittest.TestCase):
     def test_release_identity_and_empty_default_routes(self):
-        self.assertEqual((ROOT / "VERSION").read_text().strip(), "2.1.12")
+        self.assertEqual((ROOT / "VERSION").read_text().strip(), "2.3.1")
         routes = json.loads((ROOT / "catkin_ws/src/rcboat_ros/config/routes.json").read_text())
         self.assertEqual(routes["routes"], [])
         self.assertEqual(routes["multipaths"], [])
@@ -203,7 +203,7 @@ class ReleaseV210(unittest.TestCase):
     def test_statuses_are_independent(self):
         gui = (ROOT / "windows_gui/rcboat_gui/main_window.py").read_text(encoding="utf-8")
         for label in ("SSH 연결", "ROS master", "ROS gateway", "Logger", "GPS", "RTK"):
-            self.assertIn(label, gui)
+            self.assertIn(label, gui + (ROOT / "windows_gui/rcboat_gui/ui_shell.py").read_text(encoding="utf-8"))
 
     def test_ssh_status_uses_active_liveness_probe(self):
         worker_source = (ROOT / "windows_gui/rcboat_gui/ssh_worker.py").read_text(encoding="utf-8")

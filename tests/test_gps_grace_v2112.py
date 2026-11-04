@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import types
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -132,6 +133,8 @@ class NavigationProvenanceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             module=logger_tests.load_node('navigation_node',Path(directory))
         nav=module.Navigation.__new__(module.Navigation)
+        nav.lock=threading.RLock()
+        nav.throttle_ramp=module.NavigationThrottleRamp();nav.safety={};nav.safety_received_at=0;nav.ramp_session=None
         nav.config={'tracking_mode':'HEADING','target_speed_mps':.6,'cruise_pwm':6650}
         nav.gps={'healthy':True,'heading_deg':12,'last_valid_monotonic':100.0}
         nav.route={'monotonic':100.0,'target_lat':35,'active_route_id':'C'}

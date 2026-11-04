@@ -99,7 +99,9 @@ def verify_runtime(result, version, manifest, root=ROOT):
         raise RuntimeError('gateway is running from a different workspace')
     if identity.get('source_sha256') != manifest['files'][source_name]:
         raise RuntimeError('running gateway source hash mismatch; old process still loaded')
-    for name in ('gps', 'ntrip', 'safety'):
+    required=['gps','ntrip','safety']
+    if 'catkin_ws/src/rcboat_ros/nodes/balloon_vision_node.py' in manifest['files']:required.append('vision')
+    for name in required:
         state = (result.get('telemetry') or {}).get(name) or {}
         if state.get('software_version') != version:
             raise RuntimeError('%s node runtime version is %s; expected %s' %

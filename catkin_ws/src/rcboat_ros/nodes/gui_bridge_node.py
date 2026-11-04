@@ -16,17 +16,19 @@ import zipfile
 import rospy
 from std_msgs.msg import String
 from rcboat_ros.srv import Execute
-from rcboat_ros.common import pack, unpack
+from rcboat_ros.common import pack, unpack, fresh
+from rcboat_ros.control_config import validate_cruise
+from rcboat_ros.gps_settings import load_hdop,save_hdop,validate_hdop
 from rcboat_ros.corrections import refresh_transport_status,refresh_receiver_status
 
 
-VERSION = "2.1.12"
+VERSION = "2.3.1"
 SOCKET = os.path.expanduser("~/rcboat_ros_data/gui_bridge.sock")
 TOPICS = {
     "gps": "/rcboat/gps/status", "ntrip": "/rcboat/ntrip/status", "route": "/rcboat/route/state",
     "navigation": "/rcboat/navigation/desired", "safety": "/rcboat/safety/state",
     "actuator": "/rcboat/actuator/status", "ground_test": "/rcboat/ground_test/status",
-    "rc": "/rcboat/rc/input",
+    "rc": "/rcboat/rc/input", "vision": "/rcboat/vision/status", "vision_desired": "/rcboat/vision/desired",
 }
 
 
@@ -46,6 +48,15 @@ class Bridge:
         self.token = os.getenv("RCBOAT_GATEWAY_TOKEN", "")
         self.link_pub = rospy.Publisher("/rcboat/gui/link", String, queue_size=1)
         self.events = rospy.Publisher("/rcboat/events", String, queue_size=8)
+        self.gps_settings_path=pathlib.Path(os.path.expanduser(rospy.get_param(
+            '/rcboat/gps_settings_file','~/.rcboat/gps_settings.json')))
+        try:hdop=load_hdop(self.gps_settings_path,rospy.get_param('/rcboat/max_hdop',3.0))
+        except (OSError,ValueError,KeyError,TypeError) as exc:
+            rospy.logwarn('GPS settings file rejected: %s',exc)
+            hdop=validate_hdop(rospy.get_param('/rcboat/max_hdop',3.0))
+        rospy.set_param('/rcboat/max_hdop',hdop)
+        self.gps_settings=dict(navigation_max_hdop=hdop,hdop_gate_enabled=False,
+            rtk_fallback_to_gps=True,rtk_required_for_navigation=False,applied_monotonic=time.monotonic())
         for name, topic in TOPICS.items():
             callback = self.gps_update if name == "gps" else lambda message, key=name: self.cache.__setitem__(key, unpack(message))
             rospy.Subscriber(topic, String, callback)
@@ -109,6 +120,21 @@ class Bridge:
         return {"test_id": chosen, "filename": chosen + ".zip", "bytes": len(payload),
                 "sha256": __import__("hashlib").sha256(payload).hexdigest(),
                 "zip_base64": base64.b64encode(payload).decode("ascii")}
+
+    def download_vision_log(self):
+        root=pathlib.Path(os.path.expanduser('~/rcboat_ros_data/logs/vision'))
+        logs=sorted(root.glob('vision_*.jsonl'),key=lambda p:p.stat().st_mtime,reverse=True) if root.exists() else []
+        if not logs:raise ValueError('No vision log has been recorded')
+        chosen=logs[0]
+        if chosen.stat().st_size>32*1024*1024:raise ValueError('Vision log exceeds 32 MiB; copy it via SCP')
+        raw=chosen.read_bytes();last=raw.rfind(b'\n');raw=raw[:last+1] if last>=0 else b''
+        out=io.BytesIO()
+        with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(chosen.name,raw)
+            archive.writestr('export_manifest.json',json.dumps(dict(version=VERSION,source=chosen.name,snapshot=True,
+                bytes=len(raw),sha256=hashlib.sha256(raw).hexdigest(),exported_at_utc=dt.datetime.now(dt.timezone.utc).isoformat())))
+        payload=out.getvalue()
+        return dict(filename=chosen.stem+'.zip',sha256=hashlib.sha256(payload).hexdigest(),bytes=len(payload),zip_base64=base64.b64encode(payload).decode('ascii'))
 
     @staticmethod
     def service(namespace, action, arguments=None, timeout=3):
@@ -193,10 +219,14 @@ class Bridge:
         if self.token and payload.get("token") != self.token:
             return {"success": False, "error": "gateway authentication failed"}
         command = payload.get("action", "status"); args = payload.get("arguments", {})
+        if not isinstance(args,dict):return {'success':False,'error':'arguments must be a JSON object'}
         if command == "operator_link":
             # Stamp at the Jetson; PC/Jetson monotonic clocks are unrelated.
-            self.link_pub.publish(pack(ssh_connected=args.get("ssh_connected") is True,
-                                       monotonic=time.monotonic()))
+            link=dict(ssh_connected=args.get("ssh_connected") is True,
+                      ssh_state=args.get('ssh_state','connected' if args.get('ssh_connected') else 'disconnected'),
+                      monotonic=time.monotonic())
+            self.cache['operator_link']=link
+            self.link_pub.publish(pack(**link))
             return {"success": True}
         if command == "status":
             try:
@@ -206,25 +236,39 @@ class Bridge:
             except Exception:
                 nodes = []; master_online = False
             telemetry = dict(self.cache)
+            nav=dict(telemetry.get('navigation',{}))
+            nav['fresh']=fresh(nav.get('monotonic',0),1.0,time.monotonic())
+            telemetry['navigation']=nav
             telemetry['ntrip']=refresh_transport_status(self.cache.get('ntrip',{}),time.monotonic())
             telemetry['gps']=refresh_receiver_status(self.cache.get('gps',{}),time.monotonic())
             telemetry["gps_logging"] = {"active": self.gps_log_file is not None, "file_path": self.gps_log_path,
                                         "samples": self.gps_log_samples}
             return {"success": True, "version": VERSION, "backend": "ROS Noetic", "master_online": master_online,
-                    "gateway_online": True, "runtime_identity": self.runtime_identity, "telemetry": telemetry, "nodes": nodes, "ground_tests": self.tests()}
+                    "gateway_online": True, "runtime_identity": self.runtime_identity, "telemetry": telemetry,
+                    "gps_settings":dict(self.gps_settings),"nodes": nodes, "ground_tests": self.tests()}
         if command == "gps_log_start": self.start_gps_log(); return {"success": True, "response": {"file_path": self.gps_log_path}}
         if command == "gps_log_stop":
             path = self.gps_log_path; samples = self.gps_log_samples; self.close_gps_log()
             return {"success": True, "response": {"file_path": path, "samples": samples}}
         if command == "list_ground_tests": return {"success": True, "response": {"ground_tests": self.tests()}}
         if command == "download_ground_test": return {"success": True, "response": self.download_test(args.get("test_id"))}
+        if command == "download_vision_log": return {"success":True,"response":self.download_vision_log()}
         if command == "ground_start": return {"success": True, "response": self.ground_start(args)}
         if command == "ground_resume": return {"success": True, "response": self.ground_resume()}
         if command == "ground_stop": return {"success": True, "response": self.ground_stop()}
         if command == "set_gps_settings":
-            if "navigation_max_hdop" in args: rospy.set_param("/rcboat/max_hdop", float(args["navigation_max_hdop"]))
-            self.events.publish(pack(type="CONFIG_CHANGE", change_type="gps_settings", after=args))
-            return {"success": True, "response": args}
+            try:
+                hdop=validate_hdop(args.get('navigation_max_hdop'))
+                before=dict(self.gps_settings)
+                save_hdop(self.gps_settings_path,hdop)
+                rospy.set_param('/rcboat/max_hdop',hdop)
+                self.gps_settings.update(navigation_max_hdop=hdop,applied_monotonic=time.monotonic())
+                self.events.publish(pack(type='CONFIG_CHANGE',change_type='gps_settings',before=before,after=self.gps_settings))
+                return {'success':True,'response':dict(self.gps_settings)}
+            except (ValueError,TypeError,OSError) as exc:return {'success':False,'error':str(exc)}
+        if command == 'set_auto_cruise_pwm':
+            try:validate_cruise(args.get('value'))
+            except (ValueError,AttributeError) as exc:return {'success':False,'error':str(exc)}
         namespace = (
             "/rcboat/safety/execute" if command in ("set_mode", "estop", "reset_estop", "set_remote_pwm", "heartbeat")
             else "/rcboat/route/execute" if command in ("select_route", "delete_route", "upsert_route", "list_routes",
@@ -232,6 +276,7 @@ class Bridge:
                                                          "choose_nearest_group_route", "set_test_route_set",
                                                          "select_multipath","upsert_multipath","delete_multipath",
                                                          "compatible_routes")
+            else "/rcboat/vision/execute" if command in ("vision_enable","vision_configure","vision_reset_tracking","vision_status")
             else "/rcboat/ntrip/execute" if command == "configure"
             else "/rcboat/navigation/execute" if command in ("set_tracking_mode", "set_auto_cruise_pwm") else None
         )

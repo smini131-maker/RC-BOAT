@@ -3,7 +3,7 @@ param(
   [ValidateSet('CHECK_WINDOWS','BUILD_GUI','CHECK_BACKEND','CHECK_ROS','DEPLOY_ROS','INSTALL_ROS')]
   [string]$Action,
   [Parameter(Mandatory=$true)][string]$Root,
-  [string]$Destination='jetson@10.227.56.215'
+  [string]$Destination='jetson@10.123.65.215'
 )
 $ErrorActionPreference='Stop'
 $Root=(Resolve-Path -LiteralPath $Root).Path
@@ -32,9 +32,9 @@ if($Action -in @('DEPLOY_ROS','INSTALL_ROS')) {
   $Stage=Join-Path $env:LOCALAPPDATA ('RCBoatDeploy\'+[guid]::NewGuid().ToString('N'))
   New-Item -ItemType Directory -Path $Stage -Force | Out-Null
   $RuntimeFiles=@(Get-Item -LiteralPath (Join-Path $Root 'VERSION'))
-  foreach($Name in @('catkin_ws','deployment','systemd','matlab')) {
+  foreach($Name in @('catkin_ws','deployment','systemd','matlab','models')) {
     $RuntimeFiles+=@(Get-ChildItem -LiteralPath (Join-Path $Root $Name) -Recurse -File |
-      Where-Object { $_.FullName -notmatch '[\\/](__pycache__|build|devel|logs)[\\/]' -and $_.Extension -notin @('.pyc','.pyo','.log') })
+      Where-Object { $_.FullName -notmatch '[\\/](__pycache__|build|devel|logs)[\\/]' -and $_.Extension -notin @('.pyc','.pyo','.log','.pt','.engine') })
   }
   $Manifest=@{version=(Get-Content -LiteralPath (Join-Path $Root 'VERSION') -Raw).Trim();files=@{}}
   foreach($File in $RuntimeFiles) {
@@ -54,7 +54,7 @@ if($Action -in @('DEPLOY_ROS','INSTALL_ROS')) {
   }
   $ManifestPath=Join-Path $Stage 'deployment_manifest.json'
   [IO.File]::WriteAllText($ManifestPath,($Manifest | ConvertTo-Json -Depth 4),(New-Object Text.UTF8Encoding($false)))
-  $UploadItems=@('catkin_ws','deployment','systemd','matlab','VERSION','deployment_manifest.json') | ForEach-Object { Join-Path $Stage $_ }
+  $UploadItems=@('catkin_ws','deployment','systemd','matlab','models','VERSION','deployment_manifest.json') | ForEach-Object { Join-Path $Stage $_ }
   & scp.exe -r @UploadItems ($Destination + ':/home/jetson/rcboat_ros_ws/')
   if($LASTEXITCODE -ne 0){throw 'SCP failed; installation must not continue'}
   Remote 'python3 /home/jetson/rcboat_ros_ws/deployment/jetson/normalize_line_endings.py'

@@ -2,6 +2,8 @@
 
 [프로젝트 소개](../README.md) · [운항·시험](operation.md) · [문제 해결](troubleshooting.md)
 
+통합 정식 v2.3.1은 항로 주행·도보 테스트·풍선 추적을 함께 제공합니다. 영상 의존성 설치 순서와 USB/CSI 점검은 [카메라·풍선 추적 안내](vision.md)를 먼저 따릅니다. 기존 Jetson 항로·NTRIP 로컬 정보는 그대로 사용합니다.
+
 ## 준비 환경
 
 | 대상 | 준비 사항 |
@@ -16,9 +18,7 @@
 ## 1. 저장소 준비 — Windows PowerShell
 
 ```powershell
-git clone https://github.com/smini131-maker/RC-BOAT.git
-cd RC-BOAT
-git switch main
+Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_v2.3.1"
 ```
 
 이후 Windows 명령은 저장소 루트에서 실행합니다. `JETSON_IP`는 실제 장치 주소로 바꿉니다.
@@ -48,31 +48,32 @@ PC의 [boat.yaml](../catkin_ws/src/rcboat_ros/config/boat.yaml)에서 `gps_port`
 프로펠러를 제거하고, 수동으로 실행 중인 ROS가 있으면 해당 Jetson 터미널에서 `Ctrl+C`로 종료합니다. Windows GUI도 종료한 뒤 실행합니다.
 
 ```powershell
-.\INSTALL_ROS.cmd -Destination "jetson@JETSON_IP"
+.\DEPLOY_ROS.cmd -Destination "jetson@JETSON_IP"
+ssh jetson@JETSON_IP
 ```
 
-SSH·sudo 비밀번호는 요청 프롬프트에 직접 입력합니다. 설치는 소스 전송 → SHA-256 검증 → ROS 서비스 정지 → 잔존 프로세스 확인 → catkin 재빌드 → 서비스 시작 → 실행 버전 검증 순서입니다.
+SSH·sudo 비밀번호는 요청 프롬프트에 직접 입력합니다. 이어서 Jetson SSH 안에서 영상 의존성을 먼저 적용합니다.
+
+```bash
+cd /home/jetson/rcboat_ros_ws
+bash deployment/jetson/install_vision_dependencies.sh
+```
+
+`VISION INSTALL VERIFIED`가 나온 후 다음 명령을 실행합니다.
+
+```bash
+bash deployment/jetson/install_jetson_ros.sh
+```
+
+설치는 소스 전송 → SHA-256 검증 → ROS 서비스 정지 → 전용 영상 환경·실제 추론 확인 → 잔존 프로세스 확인 → catkin 재빌드 → ROS 의존성 확인 → 서비스 시작 → 실행 버전 검증 순서입니다. 기존 영상 환경의 전역 패키지 상속 설정이 발견되면 `~/.rcboat/vision-venv.backup-날짜_시각` 경로로 보존합니다. 전역 TensorFlow나 NumPy를 삭제하지 않습니다.
 
 완료 조건은 다음 출력입니다.
 
 ```text
-RUNNING GATEWAY VERIFIED: v2.1.12
+RUNNING GATEWAY VERIFIED: v2.3.1
 ```
 
-소스만 전송하고 Jetson에서 설치하려면:
-
-```powershell
-.\DEPLOY_ROS.cmd -Destination "jetson@JETSON_IP"
-```
-
-이어서 Jetson 터미널에서:
-
-```bash
-cd /home/jetson/rcboat_ros_ws
-bash deployment/jetson/install_jetson_ros.sh
-```
-
-`DEPLOY_ROS`만으로 실행 중인 프로세스가 새 코드로 바뀌지는 않습니다.
+`DEPLOY_ROS`만으로 실행 중인 프로세스가 새 코드로 바뀌지는 않습니다. `INSTALL_ROS.cmd`는 영상 의존성을 이미 검증한 재설치에서 사용할 수 있습니다.
 
 ## 4. NTRIP 설정 — Jetson 터미널
 
@@ -103,7 +104,7 @@ py -3 -m venv windows_gui\.venv
 
 GUI에서 Jetson 주소와 SSH 접속 정보를 설정하고 연결합니다. SSH, ROS master, ROS gateway, Logger, GPS, RTK 카드는 각각 독립적인 상태입니다. GUI와 backend 버전이 다르면 새 운항 시작이 차단됩니다.
 
-EXE가 필요하면 저장소 루트에서 `BUILD_ROS_GUI.cmd`를 실행합니다. 결과는 `dist\RCBoatControl_ROS_v2.1.12.exe`입니다. 자세한 빌드·테스트 절차는 [개발·검증](development.md)을 참고합니다.
+EXE가 필요하면 저장소 루트에서 `BUILD_ROS_GUI.cmd`를 실행합니다. 결과는 `dist\RCBoatControl_ROS_v2.3.1.exe`입니다. 자세한 빌드·테스트 절차는 [개발·검증](development.md)을 참고합니다.
 
 ## 6. 설치 확인 및 수동 ROS 실행
 

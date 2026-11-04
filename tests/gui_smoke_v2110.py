@@ -22,8 +22,9 @@ with patch.object(worker,'_ssh_is_healthy',side_effect=[False,True]) as probe:
     assert probe.call_count==2
 assert not worker._ssh_health_failed.is_set()
 with patch.object(worker,'_ssh_is_healthy',return_value=False):
-    assert worker._update_ssh_health() is True
-    assert worker._update_ssh_health() is False
+    with patch('rcboat_gui.ssh_worker.time.monotonic',side_effect=[100.0,100.0,105.1]):
+        assert worker._update_ssh_health() is True
+        assert worker._update_ssh_health() is False
 assert worker._ssh_health_failed.is_set()
 worker._ssh_health_failed.clear();worker._ssh_confirmed=True
 worker._shell_channel.exit_status_ready.return_value=True

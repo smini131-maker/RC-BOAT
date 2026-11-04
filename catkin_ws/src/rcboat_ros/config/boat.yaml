@@ -1,4 +1,4 @@
-version: '2.1.12'
+version: '2.3.1'
 gui_gateway_bind: '0.0.0.0'
 gui_gateway_port: 8765
 ground_test_log_root: '~/rcboat_ros_data/logs/ground_tests'
@@ -11,15 +11,38 @@ gps_stale_s: 2.0
 # Neutral locked output during grace; recover automatically with a fresh FIX
 # and newly calculated navigation command. 0 disables grace; allowed 0..30 s.
 ground_test_gps_grace_s: 5.0
+# NAVIGATION data-delay grace only. Explicit transport loss / invalid FIX stops.
+navigation_gps_grace_s: 5.0
+navigation_gps_grace_pwm: 6650
 # Diagnostic warning reference only. It does not lock navigation.
 max_hdop: 3.0
 steering_low: 4900
 steering_center: 6000
 steering_high: 7300
 throttle_stop: 6450
-throttle_forward_max: 7000
+throttle_forward_max: 7397
 throttle_reverse_max: 5800
+# RC receiver input pulse widths in microseconds; NOT PCA duty16 calibration.
+# Endpoint representatives are rounded midpoints of the measured jitter ranges.
+# Valid envelopes add 25 us beyond measured extrema; not new measured endpoints.
+rc_input_calibration:
+  steering:
+    min_us: 1004.0  # measured 995..1013
+    center_us: 1620.0  # measured 1616..1624
+    max_us: 1985.0  # measured 1983..1986; numeric sign does not assert turn direction
+    deadband_us: 4.0
+    valid_min_us: 970.0
+    valid_max_us: 2011.0
+  throttle:
+    min_us: 1118.0  # measured reverse 1115..1120
+    center_us: 1499.0  # measured 1496..1502
+    max_us: 1881.0  # measured forward 1879..1883
+    deadband_us: 31.0  # includes old full 1470..1530 interval after recentering
+    valid_min_us: 1090.0
+    valid_max_us: 1908.0
 cruise_pwm: 6650
+# NAVIGATION upward ramp is fixed in control_config.py: 250 / 1.5 PWM/s.
+# Cruise target accepts 6480..7390 in steps of 10, plus 7397; reductions bypass the ramp.
 nav_invert_steering: true
 pca_bus: 1
 pca_address: 64
@@ -49,3 +72,12 @@ course_min_speed_mps: 0.35
 # displacement <1 m for 15 s triggers a MANUAL takeover.
 no_progress_enabled: true
 no_progress_timeout_s: 15.0
+
+# Camera inference is disabled until explicitly enabled in the GUI.
+vision:
+  camera_type: auto
+  camera_source: /dev/video0
+  inference_hz: 5.0
+  input_size: 320
+  preview_hz: 5.0
+  preview_port: 8766

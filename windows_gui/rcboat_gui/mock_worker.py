@@ -7,7 +7,11 @@ from copy import deepcopy
 from typing import Any
 
 from PySide6.QtCore import QThread, QTimer, Signal
+from rcboat_ros.control_config import validate_cruise,RC_DEFAULTS,OUTPUT_DEFAULTS,NavigationThrottleRamp,output_in_range
+from rcboat_ros.gps_settings import validate_hdop
 
+
+from rcboat_ros.balloon_tracking import validate_config,TargetTracker,TrackingController
 
 class MockWorker(QThread):
     connected = Signal()
@@ -17,13 +21,13 @@ class MockWorker(QThread):
     log = Signal(str)
 
     ROUTES = [
-        {"id": "training_a", "name": "훈련 경로 A", "waypoints": [{"lat": 35.078, "lon": 129.086}, {"lat": 35.07812, "lon": 129.08615}, {"lat": 35.07824, "lon": 129.0863}]},
-        {"id": "training_b", "name": "훈련 경로 B", "waypoints": [{"lat": 35.07802, "lon": 129.08608}, {"lat": 35.07813, "lon": 129.08623}, {"lat": 35.07826, "lon": 129.08638}]},
-        {"id": "training_c", "name": "훈련 경로 C", "waypoints": [{"lat": 35.07798, "lon": 129.08592}, {"lat": 35.07811, "lon": 129.08607}, {"lat": 35.07822, "lon": 129.08622}]},
+        {"id": "sim_a", "name": "SIM 해상 코스 A", "waypoints": [{"lat": 35.078, "lon": 129.086}, {"lat": 35.07812, "lon": 129.08615}, {"lat": 35.07824, "lon": 129.0863}]},
+        {"id": "sim_b", "name": "SIM 해상 코스 B", "waypoints": [{"lat": 35.07802, "lon": 129.08608}, {"lat": 35.07813, "lon": 129.08623}, {"lat": 35.07826, "lon": 129.08638}]},
+        {"id": "sim_c", "name": "SIM 해상 코스 C", "waypoints": [{"lat": 35.07798, "lon": 129.08592}, {"lat": 35.07811, "lon": 129.08607}, {"lat": 35.07822, "lon": 129.08622}]},
     ]
     MULTIPATHS = [
         {"id": "training_set_a", "name": "훈련 대루트 A",
-         "route_ids": ["training_a", "training_b", "training_c"], "default_route_id": "training_a"},
+         "route_ids": ["sim_a", "sim_b", "sim_c"], "default_route_id": "sim_a"},
     ]
 
     def __init__(self):
@@ -34,13 +38,17 @@ class MockWorker(QThread):
         self.estop = False
         self.steering = 6000
         self.throttle = 6450
-        self.selected_route_id = "training_a"
-        self.active_route_id = "training_a"
+        self.selected_route_id = "sim_a"
+        self.active_route_id = "sim_a"
         self.arduino_connected = True
         self.gps_connected = True
         self.gps_fix = True
         self.failsafe_reason = ""
+        self.vision_enabled=False;self.vision_config=validate_config({});self.vision_applied_at=time.monotonic()
+        self.vision_tracker=TargetTracker();self.vision_controller=TrackingController();self.vision_desired={};self.vision_state={};self.tracking_session=0
         self.auto_cruise_pwm = 6650
+        self.throttle_ramp = NavigationThrottleRamp()
+        self.cruise_applied_monotonic = time.monotonic()
         self.routes = deepcopy(self.ROUTES)
         self.multipaths = deepcopy(self.MULTIPATHS)
         self.selected_multipath_id = "training_set_a"
@@ -64,6 +72,7 @@ class MockWorker(QThread):
         self.gps_scenario = "RTK_FIXED"
         self.rtk_fallback_to_gps = True
         self.gps_max_hdop = 3.0
+        self.gps_settings_applied_monotonic=time.monotonic()
         self.ntrip = {
             "enabled": False, "connected": False, "host": "", "port": 2101,
             "mountpoint": "", "tls": False, "last_correction_age_s": None,
@@ -86,18 +95,21 @@ class MockWorker(QThread):
         try:
             if command == "SET_MODE":
                 mode = str(kwargs["mode"]).upper()
-                if mode not in {"AUTO", "MANUAL", "NAVIGATION", "REMOTE"}:
+                if mode not in {"AUTO", "MANUAL", "NAVIGATION", "REMOTE", "BALLOON"}:
                     raise ValueError(f"invalid mode: {mode}")
                 if self.estop:
                     raise RuntimeError("Emergency Stop is latched")
                 if mode == "MANUAL" and not self.arduino_connected:
                     raise RuntimeError("Arduino/RC data is unavailable; MANUAL rejected")
+                if mode=="BALLOON" and (not self.vision_enabled or not self.vision_desired.get("valid")):raise ValueError("모의 카메라를 켜고 풍선 검출을 기다리세요")
+                self.tracking_session=time.monotonic()
                 self.mode = mode
+                self.throttle_ramp.reset()
                 requested_state = {
                     "AUTO": "AUTO",
                     "MANUAL": "MANUAL_ACTIVE",
                     "NAVIGATION": "NAVIGATION_ACTIVE",
-                    "REMOTE": "REMOTE_ACTIVE",
+                    "REMOTE": "REMOTE_ACTIVE", "BALLOON":"BALLOON",
                 }[mode]
                 if mode == "NAVIGATION" and (not self.gps_connected or not self.gps_fix):
                     requested_state = "NAVIGATION_WAITING_GPS"
@@ -106,25 +118,28 @@ class MockWorker(QThread):
                     self.failsafe_reason = ""
                 self.operation_state = requested_state
                 self.steering, self.throttle = 6000, (
-                    self.auto_cruise_pwm if requested_state == "NAVIGATION_ACTIVE"
+                    self.throttle_ramp.update(self.auto_cruise_pwm,time.monotonic()) if requested_state == "NAVIGATION_ACTIVE"
                     else 6450
                 )
                 if mode == "AUTO":
                     self.operation_state = "AUTO_SAFE"
+            elif command=='VISION_ENABLE':
+                self.vision_enabled=bool(kwargs.get('enabled'));self.vision_tracker.reset();self.vision_controller=TrackingController();self.vision_desired={}
+            elif command=='VISION_CONFIGURE':
+                if self.vision_enabled:raise ValueError('카메라를 먼저 끄세요')
+                self.vision_config=validate_config(dict(self.vision_config,**kwargs));self.vision_applied_at=time.monotonic()
+            elif command=='VISION_RESET_TRACKING':self.vision_tracker.reset();self.vision_controller=TrackingController();self.vision_desired={}
             elif command == "REMOTE_CONTROL":
                 if self.mode != "REMOTE":
                     raise RuntimeError("REMOTE mode is not active")
+                if not output_in_range(kwargs.get('steering_pwm'),kwargs.get('throttle_pwm')):
+                    raise ValueError('remote PWM outside calibration')
                 self.steering = int(kwargs["steering_pwm"])
                 self.throttle = int(kwargs["throttle_pwm"])
             elif command == "SET_AUTO_CRUISE_PWM":
-                value = kwargs.get("value")
-                if isinstance(value, bool) or not isinstance(value, int):
-                    raise ValueError("auto_cruise_pwm must be an integer")
+                value = validate_cruise(kwargs.get("value"))
                 self.auto_cruise_pwm = value
-                if self.mode == "AUTO":
-                    self.steering, self.throttle = 6000, 6450
-                elif self.mode == "NAVIGATION" and self.operation_state == "NAVIGATION_ACTIVE" and not self.estop:
-                    self.throttle = value
+                self.cruise_applied_monotonic = time.monotonic()
             elif command == "SET_MULTIPATH":
                 limits = {
                     "endpoint_tolerance_m": (0.10, 1.00),
@@ -239,7 +254,8 @@ class MockWorker(QThread):
                 self.rtk_fallback_to_gps = bool(
                     kwargs.get("rtk_fallback_to_gps", self.rtk_fallback_to_gps)
                 )
-                self.gps_max_hdop = float(kwargs.get("navigation_max_hdop", self.gps_max_hdop))
+                self.gps_max_hdop = validate_hdop(kwargs.get("navigation_max_hdop", self.gps_max_hdop))
+                self.gps_settings_applied_monotonic=time.monotonic()
             elif command == "CONFIGURE_NTRIP":
                 self.ntrip.update({
                     "enabled": bool(kwargs.get("enabled", False)),
@@ -343,6 +359,12 @@ class MockWorker(QThread):
             "ok": ok,
             "error": error,
         }
+        if ok and command in ('VISION_CONFIGURE','VISION_ENABLE','VISION_RESET_TRACKING'):
+            acknowledgement.update(configuration=dict(self.vision_config),applied_monotonic=self.vision_applied_at)
+        if ok and command=='SET_AUTO_CRUISE_PWM':
+            acknowledgement.update(value=self.auto_cruise_pwm,cruise_applied_monotonic=self.cruise_applied_monotonic)
+        if ok and command=='SET_GPS_SETTINGS':
+            acknowledgement.update(navigation_max_hdop=self.gps_max_hdop,applied_monotonic=self.gps_settings_applied_monotonic)
         if command == "DOWNLOAD_GROUND_RESULTS" and ok:
             labels = {
                 "all": "전체 ZIP",
@@ -371,13 +393,28 @@ class MockWorker(QThread):
                 self.ground_test_samples += 1
                 if self.ground_test_actuation_enabled and self.mode == "GROUND_TEST":
                     self.steering, self.throttle = 6000 + int(math.sin(t) * 500), self.auto_cruise_pwm
+            if self.vision_enabled:
+                now=time.monotonic();cx=320+180*math.sin(t/3);bh=180+70*math.sin(t/6)
+                detections=[] if 14<t%24<20 else [dict(class_id=0,label='pink_balloon',confidence=.91,pink_fraction=.7,pink_confirmed=True,bbox=[cx-85,240-bh/2,cx+85,240+bh/2])]
+                target=self.vision_tracker.update(detections,640,480,now,self.vision_config,dict(fix=self.gps_fix,latitude=lat,longitude=lon,heading_deg=t*5%360,speed_mps=.7,last_valid_monotonic=now))
+                self.vision_desired=self.vision_controller.command(target,now,now,self.vision_config,self.auto_cruise_pwm,self.tracking_session if self.mode=='BALLOON' else None)
+                self.vision_state=dict(enabled=True,camera_online=True,model_ready=True,live_source=True,reason=target['phase'],target=target,configuration=dict(self.vision_config),applied_monotonic=self.vision_applied_at,backend='SIMULATION',inference_ms=None,processed_fps=None,frame_age_s=0.,monotonic=now,shared_cruise_pwm=self.auto_cruise_pwm)
+                if self.mode=='BALLOON' and not self.estop:
+                    if self.vision_desired['valid']:self.steering=self.vision_desired['desired_steering_pwm'];self.throttle=self.vision_desired['desired_throttle_pwm']
+                    else:self._manual_fault('BALLOON_TARGET_OR_CAMERA_LOST')
+            else:
+                self.vision_state=dict(enabled=False,camera_online=False,model_ready=False,configuration=dict(self.vision_config),applied_monotonic=self.vision_applied_at)
+                if self.mode=='BALLOON':self._manual_fault('BALLOON_TARGET_OR_CAMERA_LOST')
             selected = next(route for route in self.routes if route["id"] == self.selected_route_id)
             active = next(route for route in self.routes if route["id"] == self.active_route_id)
             nav_active = self.operation_state == "NAVIGATION_ACTIVE"
+            if nav_active and not self.estop:
+                self.throttle=self.throttle_ramp.update(self.auto_cruise_pwm,time.monotonic())
+            else:self.throttle_ramp.reset()
             self.telemetry.emit(
                 {
                     "type": "telemetry",
-                    "backend": {"name": "SIM", "ready": True, "node_count": 9,
+                    "backend": {"name": "SIM", "version":"2.3.1", "ready": True, "node_count": 10,
                                 "master_online": True, "gateway_online": True,
                                 "ssh_connected": False,
                                 "logger_state": "recording" if self.ground_test_active else "idle"},
@@ -389,11 +426,19 @@ class MockWorker(QThread):
                     "estop": self.estop,
                     "failsafe_reason": self.failsafe_reason,
                     "manual_waiting_for_neutral": self.operation_state == "MANUAL_WAITING_NEUTRAL",
+                    "vision":dict(self.vision_state),"vision_desired":dict(self.vision_desired),"balloon_armed":self.mode=="BALLOON",
                     "auto_cruise_pwm": self.auto_cruise_pwm,
+                    "ramp_throttle_pwm": self.throttle if nav_active and not self.estop else None,
+                    "final_throttle_pwm": self.throttle,
+                    "cruise_applied_monotonic": self.cruise_applied_monotonic,
+                    "rc_input_calibration": deepcopy(RC_DEFAULTS),
+                    "pca_output_calibration": dict(OUTPUT_DEFAULTS),
                     "gps_recording": {"active": self.gps_recording, "name": self.gps_recording_name, "point_count": len(self.gps_recording_points), "minimum_distance_m": self.recording_minimum_distance_m, "minimum_interval_s": self.recording_minimum_interval_s, "arrival_radius_m": self.recording_arrival_radius_m},
                     "gps_logging": {"active": self.gps_data_logging, "file_path": "/home/jetson/rcboat/logs/gps/mock_week6.csv" if self.gps_data_samples else "", "samples": self.gps_data_samples, "started_at": "simulation" if self.gps_data_logging else None},
                     "ntrip": dict(self.ntrip),
-                    "gps_settings": {"baudrate": 115200, "health_stale_s": 2.0, "navigation_max_hdop": self.gps_max_hdop, "rtk_required_for_navigation": not self.rtk_fallback_to_gps, "rtk_fallback_to_gps": self.rtk_fallback_to_gps, "rtk_correction_max_age_s": 10.0},
+                    "gps_settings": {"baudrate": 115200, "health_stale_s": 2.0, "navigation_max_hdop": self.gps_max_hdop,
+                                     "applied_monotonic":self.gps_settings_applied_monotonic,"hdop_gate_enabled":False,
+                                     "rtk_required_for_navigation": not self.rtk_fallback_to_gps, "rtk_fallback_to_gps": self.rtk_fallback_to_gps, "rtk_correction_max_age_s": 10.0},
                     "ground_test": {"active": self.ground_test_active,
                                     "output_paused": self.ground_test_active and self.mode != "GROUND_TEST",
                                     "pause_reason": self.failsafe_reason if self.mode != "GROUND_TEST" else "",
@@ -402,7 +447,7 @@ class MockWorker(QThread):
                                     "actuator_locked": not self.ground_test_actuation_enabled,
                                     "actuation_enabled": self.ground_test_actuation_enabled},
                     "mock": True,
-                    "rc": {"steering_us": 1640 + int(math.sin(t) * 60) if self.arduino_connected else None, "throttle_us": 1500 if self.arduino_connected else None, "age_s": 0.01 if self.arduino_connected else None},
+                    "rc": {"steering_us": 1620 + int(math.sin(t) * 60) if self.arduino_connected else None, "throttle_us": 1499 if self.arduino_connected else None, "age_s": 0.01 if self.arduino_connected else None},
                     "pca": {"frequency_hz": 60, "steering_channel": 0, "throttle_channel": 6, "steering_pwm": self.steering, "throttle_pwm": self.throttle},
                     "gps": self._gps_telemetry(t, lat, lon),
                     "devices": {"arduino": self.arduino_connected, "gps": self.gps_connected, "pca9685": True},

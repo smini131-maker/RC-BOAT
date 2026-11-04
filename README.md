@@ -2,9 +2,15 @@
 
 ROS Noetic 기반 RC 보트 자율운항 및 Windows 관제 시스템입니다. Jetson에서 GNSS/RTK 수신, 항로 선택, 조향·스로틀 제어와 시험 기록을 처리하고, Windows GUI에서 항로 편집과 운항 상태 확인, 시험 로그 다운로드를 수행합니다.
 
-현재 `main`의 소프트웨어 버전은 **v2.1.12**입니다. Windows GUI와 Jetson backend는 같은 버전을 사용합니다.
+최신 정식 버전은 **v2.3.1**이며 `main`에서 관리합니다. 항로 주행·도보 테스트·풍선 추적을 하나의 Windows GUI와 ROS Noetic backend로 제공합니다. 풍선 기능이 없는 별도 최신 버전은 운영하지 않습니다. Windows GUI와 Jetson backend는 같은 버전을 사용합니다.
+
+2026-11-04 Jetson Nano에 실제 배포하고 ROS 실행 버전, IMX219 CSI 영상 수신과 PC 미리보기까지 확인했습니다. 실물 조향·수상 주행·풍선 파열 성공 여부는 별도 현장 검증이 필요합니다.
+
+v2.3.1은 카메라 버전의 설치 오류를 수정합니다. 기존 TensorFlow/사용자 NumPy를 상속하던 환경을 백업하고 전용 환경으로 분리하며, 실제 ONNX 추론과 ROS 의존성 확인 후에만 설치 성공을 표시합니다. v2.3.0의 지도 중심 GUI·풍선 연속 추적·RC 보정·7397 출력 상한·안전 제어·도보 테스트는 유지합니다. [카메라 버전 사용·배포](docs/vision.md)에 실행 명령과 실제 검증 범위를 정리했습니다.
 
 ## 주요 기능
+
+- **핑크 풍선**: USB/CSI 카메라, 신경망 풍선 검출+핑크 확인, 실시간 연속 추적, 선택적 저대역폭 미리보기.
 
 - **항로 관리**: waypoint 항로를 직접 추가·편집하고, 여러 항로를 하나의 Multi-Path로 묶습니다.
 - **최근접 항로 선택**: 유효한 GPS 갱신마다 그룹 안에서 보트와 경로선의 거리가 가장 가까운 항로를 선택합니다. 항로 전환에 2 m 임계값을 사용하지 않습니다.
@@ -32,8 +38,7 @@ Windows GUI ── TCP 8765 ── Jetson / ROS Noetic
 ## 시작하기
 
 ```powershell
-git clone https://github.com/smini131-maker/RC-BOAT.git
-cd RC-BOAT
+Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_v2.3.1"
 ```
 
 Windows GUI를 소스에서 실행하려면:
@@ -47,15 +52,25 @@ py -3 -m venv windows_gui\.venv
 Jetson의 ROS Noetic 설치와 장치 설정을 확인한 뒤 배포합니다.
 
 ```powershell
-.\INSTALL_ROS.cmd -Destination "jetson@JETSON_IP"
+.\DEPLOY_ROS.cmd -Destination "jetson@10.123.65.215"
+ssh jetson@10.123.65.215
 ```
 
-설치 결과에서 `RUNNING GATEWAY VERIFIED: v2.1.12`를 확인합니다. `DEPLOY_ROS.cmd`는 소스 전송만 수행하며, 실행 중인 backend 갱신은 `INSTALL_ROS.cmd`로 완료합니다. 자세한 환경 준비와 설정은 [설치·실행 안내](docs/setup.md)를 따릅니다.
+이어서 Jetson SSH 안에서 실행합니다.
+
+```bash
+cd /home/jetson/rcboat_ros_ws
+bash deployment/jetson/install_vision_dependencies.sh
+bash deployment/jetson/install_jetson_ros.sh
+```
+
+각 명령이 오류 없이 끝나야 다음 명령을 실행합니다. 완료 조건은 `VISION INSTALL VERIFIED`와 `RUNNING GATEWAY VERIFIED: v2.3.1`입니다. `DEPLOY_ROS.cmd`는 소스 전송만 수행합니다. 자세한 환경 준비와 설정은 [설치·실행 안내](docs/setup.md)를 따릅니다.
 
 ## 문서
 
 | 문서 | 내용 |
 |---|---|
+| [카메라 버전 안내](docs/vision.md) | 새 화면, 모델, 카메라·풍선 추적, 정확한 배포 명령 |
 | [설치·실행](docs/setup.md) | Windows GUI, Jetson 배포, 장치·NTRIP 설정 |
 | [운항·시험](docs/operation.md) | 항로 편집, 운항 시작, Ground Test, 수동 전환·GPS 유예 |
 | [로그·MATLAB 분석](docs/data-analysis.md) | 저장 파일, 품질 필터, 헤딩·조향각 해석 |
@@ -81,6 +96,6 @@ docs/                    설치·운용·개발 문서
 
 ## 버전 및 시험 범위
 
-현재 소스는 `main`과 [VERSION](VERSION)을 기준으로 확인합니다. GitHub Releases에 남아 있는 **v2.1.0 바이너리는 이전 버전**입니다. v2.1.12 GUI는 현재 소스에서 빌드합니다. 이전 버전의 소스와 수정 내역은 Git 이력과 기존 릴리스에서 확인할 수 있습니다.
+정식 소스는 `main`의 [VERSION](VERSION), 실행 파일과 전체 ZIP은 [v2.3.1 릴리스](https://github.com/smini131-maker/RC-BOAT/releases/tag/v2.3.1)를 기준으로 사용합니다. 이전 버전은 Git 이력과 과거 릴리스에 남아 있으며 최신 설치 대상으로 안내하지 않습니다. 로컬 실행 폴더는 `RCBoatControl_v2.3.1`, 실행 파일은 `dist/RCBoatControl_ROS_v2.3.1.exe`입니다.
 
 기본 제어는 `HEADING` 모드와 고정 순항 PWM을 사용하며, 속도 피드백 제어는 기본적으로 꺼져 있습니다. 로그의 GPS 진행 방향은 선체 자세 센서 값과 다르고, `actual_*_pwm`은 장치에 보낸 명령 확인값입니다. 실물 출력 시험은 프로펠러를 제거한 상태에서 중립·RC 수동 전환·E-STOP을 먼저 확인합니다. 세부 조건과 한계는 [운항·시험](docs/operation.md)과 [로그 해석](docs/data-analysis.md)에 정리했습니다.

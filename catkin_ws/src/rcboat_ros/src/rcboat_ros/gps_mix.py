@@ -94,6 +94,8 @@ class MixedGpsParser:
                     a['utc_time']=stamp.isoformat(timespec='milliseconds').replace('+00:00','Z');a['utc_status']='valid'
                 except (ValueError,IndexError):a['utc_status']='invalid'
         elif kind=='RMC' and len(cells)>8:
+            if (time.monotonic()-self.last_pvt)>1.5 and cells[2]!='A':
+                a['fix']=False;a['rtk_state']='NO_FIX'
             if (time.monotonic()-self.last_pvt)>1.5 and cells[2]=='A' and cells[3] and cells[5]:
                 a['latitude']=self.nmea_coord(cells[3],cells[4]); a['longitude']=self.nmea_coord(cells[5],cells[6]); a['fix']=True
                 if cells[7]:a['speed_mps']=float(cells[7])*0.5144444444

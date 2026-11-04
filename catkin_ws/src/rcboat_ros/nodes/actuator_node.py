@@ -9,9 +9,11 @@ from std_msgs.msg import String
 from rcboat_ros.msg import ControlCommand
 from rcboat_ros.common import SAFE_STEERING,SAFE_THROTTLE,pack,PCA_OWNER_LOCK
 from rcboat_ros.direct_pca import DirectLinuxPCA9685
+from rcboat_ros.control_config import load_output,validate_cruise,output_in_range
 
 class Actuator:
     def __init__(self):
+        self.output_calibration=load_output(rospy.get_param)
         self.lockfd=open(PCA_OWNER_LOCK,'w')
         fcntl.flock(self.lockfd,fcntl.LOCK_EX|fcntl.LOCK_NB)
         self.pca=DirectLinuxPCA9685(rospy.get_param('/rcboat/pca_bus',1),rospy.get_param('/rcboat/pca_address',64),rospy.get_param('/rcboat/pca_frequency',60))
@@ -32,24 +34,41 @@ class Actuator:
     def safe_write(self):self.write(SAFE_STEERING,SAFE_THROTTLE)
     def command(self,msg):
         self.last_message=msg;self.last_at=time.monotonic()
+    def resolve(self,now):
+        """Resolve a received safety command without performing hardware I/O."""
+        state='TIMEOUT';s=SAFE_STEERING;t=SAFE_THROTTLE
+        msg=self.last_message
+        timeout=float(rospy.get_param('/rcboat/command_timeout_s',.75))
+        if msg and 0<=now-self.last_at<=timeout:
+            if msg.mode=='GROUND_TEST':
+                if msg.actuator_locked:
+                    state='GROUND_TEST_LOCKED'
+                elif (msg.source=='GROUND_TEST_NAVIGATION' and
+                      output_in_range(msg.steering_pwm,msg.throttle_pwm,self.output_calibration)):
+                    s=msg.steering_pwm;t=msg.throttle_pwm;state='GROUND_TEST_NAVIGATION'
+                else:state='GROUND_TEST_REJECTED'
+            elif msg.actuator_locked:state='LOCKED'
+            elif msg.mode=='NAVIGATION' and msg.source=='NAVIGATION_GPS_GRACE':
+                try:
+                    grace_pwm=validate_cruise(rospy.get_param('/rcboat/navigation_gps_grace_pwm',6650))
+                    if msg.steering_pwm==SAFE_STEERING and msg.throttle_pwm==grace_pwm:
+                        s=SAFE_STEERING;t=grace_pwm;state=msg.source
+                except ValueError:state='CRUISE_REJECTED'
+            elif msg.source in ('AUTO','MANUAL','REMOTE','NAVIGATION','BALLOON'):
+                if output_in_range(msg.steering_pwm,msg.throttle_pwm,self.output_calibration):
+                    s=msg.steering_pwm;t=msg.throttle_pwm;state=msg.source
+        if msg and msg.mode in ('AUTO','NAVIGATION','GROUND_TEST','BALLOON') and state in ('AUTO','NAVIGATION','NAVIGATION_GPS_GRACE','GROUND_TEST_NAVIGATION','BALLOON'):
+            try:
+                validate_cruise(rospy.get_param('/rcboat/cruise_pwm',6650))
+                if state=='AUTO':validate_cruise(t)
+            except ValueError:
+                s=SAFE_STEERING;t=SAFE_THROTTLE;state='CRUISE_REJECTED'
+        return s,t,state
+
     def run(self):
         rate=rospy.Rate(15)
         while not rospy.is_shutdown():
-            state='TIMEOUT';s=SAFE_STEERING;t=SAFE_THROTTLE
-            msg=self.last_message
-            timeout=float(rospy.get_param('/rcboat/command_timeout_s',.75))
-            if msg and 0<=time.monotonic()-self.last_at<=timeout:
-                if msg.mode=='GROUND_TEST':
-                    if msg.actuator_locked:
-                        state='GROUND_TEST_LOCKED'
-                    elif (msg.source=='GROUND_TEST_NAVIGATION' and
-                          4900<=msg.steering_pwm<=7300 and 5800<=msg.throttle_pwm<=7000):
-                        s=msg.steering_pwm;t=msg.throttle_pwm;state='GROUND_TEST_NAVIGATION'
-                    else:state='GROUND_TEST_REJECTED'
-                elif msg.actuator_locked:state='LOCKED'
-                elif msg.source in ('AUTO','MANUAL','REMOTE','NAVIGATION'):
-                    if 4900<=msg.steering_pwm<=7300 and 5800<=msg.throttle_pwm<=7000:
-                        s=msg.steering_pwm;t=msg.throttle_pwm;state=msg.source
+            s,t,state=self.resolve(time.monotonic())
             try:
                 self.write(s,t)
                 self.status.publish(pack(actual_steering_pwm=s,actual_throttle_pwm=t,

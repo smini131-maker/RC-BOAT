@@ -8,6 +8,7 @@ import re
 import uuid
 from pathlib import Path
 from .common import clamp
+from .control_config import THROTTLE_FORWARD_MAX
 from .geo import enrich_waypoints
 
 R = 6371000.0
@@ -469,7 +470,7 @@ def navigation_command(gps, route, config, stopped_once=False):
         # Disabled by default. This is a bounded PWM experiment, not certified speed control.
         speed_error=float(config.get('target_speed_mps',0.6))-float(gps['speed_mps'])
         correction_pwm=clamp(speed_error*float(config.get('speed_kp_pwm_per_mps',30.0)),-30,30)
-        throttle=int(round(clamp(throttle+correction_pwm,stop,int(config.get('throttle_forward_max',7000)))))
+        throttle=int(round(clamp(throttle+correction_pwm,stop,int(config.get('throttle_forward_max',THROTTLE_FORWARD_MAX)))))
     if route.get('route_complete'): throttle=stop
     # desired rudder angle: positive means physical right after inverted NAV mapping.
     angle=(demand-center)/(high-center if demand>=center else center-low)*30

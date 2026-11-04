@@ -12,4 +12,5 @@
   <node pkg="rcboat_ros" type="actuator_node.py" name="actuator_node" output="screen" required="true" />
   <node pkg="rcboat_ros" type="ground_test_logger_node.py" name="ground_test_logger_node" output="screen" />
   <node pkg="rcboat_ros" type="gui_bridge_node.py" name="gui_bridge_node" output="screen" />
+  <node pkg="rcboat_ros" type="balloon_vision_node.py" name="balloon_vision_node" output="screen" respawn="true" respawn_delay="3" launch-prefix="$(find rcboat_ros)/../../../deployment/jetson/vision_python.sh" />
 </launch>

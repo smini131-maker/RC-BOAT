@@ -23,6 +23,12 @@ if [[ ! -f /home/jetson/rcboat_ros_data/routes.json ]]; then
   cp "$ROOT/catkin_ws/src/rcboat_ros/config/routes.json" /home/jetson/rcboat_ros_data/routes.json
 fi
 (cd catkin_ws && catkin_make)
+set +u
+source "$ROOT/catkin_ws/devel/setup.bash"
+set -u
+VISION_PY="$HOME/.rcboat/vision-venv/bin/python3"
+[[ -x "$VISION_PY" ]] || { echo 'Run bash deployment/jetson/install_vision_dependencies.sh first'; exit 5; }
+PYTHONNOUSERSITE=1 "$VISION_PY" "$ROOT/deployment/jetson/vision_environment.py" --check --ros
 sudo cp systemd/rcboat_ros.service /etc/systemd/system/rcboat_ros.service
 sudo systemctl daemon-reload
 sudo systemctl reset-failed rcboat_ros.service
@@ -33,4 +39,4 @@ sudo systemctl is-active --quiet rcboat_ros.service || {
   exit 4
 }
 python3 deployment/jetson/verify_release.py --timeout 45
-echo 'RCBoat ROS Noetic v2.1.12 source AND running gateway verified.'
+echo 'RCBoat ROS Noetic v2.3.1 source AND running gateway verified.'

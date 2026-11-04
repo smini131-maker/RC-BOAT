@@ -16,9 +16,10 @@ from rcboat_ros.srv import Execute, ExecuteResponse
 from rcboat_ros.corrections import refresh_transport_status,refresh_receiver_status
 from rcboat_ros.common import pack, unpack, gps_is_healthy
 from rcboat_ros.geo import enrich_waypoints
+from rcboat_ros.control_config import load_rc,load_output,output_in_range
 
 
-VERSION = "2.1.12"
+VERSION = "2.3.1"
 CSV_FIELDS = [
     "sample_index", "sample_time_epoch_s", "logger_time_utc", "measurement_time_utc", "gps_received_time_utc",
     "output_time_utc", "elapsed_time_s", "latitude", "longitude", "utm_easting_m",
@@ -67,6 +68,7 @@ def json_dump(path, value):
 class Logger:
     def __init__(self):
         self.cache = {}
+        self.output_calibration=load_output(rospy.get_param)
         self.lock = threading.RLock()
         self.output_paused = False
         self.pause_reason = ""
@@ -224,7 +226,7 @@ class Logger:
         steering = actuator.get("actual_steering_pwm"); throttle = actuator.get("actual_throttle_pwm")
         if not (actuator.get("command_applied") is True and output_fresh and
                 steering is not None and throttle is not None and
-                4900 <= int(steering) <= 7300 and 5800 <= int(throttle) <= 7000):
+                output_in_range(steering,throttle,self.output_calibration)):
             raise RuntimeError("actuator command confirmation is missing")
         if not actuation_enabled and (int(steering) != 6000 or int(throttle) != 6450):
             raise RuntimeError("neutral output confirmation is missing")
@@ -289,6 +291,8 @@ class Logger:
             "execution_target_name": target_name, "subroute_count": len(routes),
             "ground_test_actuation_enabled": self.actuation_enabled,
             "configuration": rospy.get_param("/rcboat", {}),
+            "rc_input_calibration": self.cache.get('safety',{}).get('rc_input_calibration') or load_rc(rospy.get_param),
+            "pca_output_calibration": self.cache.get('safety',{}).get('pca_output_calibration') or load_output(rospy.get_param),
             "servo_calibration": {key: rospy.get_param("/rcboat/" + key, None) for key in
                                   ("steering_low", "steering_center", "steering_high", "throttle_stop",
                                    "throttle_forward_max", "throttle_reverse_max", "pca_frequency")},
@@ -338,7 +342,7 @@ class Logger:
             pause_reason = "GROUND_TEST_GPS_GRACE"
         steering = actuator.get("actual_steering_pwm"); throttle = actuator.get("actual_throttle_pwm")
         confirmed = (actuator.get("command_applied") is True and steering is not None and throttle is not None and
-                     4900 <= int(steering) <= 7300 and 5800 <= int(throttle) <= 7000 and
+                     output_in_range(steering,throttle,self.output_calibration) and
                      0 <= time.monotonic() - float(actuator.get("monotonic") or 0) <= 1.0)
         if confirmed and not self.actuation_enabled and not pause_reason:
             confirmed = int(steering) == 6000 and int(throttle) == 6450

@@ -44,3 +44,12 @@ release/v*/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Camera training and device-specific inference artefacts
+/training/datasets/
+/training/downloads/
+/training/runs/
+*.engine
+*.engine.json
+*.pt
+/yolo11n.pt

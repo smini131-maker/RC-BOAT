@@ -63,8 +63,9 @@ class SupervisorTests(unittest.TestCase):
                           speed_mps=.6, last_valid_monotonic=self.now)
         self.s.link = dict(ssh_connected=True, monotonic=self.now)
         self.s.nav = dict(valid=True, monotonic=self.now, route_monotonic=self.now, desired_steering_pwm=6100,
-                          desired_throttle_pwm=6650, route_complete=False)
-        self.s.rc = dict(monotonic=self.now, steering_us=1640, throttle_us=1500)
+                          desired_throttle_pwm=6650, route_complete=False,
+                          ramp_active=True,ramp_session_monotonic=self.s.mode_since)
+        self.s.rc = dict(monotonic=self.now, steering_us=1620, throttle_us=1499)
         self.s.actuator = dict(command_applied=True, monotonic=self.now)
 
     def request(self, action, **args):
@@ -95,6 +96,10 @@ class SupervisorTests(unittest.TestCase):
 
     def test_gps_publisher_dies_with_cached_healthy_true(self):
         self.s.gps['last_valid_monotonic'] = self.now - 2.01
+        self.assertEqual(self.s._command(),('NAVIGATION_GPS_GRACE',6000,6650,False))
+        self.now+=5.0
+        self.s.link['monotonic']=self.s.rc['monotonic']=self.s.actuator['monotonic']=self.now
+        self.s.nav['monotonic']=self.s.nav['route_monotonic']=self.now
         self.assert_manual_stop('GPS_INVALID_OR_STALE')
 
     def test_goal_arrival(self):

@@ -46,41 +46,13 @@ from .credentials import delete_password, load_password, save_password
 from .mock_worker import MockWorker
 from .ssh_worker import SSHWorker
 from .widgets import MetricCard, RoutePlot, StatusCard, TelemetryGraph
+from rcboat_ros.control_config import CRUISE_MIN,CRUISE_MAX,CRUISE_DEFAULT,CRUISE_STEP,validate_cruise,validate_rc,THROTTLE_FORWARD_MAX
 
 
-APP_VERSION = "2.1.12"
+APP_VERSION = "2.3.1"
 
 
-STYLE = """
-QMainWindow, QWidget { background:#09111f; color:#edf4ff; font-family:'Malgun Gothic','Segoe UI'; font-size:10pt; }
-QGroupBox { border:1px solid #26334a; border-radius:8px; margin-top:12px; padding:12px; font-weight:600; }
-QGroupBox::title { subcontrol-origin:margin; left:10px; padding:0 6px; color:#a9b9d2; }
-QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QTextEdit { background:#101a2b; border:1px solid #31405b; border-radius:5px; padding:6px; }
-QPushButton { background:#176fe2; border:0; border-radius:7px; padding:9px 14px; font-weight:600; }
-QPushButton:hover { background:#2a79ec; }
-QPushButton:disabled { background:#273247; color:#72809a; }
-QPushButton#danger { background:#d83c50; font-size:12pt; min-height:34px; }
-QPushButton#danger:hover { background:#f04e61; }
-QPushButton#safe { background:#1d8d68; }
-QLabel#appTitle { font-size:21pt; font-weight:800; color:#f5f9ff; }
-QLabel#appSubtitle { color:#8ea4c4; font-size:9pt; }
-QLabel#safetyBadge { background:#102b2c; color:#4ee0b0; border:1px solid #245a53; border-radius:12px; padding:5px 10px; font-weight:700; }
-QLabel#simulationBadge { background:#5a3510; color:#ffd27a; border:2px solid #d58b2d; border-radius:9px; padding:8px 16px; font-size:12pt; font-weight:800; }
-QFrame#statusCard { background:#111a2b; border:1px solid #26334a; border-radius:8px; }
-QLabel#cardTitle { color:#8fa1bd; font-size:9pt; }
-QLabel#cardValue { color:#e8eef8; font-size:14pt; font-weight:700; }
-QTabWidget::pane { border:1px solid #26334a; }
-QTabBar::tab { background:#111a2b; padding:9px 18px; }
-QTabBar::tab:selected { background:#1c2b45; color:#61caff; }
-QSlider::groove:horizontal { height:6px; background:#26334a; border-radius:3px; }
-QSlider::handle:horizontal { width:16px; margin:-5px 0; background:#4da3ff; border-radius:8px; }
-QFrame#metricCard { background:#0f1a2c; border:1px solid #243652; border-radius:10px; }
-QLabel#metricTitle { color:#8fa7c8; font-size:9pt; font-weight:600; }
-QLabel#metricValue { color:#f5f9ff; font-size:14pt; font-weight:800; }
-QLabel#metricHint { color:#7187a6; font-size:8pt; }
-QLabel#healthHeadline { font-size:12pt; font-weight:800; padding:4px 0; }
-QLabel#sectionHint { color:#7187a6; font-size:8.5pt; }
-"""
+from .ui_shell import STYLE
 
 
 class MainWindow(QMainWindow):
@@ -118,6 +90,14 @@ class MainWindow(QMainWindow):
         self._pending_mode_target: str | None = None
         self._auto_speed_dirty = False
         self._syncing_auto_speed = False
+        self._pending_cruise_request = None
+        self._pending_cruise_value = None
+        self._confirmed_cruise_pwm = None
+        self._cruise_applied_stamp = 0.0
+        self._gps_settings_dirty=False
+        self._syncing_gps_settings=False
+        self._pending_gps_settings=None
+        self._gps_settings_stamp=0.0
         self._multipath_dirty = False
         self._syncing_multipath = False
         self._pending_multipath_request: str | None = None
@@ -142,160 +122,16 @@ class MainWindow(QMainWindow):
             app.installEventFilter(self)
 
     def _build_ui(self) -> None:
-        # The entire control surface can scroll instead of clipping controls
-        # on smaller screens or high Windows display scaling.
-        viewport = QScrollArea()
-        viewport.setWidgetResizable(True)
-        viewport.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        viewport.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        central = QWidget()
-        viewport.setWidget(central)
-        self.setCentralWidget(viewport)
-        outer = QVBoxLayout(central)
-
-        header = QHBoxLayout()
-        logo = QLabel()
-        logo.setPixmap(self.windowIcon().pixmap(68, 68))
-        logo.setFixedSize(76, 76)
-        logo.setAlignment(Qt.AlignCenter)
-        title_box = QVBoxLayout()
-        title = QLabel("RC 보트 관제센터")
-        title.setObjectName("appTitle")
-        subtitle = QLabel(
-            f"v{APP_VERSION} · Jetson Nano · Arduino · GPS · PCA9685 통합 제어"
-        )
-        subtitle.setObjectName("appSubtitle")
-        title_box.addWidget(title)
-        title_box.addWidget(subtitle)
-        safety = QLabel("기본 안전 출력  조향 6000 · 스로틀 6450")
-        safety.setObjectName("safetyBadge")
-        self.simulation_badge = QLabel("SIMULATION MODE / 모의 데이터")
-        self.simulation_badge.setObjectName("simulationBadge")
-        self.simulation_badge.setVisible(False)
-        header.addWidget(logo)
-        header.addLayout(title_box)
-        header.addStretch(1)
-        header.addWidget(self.simulation_badge)
-        header.addWidget(safety)
-        outer.addLayout(header)
-
-        connect_group = QGroupBox("Jetson ROS gateway / SSH 연결")
-        connect_layout = QHBoxLayout(connect_group)
-        self.host = QLineEdit("10.227.56.215")
-        self.host.setMinimumWidth(150)
-        self.port = QSpinBox(); self.port.setRange(1, 65535); self.port.setValue(22)
-        self.username = QLineEdit("jetson")
-        self.password = QLineEdit(); self.password.setEchoMode(QLineEdit.Password)
-        self.remember = QCheckBox("비밀번호 안전 저장")
-        self.simulation = QCheckBox("시뮬레이션")
-        self.connect_button = QPushButton("연결")
-        self.connect_button.setIcon(self.style().standardIcon(QStyle.SP_DriveNetIcon))
-        self.connect_button.clicked.connect(self.toggle_connection)
-        for label, widget in (("주소", self.host), ("포트", self.port), ("사용자", self.username), ("비밀번호", self.password)):
-            connect_layout.addWidget(QLabel(label)); connect_layout.addWidget(widget)
-        connect_layout.addWidget(self.remember)
-        connect_layout.addWidget(self.simulation)
-        connect_layout.addWidget(self.connect_button)
-        outer.addWidget(connect_group)
-
-        status_layout = QGridLayout()
-        self.cards = {
-            "ssh": StatusCard("SSH 연결", "연결 안 됨"),
-            "ros_master": StatusCard("ROS master", "확인 전"),
-            "backend": StatusCard("ROS gateway", "확인 전"),
-            "logger": StatusCard("Logger", "idle"),
-            "mode": StatusCard("현재 모드", "자동 대기"),
-            "arduino": StatusCard("Arduino", "-"),
-            "pca": StatusCard("PCA9685", "-"),
-            "gps": StatusCard("GPS", "위치 미수신"),
-            "rtk": StatusCard("RTK", "no_data"),
-            "armed": StatusCard("GPS 항법", "대기"),
-            "estop": StatusCard("비상정지", "정상"),
-        }
-        for idx, card in enumerate(self.cards.values()):
-            status_layout.addWidget(card, idx // 4, idx % 4)
-        outer.addLayout(status_layout)
-
-        action_layout = QHBoxLayout()
-        self.mode_combo = QComboBox()
-        for label, value in (("자동 대기", "AUTO"), ("수동 조종", "MANUAL"), ("GPS 항법", "NAVIGATION"), ("PC 원격 조종", "REMOTE")):
-            self.mode_combo.addItem(label, value)
-        self.mode_combo.currentIndexChanged.connect(self._on_mode_selected)
-        self.mode_button = QPushButton("모드 적용"); self.mode_button.setIcon(self.style().standardIcon(QStyle.SP_DialogApplyButton)); self.mode_button.clicked.connect(self.set_mode)
-        self.estop_button = QPushButton("비상 정지"); self.estop_button.setIcon(self.style().standardIcon(QStyle.SP_MessageBoxCritical)); self.estop_button.setObjectName("danger"); self.estop_button.clicked.connect(lambda: self.command("EMERGENCY_STOP"))
-        self.clear_estop_button = QPushButton("비상정지 해제"); self.clear_estop_button.setIcon(self.style().standardIcon(QStyle.SP_DialogResetButton)); self.clear_estop_button.setObjectName("safe"); self.clear_estop_button.clicked.connect(self.clear_estop)
-        action_layout.addWidget(QLabel("운항 모드")); action_layout.addWidget(self.mode_combo); action_layout.addWidget(self.mode_button)
-        self.auto_speed_slider = QSlider(Qt.Horizontal)
-        self.auto_speed_slider.setRange(6480, 6900)
-        self.auto_speed_slider.setSingleStep(10)
-        self.auto_speed_slider.setPageStep(50)
-        self.auto_speed_slider.setValue(6650)
-        self.auto_speed_slider.setFixedWidth(180)
-        self.auto_speed_spin = QSpinBox()
-        self.auto_speed_spin.setRange(6480, 6900)
-        self.auto_speed_spin.setSingleStep(10)
-        self.auto_speed_spin.setValue(6650)
-        self.auto_speed_spin.setSuffix(" PWM")
-        self.auto_speed_percent = QLabel("15%")
-        self.auto_speed_percent.setMinimumWidth(34)
-        self.auto_speed_apply = QPushButton("적용")
-        self.auto_speed_apply.clicked.connect(self.apply_auto_speed)
-        self.auto_speed_reset = QPushButton("기본값")
-        self.auto_speed_reset.clicked.connect(self.reset_auto_speed)
-        self.auto_speed_slider.valueChanged.connect(self._auto_speed_from_slider)
-        self.auto_speed_spin.valueChanged.connect(self._auto_speed_from_spin)
-        action_layout.addSpacing(12)
-        action_layout.addWidget(QLabel("자동 속도"))
-        action_layout.addWidget(self.auto_speed_slider)
-        action_layout.addWidget(self.auto_speed_spin)
-        action_layout.addWidget(self.auto_speed_percent)
-        action_layout.addWidget(self.auto_speed_apply)
-        action_layout.addWidget(self.auto_speed_reset)
-        action_layout.addStretch(1)
-        action_layout.addWidget(self.clear_estop_button); action_layout.addWidget(self.estop_button)
-        outer.addLayout(action_layout)
-        auto_speed_note = QLabel("6450 = 정지 / 값이 클수록 전진 속도 증가 · 너무 낮은 값에서는 ESC 특성에 따라 모터가 회전하지 않을 수 있습니다.")
-        auto_speed_note.setStyleSheet("color:#8ea4c4; font-size:9pt;")
-        outer.addWidget(auto_speed_note)
-
-        tabs = QTabWidget()
-        self.tabs = tabs
-        tabs.addTab(self._dashboard_tab(), self.style().standardIcon(QStyle.SP_ComputerIcon), "실시간 계기판")
-        tabs.addTab(self._gps_rtk_tab(), self.style().standardIcon(QStyle.SP_DriveNetIcon), "GPS · RTK")
-        tabs.addTab(self._route_tab(), self.style().standardIcon(QStyle.SP_FileDialogDetailedView), "항로")
-        tabs.addTab(self._ground_test_tab(), self.style().standardIcon(QStyle.SP_DialogApplyButton), "도보 테스트")
-        tabs.addTab(self._remote_tab(), self.style().standardIcon(QStyle.SP_ArrowRight), "PC 원격 조종")
-        self.terminal_tab_index = tabs.addTab(
-            self._terminal_tab(),
-            self.style().standardIcon(QStyle.SP_ComputerIcon),
-            "SSH 터미널",
-        )
-        tabs.addTab(self._logs_tab(), self.style().standardIcon(QStyle.SP_FileDialogInfoView), "운항 기록")
-        outer.addWidget(tabs, 1)
+        from .ui_shell import build_shell
+        build_shell(self)
 
     def _dashboard_tab(self) -> QWidget:
-        page = QWidget(); layout = QVBoxLayout(page)
-        values = QGridLayout()
-        self.value_labels = {}
-        fields = [
-            ("조종기 조향", "rc_steering"), ("조종기 스로틀", "rc_throttle"),
-            ("서보 출력 CH0", "pca_steering"), ("ESC 출력 CH6", "pca_throttle"),
-            ("위도", "lat"), ("경도", "lon"),
-            ("고도", "altitude"), ("HDOP (좋음 ≤2 / 항법 ≤3)", "hdop"), ("마지막 FIX 경과 (정상 ≤2 s)", "last_fix_age"),
-            ("수신 위성 (좋음 ≥8 / 주의 6~7)", "satellites"), ("속도", "speed"),
-            ("진행 방향", "course"), ("안전 전환 사유", "failsafe"),
-        ]
-        for idx, (title, key) in enumerate(fields):
-            card = StatusCard(title)
-            self.value_labels[key] = card
-            values.addWidget(card, idx // 5, idx % 5)
-        layout.addLayout(values)
-        splitter = QSplitter(Qt.Horizontal)
-        self.rc_graph = TelemetryGraph("조종기 입력 (조향 / 스로틀, us)", 1000, 2100, ("#35c9ff", "#f8bd58"))
-        self.pwm_graph = TelemetryGraph("PCA9685 출력 (조향 / 스로틀)", 4800, 7400, ("#38d996", "#ff6474"))
-        splitter.addWidget(self.rc_graph); splitter.addWidget(self.pwm_graph)
-        layout.addWidget(splitter, 1)
-        return page
+        from .ui_shell import build_dashboard
+        return build_dashboard(self)
+
+    def vision_request(self,command,args):
+        request=self.command(command,**args)
+        self.balloon_panel.request_sent(command,request,args)
 
     def _route_tab(self) -> QWidget:
         page = QWidget()
@@ -396,9 +232,9 @@ class MainWindow(QMainWindow):
 
         layer_box = QGroupBox("지도에 표시할 기록 항로")
         layer_layout = QVBoxLayout(layer_box)
-        layer_toolbar = QHBoxLayout()
+        layer_toolbar = QGridLayout()
         self.route_layer_checks_widget = QWidget()
-        self.route_layer_checks_layout = QHBoxLayout(self.route_layer_checks_widget)
+        self.route_layer_checks_layout = QVBoxLayout(self.route_layer_checks_widget)
         self.route_layer_checks_layout.setContentsMargins(0, 0, 0, 0)
         self.route_layer_checks_layout.setSpacing(12)
         self.route_layer_empty = QLabel("저장된 기록 항로가 없습니다")
@@ -412,11 +248,11 @@ class MainWindow(QMainWindow):
         hide_all.clicked.connect(lambda: self._set_all_route_layers(False))
         fit_map = QPushButton("지도 전체 맞춤")
         fit_map.clicked.connect(self.route_plot_fit)
-        layer_toolbar.addWidget(QLabel("훈련 항로는 지도 표시에서 제외됩니다"))
-        layer_toolbar.addStretch(1)
-        layer_toolbar.addWidget(show_all)
-        layer_toolbar.addWidget(hide_all)
-        layer_toolbar.addWidget(fit_map)
+        layer_hint=QLabel("훈련 항로는 지도 표시에서 제외됩니다");layer_hint.setWordWrap(True)
+        layer_toolbar.addWidget(layer_hint,0,0,1,2)
+        layer_toolbar.addWidget(show_all,1,0)
+        layer_toolbar.addWidget(hide_all,1,1)
+        layer_toolbar.addWidget(fit_map,2,0,1,2)
         layer_layout.addWidget(self.route_layer_checks_widget)
         layer_layout.addLayout(layer_toolbar)
 
@@ -474,9 +310,9 @@ class MainWindow(QMainWindow):
         helper_box = QVBoxLayout()
         helper_box.addWidget(QLabel("자동 편성 도움 허용거리"))
         helper_box.addWidget(self.multipath_endpoint)
-        multipath_layout.addLayout(helper_box, 0, 1)
-        multipath_layout.addWidget(self.multipath_apply, 0, 2)
-        multipath_layout.addWidget(self.multipath_status, 1, 0, 1, 3)
+        multipath_layout.addLayout(helper_box, 1, 0)
+        multipath_layout.addWidget(self.multipath_apply, 2, 0)
+        multipath_layout.addWidget(self.multipath_status, 3, 0)
         for widget in (
             self.multipath_enabled,
             self.multipath_endpoint,
@@ -486,13 +322,8 @@ class MainWindow(QMainWindow):
             else:
                 widget.valueChanged.connect(self._mark_multipath_dirty)
 
-        layout.addWidget(operation_box)
-        layout.addWidget(record_box)
-        layout.addWidget(layer_box)
-        layout.addWidget(self.route_plot, 1)
-        layout.addWidget(multipath_group_box)
-        layout.addWidget(multipath_box)
-        return page
+        from .ui_shell import build_route_workspace
+        return build_route_workspace(self,operation_box,record_box,layer_box,multipath_group_box,multipath_box,reload_button)
 
     def _gps_rtk_tab(self) -> QWidget:
         page = QWidget()
@@ -517,33 +348,38 @@ class MainWindow(QMainWindow):
         metrics = QGridLayout()
         metrics.setHorizontalSpacing(8)
         metrics.setVerticalSpacing(8)
+        detail_box=QGroupBox('상세 수신 품질');detail_grid=QGridLayout(detail_box)
         self.gps_detail_labels: dict[str, QLabel] = {}
         self.gps_metric_cards: dict[str, MetricCard] = {}
         detail_fields = (
-            ("GNSS 해", "fix_label", "RTK_FIXED가 최고 정밀도"),
-            ("UTC 시각", "utc_time", "수신기 GNSS 시간"),
-            ("위성 수", "satellites", "≥8 좋음 · 6~7 주의"),
-            ("HDOP", "hdop", "≤2 좋음 · ≤3 항법 허용"),
-            ("PDOP", "pdop", "≤2 좋음 · ≤4 주의"),
-            ("VDOP", "vdop", "≤5 양호 · 표면항법 Gate 제외"),
-            ("평균 C/N0", "cno", "≥30 좋음 · 25~29 주의 · <25 나쁨"),
-            ("수평 정확도 hAcc", "hacc", "UBX NAV-PVT · ≤1.5 m 좋음 · ≤3 m 주의"),
-            ("GPS 데이터 지연", "age", "≤2 s 정상"),
-            ("UTM 좌표", "utm", "좌표 기반 미터 단위 위치"),
-            ("RTK 해 상태", "rtk_state", "FIXED / FLOAT / DGPS 실시간 표시"),
-            ("RTCM 수신 후 경과", "correction_age", "Jetson CRC 검증 수신 기준 · 위치 FIX와 별도"),
-            ("수신기 보정 나이", "receiver_correction_age", "수신기 GGA 보고값 · 미제공 시 no_data/unsupported"),
+            ("GNSS 해", "fix_label", "FIXED / FLOAT / GPS"),
+            ("UTC 시각", "utc_time", "UTC"),
+            ("위성 수", "satellites", "정상 ≥8 | 주의 6–7"),
+            ("HDOP", "hdop", "정상 ≤2"),
+            ("PDOP", "pdop", "정상 ≤2 | 주의 ≤4"),
+            ("VDOP", "vdop", "정상 ≤5"),
+            ("평균 C/N0", "cno", "정상 ≥30 | 주의 25–29 dB-Hz"),
+            ("수평 정확도 hAcc", "hacc", "정상 ≤1.5 m | 주의 ≤3 m"),
+            ("GPS 데이터 지연", "age", "정상 ≤2 s"),
+            ("UTM 좌표", "utm", "UTM · m"),
+            ("RTK 해 상태", "rtk_state", "FIXED / FLOAT / DGPS"),
+            ("RTCM 수신 후 경과", "correction_age", "정상 ≤5 s | 주의 ≤10 s"),
+            ("수신기 보정 나이", "receiver_correction_age", "수신기 보고값 · s"),
         )
+        primary_keys={'fix_label','utc_time','satellites','hdop','age','correction_age'}
+        primary_index=detail_index=0
         for index, (title, key, hint) in enumerate(detail_fields):
             card = MetricCard(title, hint)
             self.gps_metric_cards[key] = card
             self.gps_detail_labels[key] = card.value_label
-            metrics.addWidget(card, index // 4, index % 4)
+            if key in primary_keys:
+                metrics.addWidget(card,primary_index//2,primary_index%2);primary_index+=1
+            else:
+                detail_grid.addWidget(card,detail_index//2,detail_index%2);detail_index+=1
         health_layout.addLayout(metrics)
 
         self.gps_range_note = QLabel(
-            "항법 안전 Gate 핵심: GPS 연결 · 유효 위치 FIX · 위치 age ≤2 s · "
-            "HDOP ≤설정값. VDOP는 표면 자율항법 Gate를 직접 차단하지 않습니다."
+            "항법 기준  FIX 유효 · GPS 데이터 ≤2 s"
         )
         self.gps_range_note.setWordWrap(True)
         self.gps_range_note.setObjectName("sectionHint")
@@ -627,8 +463,8 @@ class MainWindow(QMainWindow):
         ntrip_cards.setHorizontalSpacing(8)
         self.ntrip_link_card = MetricCard("보정 서버", "NTRIP caster 연결")
         self.ntrip_solution_card = MetricCard("현재 위치 해", "FIXED / FLOAT / DGPS")
-        self.ntrip_bytes_card = MetricCard("RTCM 누적 수신", "수신량이 증가하면 보정 데이터 유입 중")
-        self.ntrip_age_card = MetricCard("RTCM 수신 후 경과", "Jetson 수신 기준 · 실제 수신기 보정 나이와 다름")
+        self.ntrip_bytes_card = MetricCard("RTCM 누적 수신", "B / kB / MB")
+        self.ntrip_age_card = MetricCard("RTCM 수신 후 경과", "정상 ≤5 s | 주의 ≤10 s")
         ntrip_cards.addWidget(self.ntrip_link_card, 0, 0)
         ntrip_cards.addWidget(self.ntrip_solution_card, 0, 1)
         ntrip_cards.addWidget(self.ntrip_bytes_card, 0, 2)
@@ -648,28 +484,39 @@ class MainWindow(QMainWindow):
         ntrip_explain.setObjectName("sectionHint")
         ntrip_layout.addWidget(ntrip_explain, 4, 0, 1, 6)
 
-        safety_box = QGroupBox("GPS 항법 안전 Gate")
-        safety_layout = QHBoxLayout(safety_box)
+        safety_box = QGroupBox("GPS 항법 설정 · HDOP는 진단 참고 기준")
+        safety_layout = QVBoxLayout(safety_box)
         self.rtk_fallback = QCheckBox("RTK 미고정/끊김 시 일반 GPS로 계속 운항")
         self.rtk_fallback.setChecked(True)
+        self.rtk_fallback.setEnabled(False)
+        self.rtk_fallback.setToolTip('현재 정식 정책: 유효한 일반 GPS FIX로 운항 가능')
         self.gps_max_hdop = QDoubleSpinBox()
         self.gps_max_hdop.setRange(0.5, 20.0)
         self.gps_max_hdop.setValue(3.0)
         self.gps_max_hdop.setSuffix(" HDOP")
-        save_safety = QPushButton("안전 기준 저장")
+        self.gps_max_hdop.setKeyboardTracking(False)
+        self.gps_max_hdop.valueChanged.connect(lambda _value: self._mark_gps_settings_dirty())
+        self.gps_max_hdop.lineEdit().textEdited.connect(lambda _text: self._mark_gps_settings_dirty())
+        save_safety = QPushButton("HDOP 참고 기준 저장")
+        self.gps_settings_save=save_safety
         save_safety.clicked.connect(self.apply_gps_safety)
         safety_layout.addWidget(self.rtk_fallback)
-        safety_layout.addWidget(QLabel("최대 허용 HDOP"))
+        safety_layout.addWidget(QLabel("HDOP 참고 상한 (출력 차단 안 함)"))
         safety_layout.addWidget(self.gps_max_hdop)
         safety_layout.addWidget(save_safety)
-        safety_layout.addStretch(1)
+        from .ui_shell import grouped_pages,tidy_ntrip
+        more=QWidget();more_layout=QVBoxLayout(more);more_layout.setContentsMargins(0,0,0,0)
+        more_layout.addWidget(detail_box);more_layout.addWidget(safety_box);more_layout.addWidget(logging_box)
+        self.gps_details_toggle=QPushButton('상세 품질 · 기준 · GPS 기록');self.gps_details_toggle.setCheckable(True)
+        self.gps_details_toggle.toggled.connect(more.setVisible);health_layout.addWidget(self.gps_details_toggle);health_layout.addWidget(more);more.hide()
+        self.gps_workspace_tabs=grouped_pages([('GPS 상태',health_box),('RTK 연결',tidy_ntrip(self,ntrip_disable,refresh))])
+        return self.gps_workspace_tabs
 
-        layout.addWidget(health_box)
-        layout.addWidget(ntrip_box)
-        layout.addWidget(safety_box)
-        layout.addWidget(logging_box)
-        layout.addStretch(1)
-        return page
+    def reload_ntrip_profile(self):
+        if self._pending_ntrip_request:return
+        self._ntrip_dirty=False;self.ntrip_password.clear();self.ntrip_apply.setText('설정 저장 · 연결')
+        self.ntrip_status.setText('Jetson 로컬에 저장된 설정 조회 중 · 설정 파일은 변경하지 않습니다')
+        self.command('REFRESH_NTRIP')
 
     def _mark_ntrip_dirty(self, *_args) -> None:
         if not self._syncing_ntrip:
@@ -735,12 +582,39 @@ class MainWindow(QMainWindow):
         self.ntrip_password.clear()
 
     def apply_gps_safety(self) -> None:
-        self.command(
+        if self._pending_gps_settings:return
+        request=self.command(
             "SET_GPS_SETTINGS",
             navigation_max_hdop=self.gps_max_hdop.value(),
             rtk_fallback_to_gps=self.rtk_fallback.isChecked(),
             rtk_required_for_navigation=not self.rtk_fallback.isChecked(),
         )
+        if request is not None:
+            self._pending_gps_settings=request
+            self.gps_settings_save.setText('저장 확인 중')
+            QTimer.singleShot(6000,lambda:self._gps_settings_timeout(request))
+
+    def _mark_gps_settings_dirty(self):
+        if not self._syncing_gps_settings:self._gps_settings_dirty=True
+
+    def _gps_settings_timeout(self,request):
+        if self._pending_gps_settings==request:
+            self._pending_gps_settings=None
+            self._gps_settings_dirty=True
+            self.gps_settings_save.setText('저장 미확인 · 다시 저장')
+
+    def _sync_gps_settings(self,settings):
+        value=settings.get('navigation_max_hdop')
+        stamp=settings.get('applied_monotonic')
+        if (not isinstance(value,(int,float)) or isinstance(value,bool) or not math.isfinite(value)
+                or not .5<=value<=20 or not isinstance(stamp,(int,float)) or not math.isfinite(stamp)
+                or stamp<self._gps_settings_stamp):return
+        self._gps_settings_stamp=stamp
+        self.gps_metric_cards['hdop'].hint_label.setText(f'정상 ≤2 | 참고 ≤{value:g}')
+        if self._gps_settings_dirty or self._pending_gps_settings:return
+        self._syncing_gps_settings=True
+        try:self.gps_max_hdop.setValue(value)
+        finally:self._syncing_gps_settings=False
 
     @staticmethod
     def _distance_spin(low: float, high: float, value: float, step: float, suffix: str) -> QDoubleSpinBox:
@@ -846,10 +720,11 @@ class MainWindow(QMainWindow):
         page = QWidget(); layout = QVBoxLayout(page)
         notice = QLabel("PC 원격 조종 모드 전용 · 0.2초마다 연결 신호 전송 · 0.7초 끊기면 자동 안전 모드로 즉시 전환")
         notice.setStyleSheet("color:#f8bd58")
+        notice.setWordWrap(True)
         layout.addWidget(notice)
         form = QFormLayout()
         self.remote_steering = QSlider(Qt.Horizontal); self.remote_steering.setRange(4900, 7300); self.remote_steering.setValue(6000)
-        self.remote_throttle = QSlider(Qt.Horizontal); self.remote_throttle.setRange(5800, 7000); self.remote_throttle.setValue(6450)
+        self.remote_throttle = QSlider(Qt.Horizontal); self.remote_throttle.setRange(5800, THROTTLE_FORWARD_MAX); self.remote_throttle.setValue(6450)
         self.remote_steering_label = QLabel("6000")
         self.remote_throttle_label = QLabel("6450")
         self.remote_steering.valueChanged.connect(lambda v: self.remote_steering_label.setText(str(v)))
@@ -857,13 +732,14 @@ class MainWindow(QMainWindow):
         steering_row = QHBoxLayout(); steering_row.addWidget(self.remote_steering); steering_row.addWidget(self.remote_steering_label)
         throttle_row = QHBoxLayout(); throttle_row.addWidget(self.remote_throttle); throttle_row.addWidget(self.remote_throttle_label)
         form.addRow("조향 PWM (4900~7300)", steering_row)
-        form.addRow("스로틀 PWM (5800~7000)", throttle_row)
+        form.addRow(f"스로틀 PWM (5800~{THROTTLE_FORWARD_MAX})", throttle_row)
         send = QPushButton("원격 출력 전송"); send.setIcon(self.style().standardIcon(QStyle.SP_ArrowRight)); send.clicked.connect(self.send_remote)
         neutral = QPushButton("조향 중앙 + 모터 정지"); neutral.setIcon(self.style().standardIcon(QStyle.SP_MediaStop)); neutral.setObjectName("safe"); neutral.clicked.connect(self.remote_neutral)
         keyboard_help = QLabel("키보드: W/↑ 전진 · S/↓ 후진 · A/← 좌회전 · D/→ 우회전 · Space 정지 (키를 놓으면 해당 축은 안전 중립)")
         keyboard_help.setStyleSheet("color:#8ea4c4")
+        keyboard_help.setWordWrap(True)
         simulation_box = QGroupBox("시뮬레이션 장애 재현")
-        simulation_layout = QHBoxLayout(simulation_box)
+        simulation_layout = QGridLayout(simulation_box)
         self.sim_arduino_offline = QCheckBox("Arduino 분리")
         self.sim_gps_offline = QCheckBox("GPS 분리")
         self.sim_gps_no_fix = QCheckBox("GPS NO FIX")
@@ -883,10 +759,9 @@ class MainWindow(QMainWindow):
             self.sim_heartbeat_loss,
             self.sim_multipath,
         ]
-        for widget in self.simulation_controls:
-            simulation_layout.addWidget(widget)
+        for index,widget in enumerate(self.simulation_controls):
+            simulation_layout.addWidget(widget,index//3,index%3)
             widget.setEnabled(False)
-        simulation_layout.addStretch(1)
         layout.addLayout(form); layout.addWidget(keyboard_help); layout.addWidget(send); layout.addWidget(neutral); layout.addWidget(simulation_box); layout.addStretch(1)
         return page
 
@@ -954,7 +829,7 @@ class MainWindow(QMainWindow):
             self.worker.interrupt_terminal()
 
     def _load_settings(self) -> None:
-        self.host.setText(self.settings.value("host", "10.227.56.215"))
+        self.host.setText(self.settings.value("host", "10.123.65.215"))
         self.port.setValue(int(self.settings.value("port", 22)))
         self.username.setText(self.settings.value("username", "jetson"))
         self.ntrip_username.setText(self.settings.value("ntrip_username", ""))
@@ -1013,11 +888,18 @@ class MainWindow(QMainWindow):
 
     def _set_connected(self, connected: bool) -> None:
         if not connected:
+            self._confirmed_cruise_pwm = None
+            self._cruise_applied_stamp = 0.0
+            self._gps_settings_stamp=0.0
+            self._pending_gps_settings=None
+            self._pending_cruise_request = self._pending_cruise_value = None
+            self._update_cruise_label()
             self._gateway_online = self._ssh_online = False
             self.cards["ros_master"].set_value("offline",False)
             self.cards["gps"].set_value("no_data",False)
             self.cards["rtk"].set_value("no_data",False)
         self._refresh_connection_button()
+        self.balloon_panel.set_connected(connected)
         self.simulation_badge.setVisible(connected and self.is_simulation)
         if connected and self.is_simulation:
             self.cards["ssh"].set_value("시뮬레이션", True)
@@ -1147,6 +1029,7 @@ class MainWindow(QMainWindow):
         self.mode_button.setEnabled(bool(self.worker and self.worker.isRunning()))
 
     def _request_mode(self, mode: str) -> str | None:
+        if mode!="BALLOON":self.balloon_panel.waiting_start=False
         if mode != "REMOTE":
             self._release_remote_controls(send=False)
         request_id = self.command("SET_MODE", mode=mode)
@@ -1162,19 +1045,37 @@ class MainWindow(QMainWindow):
     def set_mode(self) -> None:
         self._request_mode(str(self.mode_combo.currentData()))
 
-    @staticmethod
-    def _auto_speed_percentage(value: int) -> int:
-        return round((value - 6450) / (7800 - 6450) * 100)
-
     def _set_auto_speed_editor(self, value: int, *, dirty: bool) -> None:
+        value = max(CRUISE_MIN,min(CRUISE_MAX,CRUISE_MIN + ((value-CRUISE_MIN+5)//CRUISE_STEP)*CRUISE_STEP))
         self._syncing_auto_speed = True
         try:
             self.auto_speed_slider.setValue(value)
             self.auto_speed_spin.setValue(value)
-            self.auto_speed_percent.setText(f"{self._auto_speed_percentage(value)}%")
         finally:
             self._syncing_auto_speed = False
         self._auto_speed_dirty = dirty
+        self._update_cruise_label()
+
+    def _update_cruise_label(self):
+        applied = str(self._confirmed_cruise_pwm) if self._confirmed_cruise_pwm is not None else '확인 전'
+        note = ' · 적용 확인 중' if self._pending_cruise_request else ' · 편집 중' if self._auto_speed_dirty else ''
+        self.auto_speed_status.setText(f'적용 목표: {applied}{note}')
+        self.auto_speed_apply.setText('적용 확인 중' if self._pending_cruise_request else '적용')
+
+    def _mark_cruise_dirty(self):
+        self._auto_speed_dirty=True
+        self._update_cruise_label()
+
+    def _confirm_cruise(self,value,stamp):
+        try:
+            value=validate_cruise(value)
+            if isinstance(stamp,bool) or not isinstance(stamp,(float,int)) or not math.isfinite(stamp) or stamp<=0:
+                return
+        except ValueError:return
+        if stamp<self._cruise_applied_stamp:return
+        self._cruise_applied_stamp=stamp
+        self._confirmed_cruise_pwm=value
+        self._update_cruise_label()
 
     def _auto_speed_from_slider(self, value: int) -> None:
         if self._syncing_auto_speed:
@@ -1187,10 +1088,23 @@ class MainWindow(QMainWindow):
         self._set_auto_speed_editor(value, dirty=True)
 
     def apply_auto_speed(self) -> None:
-        self.command("SET_AUTO_CRUISE_PWM", value=self.auto_speed_spin.value())
+        if self._pending_cruise_request:return
+        value=validate_cruise(self.auto_speed_spin.value())
+        request=self.command("SET_AUTO_CRUISE_PWM", value=value)
+        if request is not None:
+            self._pending_cruise_request=request;self._pending_cruise_value=value
+            self._update_cruise_label()
+            QTimer.singleShot(6000,lambda: self._cruise_ack_timeout(request))
+
+    def _cruise_ack_timeout(self,request):
+        if self._pending_cruise_request==request:
+            self._pending_cruise_request=self._pending_cruise_value=None
+            self._auto_speed_dirty=True
+            self._update_cruise_label()
+            self.log('순항 PWM 적용 응답 없음 · 현재 적용값을 확인한 뒤 다시 적용하세요')
 
     def reset_auto_speed(self) -> None:
-        self._set_auto_speed_editor(6650, dirty=True)
+        self._set_auto_speed_editor(CRUISE_DEFAULT, dirty=True)
 
     def clear_estop(self) -> None:
         answer = QMessageBox.question(self, "비상정지 해제", "비상정지 잠금을 해제할까요? 해제 후에도 자동 안전 모드에서 조향 6000, 스로틀 6450을 유지합니다.")
@@ -1221,7 +1135,7 @@ class MainWindow(QMainWindow):
         reverse = Qt.Key_S in self._remote_keys or Qt.Key_Down in self._remote_keys
         stop = Qt.Key_Space in self._remote_keys
         steering = 4900 if left and not right else 7300 if right and not left else 6000
-        throttle = 6450 if stop or forward == reverse else 7000 if forward else 5800
+        throttle = 6450 if stop or forward == reverse else THROTTLE_FORWARD_MAX if forward else 5800
         self.remote_steering.setValue(steering)
         self.remote_throttle.setValue(throttle)
         self.send_remote()
@@ -1784,6 +1698,24 @@ class MainWindow(QMainWindow):
 
     @Slot(dict)
     def on_ack(self, ack: dict) -> None:
+        self.balloon_panel.on_ack(ack)
+        if ack.get('command')=='SET_GPS_SETTINGS' and self._pending_gps_settings is not None and ack.get('request_id')==self._pending_gps_settings:
+            self._pending_gps_settings=None
+            if ack.get('ok'):
+                value=ack.get('navigation_max_hdop')
+                self._gps_settings_dirty=self.gps_max_hdop.value()!=value
+                self._sync_gps_settings(ack)
+                self.gps_settings_save.setText('저장됨' if not self._gps_settings_dirty else '새 편집값 저장')
+            else:
+                self._gps_settings_dirty=True
+                self.gps_settings_save.setText('저장 실패 · 다시 저장')
+        if (ack.get('command')=='SET_AUTO_CRUISE_PWM' and self._pending_cruise_request is not None
+                and ack.get('request_id')==self._pending_cruise_request):
+            if ack.get('ok') and ack.get('value')==self._pending_cruise_value:
+                self._confirm_cruise(ack.get('value'),ack.get('cruise_applied_monotonic'))
+                self._auto_speed_dirty=self.auto_speed_spin.value()!=self._confirmed_cruise_pwm
+            self._pending_cruise_request=self._pending_cruise_value=None
+            self._update_cruise_label()
         if ack.get("ok"):
             if (
                 ack.get("command") == "SELECT_ROUTE"
@@ -1806,8 +1738,6 @@ class MainWindow(QMainWindow):
             ):
                 self.pending_multipath_start_request = None
                 self._request_mode("NAVIGATION")
-            if ack.get("command") == "SET_AUTO_CRUISE_PWM":
-                self._auto_speed_dirty = False
             if (
                 ack.get("command") == "SET_MULTIPATH"
                 and ack.get("request_id") == self._pending_multipath_request
@@ -1954,6 +1884,7 @@ class MainWindow(QMainWindow):
     @Slot(dict)
     def update_telemetry(self, state: dict) -> None:
         if self._disconnecting or self._closing:return
+        self.balloon_panel.update_state(state,self.host.text().strip())
         devices, gps, rc, pca = state.get("devices", {}), state.get("gps", {}), state.get("rc", {}), state.get("pca", {})
         mode = state.get("mode", "-")
         self.current_mode = str(mode)
@@ -1965,10 +1896,12 @@ class MainWindow(QMainWindow):
             self._sync_mode_editor(str(mode))
         operation = state.get("operation_state", mode)
         auto_cruise_pwm = state.get("auto_cruise_pwm")
-        if not self._auto_speed_dirty and isinstance(auto_cruise_pwm, int):
-            self._set_auto_speed_editor(auto_cruise_pwm, dirty=False)
-        mode_ko = {"AUTO": "자동 대기", "MANUAL": "수동 조종", "NAVIGATION": "GPS 항법", "REMOTE": "PC 원격"}.get(mode, mode)
+        self._confirm_cruise(auto_cruise_pwm,state.get('cruise_applied_monotonic'))
+        if not self._auto_speed_dirty and self._pending_cruise_request is None and self._confirmed_cruise_pwm is not None:
+            self._set_auto_speed_editor(self._confirmed_cruise_pwm, dirty=False)
+        mode_ko = {"AUTO": "자동 대기", "MANUAL": "수동 조종", "NAVIGATION": "GPS 항법", "REMOTE": "PC 원격", "BALLOON":"풍선 추적"}.get(mode, mode)
         operation_ko = {
+            'NAVIGATION_GPS_GRACE': 'GPS 데이터 지연 유예 · 조향 중앙 / 6650 PWM',
             "AUTO": "자동 대기", "AUTO_ACTIVE": "직진 운항 중", "AUTO_SAFE": "안전 정지",
             "MANUAL_WAITING_RC": "조종기 입력 대기", "MANUAL_WAITING_NEUTRAL": "중립 입력 대기", "MANUAL_ACTIVE": "수동 조종 중",
             "NAVIGATION_WAITING_GPS": "GPS 대기", "NAVIGATION_WAITING_ROUTE": "항로 대기",
@@ -1977,10 +1910,10 @@ class MainWindow(QMainWindow):
             "NAVIGATION_ACTIVE": "자동 운항 중", "NAVIGATION_TURN_PAUSE": "큰 방향오차 · 잠깐 정지 후 저속 복귀",
             "NAVIGATION_RECOVERY_STOP": "경로 이탈 안전정지",
             "NAVIGATION_ROUTE_COMPLETE": "목적지 도착·정지",
-            "REMOTE_ACTIVE": "PC 원격 조종 중", "EMERGENCY_STOP": "비상정지",
+            "BALLOON":"풍선 추적 주행", "REMOTE_ACTIVE": "PC 원격 조종 중", "EMERGENCY_STOP": "비상정지",
             "GROUND_TEST": "도보 테스트 중",
         }.get(operation, operation)
-        self.cards["mode"].set_value(f"{mode_ko} · {operation_ko}", not state.get("estop", False))
+        self.cards["mode"].set_value(mode_ko if mode_ko==operation_ko else f"{mode_ko} · {operation_ko}", not state.get("estop", False))
         backend = state.get("backend") or {}
         backend_ready = bool(backend.get("ready", True))
         self._gateway_online = bool(backend.get("gateway_online",backend_ready))
@@ -1995,7 +1928,7 @@ class MainWindow(QMainWindow):
             backend_text = f"online · v{backend_version} · 버전 불일치"
         self.cards["backend"].set_value(backend_text, backend_ready and version_match)
         self.cards["backend"].setToolTip(f"GUI v{APP_VERSION} / Jetson v{backend_version}")
-        self.cards["ssh"].set_value("connected" if backend.get("ssh_connected") else "disconnected",
+        self.cards["ssh"].set_value("delayed · 연결 유지" if backend.get('ssh_state')=='delayed' and backend.get('ssh_connected') else "connected" if backend.get("ssh_connected") else "disconnected",
                                     bool(backend.get("ssh_connected")))
         self.cards["ros_master"].set_value("online" if backend.get("master_online") else "offline",
                                            bool(backend.get("master_online")))
@@ -2029,12 +1962,26 @@ class MainWindow(QMainWindow):
         rtk_text = ("no_data" if not gps_connected else "no_fix" if not gps.get("fix") else
                     str(gps.get("rtk_state") or "no_data").lower())
         self.cards["rtk"].set_value(rtk_text, rtk_text in {"rtk_fixed", "fix", "float", "rtk_float", "dgps"})
-        self.cards["armed"].set_value(operation_ko if mode == "NAVIGATION" else "대기", bool(state.get("navigation_active")))
+        self.cards["armed"].set_value(("풍선 추적" if mode=="BALLOON" else operation_ko) if mode in ("NAVIGATION","BALLOON") else "대기", bool(state.get("navigation_active") or state.get("balloon_armed")))
         self.cards["estop"].set_value("작동 중" if state.get("estop") else "정상", not bool(state.get("estop")))
         self.value_labels["rc_steering"].set_value(self._fmt(rc.get("steering_us"), 0, " us"))
         self.value_labels["rc_throttle"].set_value(self._fmt(rc.get("throttle_us"), 0, " us"))
+        calibration=state.get('rc_input_calibration')
+        try:
+            calibration=validate_rc(calibration)
+            for axis,key in (('steering','rc_steering'),('throttle','rc_throttle')):
+                c=calibration[axis]
+                self.value_labels[key].setToolTip(
+                    f"RC 입력 µs: {c['min_us']:g} / {c['center_us']:g} / {c['max_us']:g}\n"
+                    f"중립 {c['center_us']-c['deadband_us']:g}~{c['center_us']+c['deadband_us']:g} µs")
+        except ValueError:
+            self.value_labels['rc_steering'].setToolTip('RC 입력 보정: backend 확인 전')
+            self.value_labels['rc_throttle'].setToolTip('RC 입력 보정: backend 확인 전')
         self.value_labels["pca_steering"].set_value(self._fmt(pca.get("steering_pwm"), 0))
         self.value_labels["pca_throttle"].set_value(self._fmt(pca.get("throttle_pwm"), 0))
+        self.value_labels['pca_throttle'].setToolTip('안전감독 최종 명령 PWM: '+self._fmt(state.get('final_throttle_pwm'),0)+
+            '\n카드 값은 actuator가 전송 성공으로 보고한 출력 명령이며 실측 회전수·펄스폭이 아닙니다.')
+        self.value_labels['ramp_throttle'].set_value(self._fmt(state.get('ramp_throttle_pwm'),0))
         self.value_labels["lat"].set_value(self._fmt(gps.get("lat")))
         self.value_labels["lon"].set_value(self._fmt(gps.get("lon")))
         self.value_labels["altitude"].set_value(self._fmt(gps.get("altitude_m"), 2, " m"))
@@ -2113,7 +2060,7 @@ class MainWindow(QMainWindow):
 
         primary_reason = self._primary_gps_health_reason(health)
         self.gps_health_primary_reason.setText(
-            f"가장 큰 영향: {primary_reason}" if primary_reason else ""
+            primary_reason if primary_reason else ""
         )
         self.gps_health_primary_reason.setVisible(bool(primary_reason))
 
@@ -2130,17 +2077,17 @@ class MainWindow(QMainWindow):
             "GOOD" if solution == "RTK_FIXED"
             else "WARNING" if solution == "RTK_FLOAT"
             else "INFO" if solution in {"DGPS", "GPS", "3D_FIX", "2D_FIX"}
-            else "BAD" if solution in {"NO_FIX", "INVALID"}
-            else "INFO"
+            else "BAD" if solution in {"NO_FIX", "NO FIX", "INVALID"}
+            else "NO_DATA"
         )
         self.gps_metric_cards["fix_label"].set_value(fix_label, solution_level)
         self.gps_metric_cards["utc_time"].set_value(
-            str(gps.get("utc_time") or gps.get("utc_status") or "no_data"), "INFO"
+            str(gps.get("utc_time") or gps.get("utc_status") or "no_data"), "INFO" if gps.get("utc_time") else "NO_DATA"
         )
 
         satellites = int(gps.get("satellites") or 0)
         satellite_level = (
-            "GOOD" if satellites >= 8
+            "NO_DATA" if gps.get("satellites") is None else "GOOD" if satellites >= 8
             else "WARNING" if satellites >= 6
             else "BAD"
         )
@@ -2149,10 +2096,12 @@ class MainWindow(QMainWindow):
         )
 
         hdop = gps.get("hdop")
+        hdop_reference=(state.get('gps_settings') or {}).get('navigation_max_hdop',3.0)
+        if not isinstance(hdop_reference,(int,float)) or not math.isfinite(hdop_reference) or not .5<=hdop_reference<=20:hdop_reference=3.0
         hdop_level = (
-            "INFO" if hdop is None
-            else "GOOD" if float(hdop) <= 2.0
-            else "WARNING" if float(hdop) <= 3.0
+            "NO_DATA" if hdop is None
+            else "GOOD" if float(hdop) <= min(2.0,float(hdop_reference))
+            else "WARNING" if float(hdop) <= float(hdop_reference)
             else "BAD"
         )
         self.gps_metric_cards["hdop"].set_value(
@@ -2161,7 +2110,7 @@ class MainWindow(QMainWindow):
 
         pdop = gps.get("pdop")
         pdop_level = (
-            "INFO" if pdop is None
+            "NO_DATA" if pdop is None
             else "GOOD" if float(pdop) <= 2.0
             else "WARNING" if float(pdop) <= 4.0
             else "BAD"
@@ -2172,7 +2121,7 @@ class MainWindow(QMainWindow):
 
         vdop = gps.get("vdop")
         vdop_level = (
-            "INFO" if vdop is None
+            "NO_DATA" if vdop is None
             else "GOOD" if float(vdop) <= 5.0
             else "WARNING"
         )
@@ -2182,7 +2131,7 @@ class MainWindow(QMainWindow):
 
         cno = gps.get("cno_avg_dbhz")
         cno_level = (
-            "INFO" if cno is None
+            "NO_DATA" if cno is None
             else "GOOD" if float(cno) >= 30.0
             else "WARNING" if float(cno) >= 25.0
             else "BAD"
@@ -2193,13 +2142,13 @@ class MainWindow(QMainWindow):
 
         hacc = gps.get("hacc_m")
         hacc_level = (
-            "INFO" if hacc is None
+            "NO_DATA" if hacc is None
             else "GOOD" if float(hacc) <= 1.5
             else "WARNING" if float(hacc) <= 3.0
             else "BAD"
         )
         if hacc is None:
-            self.gps_metric_cards["hacc"].set_value("NAV-PVT 대기", "INFO")
+            self.gps_metric_cards["hacc"].set_value("NAV-PVT 대기", "NO_DATA")
         else:
             self.gps_metric_cards["hacc"].set_value(
                 self._fmt(hacc, 2, " m"), hacc_level
@@ -2209,13 +2158,13 @@ class MainWindow(QMainWindow):
         nmea_count = int(gps.get("nmea_sentence_count") or 0)
         self.gps_metric_cards["hacc"].hint_label.setText(
             f"{gps.get('hacc_source') or 'UBX-NAV-PVT'} · "
-            f"NAV-PVT {nav_pvt_count} / UBX {ubx_count} / NMEA {nmea_count}"
-            + (" · ≤1.5 m 좋음 · ≤3 m 주의" if hacc is not None else "")
+            f"정상 ≤1.5 m | 주의 ≤3 m"
+
         )
 
         gps_age = gps.get("age_s")
         age_level = (
-            "INFO" if gps_age is None
+            "NO_DATA" if gps_age is None
             else "GOOD" if float(gps_age) <= 2.0
             else "BAD"
         )
@@ -2233,7 +2182,7 @@ class MainWindow(QMainWindow):
                 f"{float(gps['utm_easting']):.2f}, "
                 f"{float(gps['utm_northing']):.2f}"
             )
-        self.gps_metric_cards["utm"].set_value(utm_text, "INFO")
+        self.gps_metric_cards["utm"].set_value(utm_text, "INFO" if gps.get("utm_easting") is not None else "NO_DATA")
 
         solution_display = solution
         if gps.get("rtk_fallback_active") and solution != "RTK_FIXED":
@@ -2245,7 +2194,7 @@ class MainWindow(QMainWindow):
         ntrip = state.get("ntrip") or {}
         correction_age = ntrip.get("last_correction_age_s")
         correction_level = (
-            "INFO" if correction_age is None
+            "NO_DATA" if correction_age is None
             else "GOOD" if float(correction_age) <= 5.0
             else "WARNING" if float(correction_age) <= 10.0
             else "BAD"
@@ -2260,7 +2209,7 @@ class MainWindow(QMainWindow):
         receiver_status = str(gps.get("receiver_correction_age_status") or "unsupported")
         self.gps_metric_cards["receiver_correction_age"].set_value(
             (self._fmt(receiver_age, 2, " s") + (" · stale" if receiver_status=="stale" else "")) if receiver_age is not None else receiver_status,
-            "INFO" if receiver_age is None else "WARNING" if receiver_status=="stale" else "GOOD")
+            "NO_DATA" if receiver_age is None else "WARNING" if receiver_status=="stale" else "GOOD")
 
         ntrip_error = str(ntrip.get("last_error") or "")
         ntrip_error_hint = self._ntrip_error_hint(
@@ -2271,15 +2220,20 @@ class MainWindow(QMainWindow):
             and "mountpoint" in ntrip_error.lower()
         )
         self.ntrip_mount_fix.setVisible(mountpoint_404)
+        if mountpoint_404:self.ntrip_settings_toggle.setChecked(True)
 
         ntrip_enabled = bool(ntrip.get("enabled"))
         ntrip_connected = bool(ntrip.get("connected"))
         credentials_saved = bool(ntrip.get("credentials_saved"))
-        self.ntrip_password.setPlaceholderText(
-            "Jetson에 저장됨 · 변경 시에만 입력"
-            if credentials_saved else "Jetson에 저장할 비밀번호 입력"
-        )
-        if not ntrip_enabled:
+        if 'credentials_saved' in ntrip:
+            self.ntrip_password.setPlaceholderText(
+                "Jetson에 저장됨 · 변경 시에만 입력" if credentials_saved else "Jetson에 저장할 비밀번호 입력")
+        if all(key in ntrip for key in ('host','port','mountpoint')):
+            self.ntrip_profile_summary.setText('Jetson 저장 설정: '+str(ntrip.get('host') or '미설정')+':'+str(ntrip.get('port') or 2101)+
+                ' / '+str(ntrip.get('mountpoint') or '미설정')+' · '+('비밀번호 저장됨' if credentials_saved else '자격정보 미확인'))
+        if "enabled" not in ntrip:
+            link_state = "no_data"
+        elif not ntrip_enabled:
             link_state = "비활성"
         elif ntrip_connected:
             link_state = "연결됨"
@@ -2302,7 +2256,7 @@ class MainWindow(QMainWindow):
             else ""
         )
         link_level = (
-            "BAD" if ntrip_error
+            "NO_DATA" if "enabled" not in ntrip else "BAD" if ntrip_error
             else "GOOD" if ntrip_connected
             else "WARNING" if ntrip_enabled
             else "INFO"
@@ -2317,7 +2271,7 @@ class MainWindow(QMainWindow):
         else:
             received_text = f"{received} B"
         self.ntrip_bytes_card.set_value(
-            received_text,
+            received_text if ntrip.get("bytes_received") is not None else "no_data",
             "GOOD" if received > 0 and ntrip_connected else "INFO",
         )
         self.ntrip_age_card.set_value(
@@ -2365,7 +2319,7 @@ class MainWindow(QMainWindow):
         elif received <= 0 and not ntrip_connected:
             self._ntrip_received_corrections = False
 
-        if not self._ntrip_dirty and self._pending_ntrip_request is None:
+        if not self._ntrip_dirty and self._pending_ntrip_request is None and all(key in ntrip for key in ('host','port','mountpoint')):
             self._syncing_ntrip = True
             try:
                 self.ntrip_host.setText(str(ntrip.get("host") or ""))
@@ -2377,11 +2331,11 @@ class MainWindow(QMainWindow):
                 )
                 self.ntrip_tls.setChecked(bool(ntrip.get("tls")))
                 self.ntrip_enabled.setChecked(ntrip_enabled)
+                if 'username' in ntrip:self.ntrip_username.setText(str(ntrip.get('username') or ''))
             finally:
                 self._syncing_ntrip = False
         gps_settings = state.get("gps_settings") or {}
-        self.rtk_fallback.setChecked(bool(gps_settings.get("rtk_fallback_to_gps", True)))
-        self.gps_max_hdop.setValue(float(gps_settings.get("navigation_max_hdop", 3.0)))
+        self._sync_gps_settings(gps_settings)
         data_logging = state.get("gps_logging") or {}
         logging_active = bool(data_logging.get("active"))
         self.gps_log_start.setEnabled(not logging_active)
@@ -2566,7 +2520,6 @@ class MainWindow(QMainWindow):
         if route.get("heading_error_deg") is not None:
             nav_detail = (
                 f" · 방향오차 {float(route.get('heading_error_deg') or 0):+.1f}°"
-                f" · 주행속도 {float(route.get('navigation_speed_fraction') or 0) * 100:.0f}%"
                 f" · 조향반전 {'ON' if route.get('navigation_steering_inverted') else 'OFF'}"
             )
         self.route_status.setText(
@@ -2590,7 +2543,10 @@ class MainWindow(QMainWindow):
                 }
             )
         self.route_plot.update_data(display_routes, display_gps, active_id)
+        self.live_map.update_data(display_routes,display_gps,active_id)
         self._sync_route_layer_controls(self._latest_routes)
+        from .ui_shell import update_dashboard_quality
+        update_dashboard_quality(self,state)
         self._update_route_action_state()
         for event in state.get("events", []):
             stamp = float(event.get("timestamp", 0))
@@ -2624,6 +2580,7 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0,self.close)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        self.balloon_panel.shutdown()
         self._release_remote_controls()
         self._closing = True
         if self.worker and self.worker.isRunning():

@@ -1,0 +1,6 @@
+{
+  "tool": "built-in image_gen",
+  "prompt": "Use case: illustration-story. Asset type: small desktop RC boat control app mascot. Generate a NEW original cute cat mascot, NOT a photo and NOT the user's supplied photograph. A fluffy cream-and-white longhaired ragdoll-style cat with bright blue eyes, small pale pink nose, rounded fluffy cheeks and a slightly serious but adorable expression, front-facing head and upper chest only. Soft polished 3D illustration, clear silhouette readable at 80 pixels, cream ear tips, white muzzle, gentle shadows. The cat itself fills a square canvas with generous transparent margin around ears and whiskers. Genuinely transparent background, no background scene, no border, no text, no watermark, no boat, no additional objects. Keep blue eyes striking and fur soft but not excessively detailed.",
+  "sha256": "8056c850c290d13c6a9963a42d9f288def75e396a6f48bf13e65b9e2945ec256",
+  "reference": "Cream/white blue-eyed cat appearance; user photograph not embedded"
+}
