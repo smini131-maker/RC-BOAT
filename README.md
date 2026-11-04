@@ -2,7 +2,9 @@
 
 ROS Noetic 기반 RC 보트 자율운항 및 Windows 관제 시스템입니다. Jetson에서 GNSS/RTK 수신, 항로 선택, 조향·스로틀 제어와 시험 기록을 처리하고, Windows GUI에서 항로 편집과 운항 상태 확인, 시험 로그 다운로드를 수행합니다.
 
-최신 정식 버전은 **v2.3.1**이며 `main`에서 관리합니다. 항로 주행·도보 테스트·풍선 추적을 하나의 Windows GUI와 ROS Noetic backend로 제공합니다. 풍선 기능이 없는 별도 최신 버전은 운영하지 않습니다. Windows GUI와 Jetson backend는 같은 버전을 사용합니다.
+최신 ROS 정식 버전은 **v2.3.1**이며 `main`에서 관리합니다. 항로 주행·도보 테스트·풍선 추적을 하나의 Windows GUI와 ROS Noetic backend로 제공합니다. ROS 계열에서 풍선 기능이 없는 별도 최신 버전은 운영하지 않습니다. Windows GUI와 Jetson backend는 같은 버전을 사용합니다.
+
+ROS 이전 **v1.6.0은 별도 레거시로 유지**합니다. 원본은 [release/1.6.0 브랜치](https://github.com/smini131-maker/RC-BOAT/tree/release/1.6.0), 로컬 보존 폴더는 `RCBoatControl_v1.6.0`입니다. ROS 최신 폴더는 `RCBoatControl_v2.3.1`이며 아래 배포 명령은 ROS 버전에만 적용합니다.
 
 2026-11-04 Jetson Nano에 실제 배포하고 ROS 실행 버전, IMX219 CSI 영상 수신과 PC 미리보기까지 확인했습니다. 실물 조향·수상 주행·풍선 파열 성공 여부는 별도 현장 검증이 필요합니다.
 

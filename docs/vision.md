@@ -1,6 +1,6 @@
 # v2.3.1 카메라 · 핑크 풍선 추적
 
-풍선 추적은 `main`의 통합 정식 v2.3.1에 포함됩니다. 항로 주행·도보 테스트와 같은 앱을 사용하며, 별도의 비카메라 최신 버전은 운영하지 않습니다. 로컬 프로젝트 폴더는 `RCBoatControl_v2.3.1`입니다. Jetson에는 한 버전의 ROS backend만 실행합니다.
+풍선 추적은 `main`의 통합 ROS 정식 v2.3.1에 포함됩니다. 항로 주행·도보 테스트와 같은 앱을 사용하며, ROS 계열의 별도 비카메라 최신 버전은 운영하지 않습니다. ROS 이전 v1.6.0은 별도 레거시 폴더와 브랜치에 보존합니다. 로컬 ROS 프로젝트 폴더는 `RCBoatControl_v2.3.1`입니다. Jetson에는 한 버전의 ROS backend만 실행합니다.
 
 v2.3.1은 설치 환경 수정입니다. NumPy 1.23.5·ONNX Runtime 1.16.3과 ROS용 Python 의존성을 전용 가상환경에 고정합니다. 기존 `--system-site-packages` 환경은 날짜가 붙은 `~/.rcboat/vision-venv.backup-*`로 보존하고 새 환경에서는 전역 TensorFlow·사용자 NumPy를 읽지 않습니다. 기존 OpenCV/GStreamer·선택적 GPU 바인딩과 ROS의 netifaces만 이름별로 연결합니다. 전역 Python 패키지를 삭제하거나 pip OpenCV로 덮어쓰지 않습니다. NumPy 배열→OpenCV 연산, ONNX Runtime CPU의 실제 모델 20회 추론, catkin 재빌드 후 ROS import를 확인하며 실패하면 설치를 중단합니다. v2.3.0의 항법·추적·모델은 변경하지 않습니다.
 
