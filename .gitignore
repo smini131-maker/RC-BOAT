@@ -53,3 +53,10 @@ Desktop.ini
 *.engine.json
 *.pt
 /yolo11n.pt
+
+# Android SDK, build cache and signing material stay local.
+/mobile_android/.gradle/
+/mobile_android/local.properties
+*.keystore
+*.jks
+**/signing.properties

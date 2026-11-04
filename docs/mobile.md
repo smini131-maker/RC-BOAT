@@ -1,0 +1,47 @@
+# Android 관제 앱 v2.3.2
+
+Android 10 이상 휴대폰과 태블릿에 같은 APK를 설치합니다. 휴대폰은 하단 5개 탭, 태블릿은 좌측 메뉴와 넓은 지도·제어 패널을 사용합니다. Galaxy Tab S9+ 크기의 가로 화면도 지원합니다. Windows GUI의 기존 화면·버튼은 변경하지 않았습니다.
+
+## 설치와 연결
+
+1. `dist/RCBoatMobile_v2.3.2.apk`를 휴대폰 또는 태블릿에 설치합니다. 연결된 휴대폰에는 USB 디버깅으로 설치할 수 있습니다.
+2. Jetson에 v2.3.2를 배포하고 ROS를 실행합니다. 기존 항로·NTRIP 로컬 설정은 그대로 사용합니다. 새 버전의 유일한 제어 변경은 공통 상승률 120 PWM/s입니다.
+3. 휴대폰을 Jetson에 접근할 수 있는 같은 Wi-Fi/네트워크에 연결합니다. 앱 상단 **연결 설정**에서 Jetson IP, gateway 8765, SSH 22, 사용자 `jetson`을 입력합니다. SSH 비밀번호를 입력하면 제어 연결, 비워두면 상태 조회 연결입니다.
+4. 처음 연결할 때 표시되는 SSH 호스트 키를 확인합니다. 변경된 호스트 키는 거부합니다. SSH 비밀번호·gateway 토큰은 메모리에서만 사용하고 저장하지 않습니다. IP·포트·사용자명만 휴대폰에 저장합니다.
+
+PC와 모바일 중 한 관제 앱만 제어 연결합니다. 기존 backend는 단일 operator-link를 사용하므로 동시 제어를 지원하지 않습니다. 조회 전용 모바일 연결은 operator-link를 발행하지 않습니다. 모바일 앱을 나가거나 화면을 끄면 수동 전환을 요청하고 SSH 연결을 해제합니다. 통신 자체가 끊겨 요청이 전달되지 않으면 기존 Jetson 안전감독의 연결 만료 처리를 따릅니다. 다시 열어도 자동 주행을 재개하지 않습니다.
+
+## 화면과 동작
+
+- **운항:** OpenStreetMap 배경, 저장 항로·웨이포인트 번호·현재 GPS 위치·이동 궤적, 대루트/소루트 선택, 주행 시작과 수동 전환, 순항 PWM 편집·적용 확인을 제공합니다. 주행 시작 시 실제 출력 확인창이 표시됩니다. 배경 지도는 인터넷이 필요하며 지도 다운로드가 실패해도 좌표와 항로 선은 표시합니다.
+- **항로:** 유효 GPS 기반 기록 시작/종료 후 저장/취소, 소루트 좌표 추가·수정·삭제, n개 소루트를 묶는 Multi-Path 관리, 전체 항로 CSV/JSON 다운로드를 제공합니다. CSV에는 항로 ID·이름·웨이포인트 번호·위경도·UTM을 포함합니다.
+- **풍선:** 기존 Jetson YOLO 감지 영상과 표시 상자를 그대로 수신합니다. 모바일에서 AI를 실행하지 않습니다. 영상은 해당 탭의 미리보기를 켠 동안만 약 1~1.4 fps로 수신합니다. 추적 시작을 누르면 최대 30초간 유효한 실시간 핑크 풍선을 기다린 뒤 기존 BALLOON 모드를 시작합니다. 카메라만 켜면 모터가 구동되지 않습니다. 추적 예측·재접근 알고리즘은 기존 backend 그대로입니다.
+- **GPS·RTK:** 정상 범위와 색상, UTC·UTM·데이터 지연·RTCM 수신 경과·수신기 보정 나이를 구분합니다. 미제공 값은 `unsupported`/`no_data`, 통신 두절 후 이전 값은 `stale`로 표시합니다. Jetson의 NTRIP 설정을 불러오며 빈 사용자명/비밀번호는 저장값을 유지합니다. HDOP 편집 중 폴링으로 값이 덮어써지지 않습니다.
+- **테스트·설정:** 선택한 대루트/소루트의 도보 테스트 시작·재개·정지, 완료한 테스트 또는 최신 완료 테스트 ZIP 다운로드, 풍선 로그 다운로드, 누르고 있는 동안만 출력하는 원격 조종, 연결별 상태·명령 기록을 제공합니다. ZIP은 SHA-256 검증 후 **다운로드/RCBoat/**에 저장합니다. 큰 ZIP(응답 48 MiB 초과)은 기존 PC 다운로드를 사용합니다.
+
+비상정지 버튼은 모든 탭 하단에 고정됩니다. 비상정지·수동 전환·도보 테스트 정지는 SSH 확인 또는 상태 조회·영상·ZIP 다운로드 완료를 기다리지 않고 별도 실행 경로로 기존 gateway에 전달합니다. 새 연결을 만들면 이전 연결에 대기 중이던 명령은 취소합니다. 모바일/Jetson 버전이 다르거나 SSH 제어 연결·신선한 상태가 없으면 주행을 시작할 수 없습니다. 기존 RC·GPS·E-STOP·출력 잠금·모드·범위 검사는 Jetson에서 다시 적용됩니다.
+
+## Windows 빌드
+
+JDK 17 이상과 Android SDK 36/build-tools 35.0.0이 필요합니다. SDK 경로가 다르면 `ANDROID_HOME`을 지정합니다. Gradle 8.13은 wrapper로 받습니다.
+
+```powershell
+Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_v2.3.1"
+$env:ANDROID_HOME = "$env:USERPROFILE\AndroidSdk"
+& .\mobile_android\build.ps1 -Install
+```
+
+빌드는 한글 OneDrive 경로를 피하도록 `%LOCALAPPDATA%\RCBoatBuild\android`에 소스를 준비합니다. 결과 APK는 프로젝트 `dist`에 저장합니다. 릴리스 서명 키와 비밀번호는 `%USERPROFILE%\.rcboat\rcboat-mobile.jks`, `android-signing.properties`에만 생성하고 Git에서 제외합니다. 향후 동일 앱 업데이트에 필요하므로 이 두 로컬 파일을 보존합니다. 개발/배포용 자체 서명이며 Play Store 등록은 수행하지 않았습니다.
+
+## 검증 범위
+
+소프트웨어 검증은 기존 Python 회귀 테스트 151개, Qt 검사 5개, Android TCP 프로토콜 테스트(분할 UTF-8·거부·중단·크기 제한·주소 검증), Android lint, 360×800·412×915·800×1280·1400×876 화면의 잘림/주행 버튼 위치/PWM ACK와 편집값 유지/기록 저장 조건/NTRIP 비밀번호 보존/버전 불일치·연결 만료를 포함합니다. UI 테스트는 합성 상태를 사용하며 실물 모터·수상 주행·풍선 파열 시험이 아닙니다. Tab S9+는 화면 크기 검증이며 실기기가 연결되지 않았다면 실기기 검증으로 보지 않습니다. 이번 작업에서는 연결된 갤럭시 휴대폰(SM-S938N/Android 17)에 릴리스 서명 APK를 설치하고 실제 앱 시작·운항/GPS·테스트 화면, 시스템 상태바/제스처 영역 겹침 수정을 확인했습니다. Jetson 연결·수상 출력 검증은 수행하지 않았습니다.
+
+```powershell
+Set-Location .\mobile_android
+npm install
+npx playwright install chromium
+npm test
+```
+
+지도: [Leaflet 1.9.4](https://leafletjs.com/) (BSD-2-Clause, `assets/vendor/LICENSE`), [OpenStreetMap 기여자](https://www.openstreetmap.org/copyright). SSH: [mwiede/JSch](https://github.com/mwiede/jsch) (BSD-3-Clause). 로컬 WebView 컨텐츠는 Android의 [앱 내 컨텐츠 로드 방식](https://developer.android.com/develop/ui/views/layout/webapps/load-local-content)을 사용하며 외부 페이지·iframe·파일 접근을 허용하지 않습니다.

@@ -1,0 +1,21 @@
+plugins { id 'com.android.application' }
+def signingFile = new File(System.getenv('RCBOAT_ANDROID_SIGNING_PROPERTIES') ?: "${System.properties['user.home']}/.rcboat/android-signing.properties")
+def signingValues = new Properties()
+if (signingFile.exists()) signingFile.withInputStream { signingValues.load(it) }
+android {
+    namespace 'kr.rcboat.mobile'
+    compileSdk 36
+    defaultConfig { applicationId 'kr.rcboat.mobile'; minSdk 29; targetSdk 36; versionCode 20302; versionName '2.3.2' }
+    signingConfigs { if (signingFile.exists()) { localRelease { storeFile file(signingValues['storeFile']); storePassword signingValues['storePassword']; keyAlias signingValues['keyAlias']; keyPassword signingValues['keyPassword'] } } }
+    buildTypes { release { minifyEnabled false; if (signingFile.exists()) signingConfig signingConfigs.localRelease } }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    buildFeatures { buildConfig true }
+    testOptions { unitTests.returnDefaultValues = true }
+    packaging { resources.excludes += ['META-INF/versions/**', 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA'] }
+}
+dependencies {
+    implementation 'androidx.webkit:webkit:1.14.0'
+    implementation 'com.github.mwiede:jsch:2.28.8'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
+}

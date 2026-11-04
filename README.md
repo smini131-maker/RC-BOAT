@@ -8,7 +8,9 @@ ROS 이전 **v1.6.0은 별도 레거시로 유지**합니다. 원본은 [release
 
 2026-11-04 Jetson Nano에 실제 배포하고 ROS 실행 버전, IMX219 CSI 영상 수신과 PC 미리보기까지 확인했습니다. 실물 조향·수상 주행·풍선 파열 성공 여부는 별도 현장 검증이 필요합니다.
 
-v2.3.2는 공통 PWM 상승률만 120 PWM/s로 낮춥니다. 시작 6650·상한 7397·감속·안전 제어는 유지합니다.
+v2.3.2는 공통 PWM 상승률을 120 PWM/s로 낮추고 Windows 지도의 일반 휠 확대·축소를 지원합니다. 시작 6650·상한 7397·감속·안전 제어는 유지합니다.
+
+Android 휴대폰·태블릿용 `dist/RCBoatMobile_v2.3.2.apk`를 추가했습니다. 모바일에서 기존 ROS gateway로 운항·항로·풍선 추적·GPS/RTK·도보 테스트·로그 다운로드를 이용합니다. 기존 Windows 화면과 backend 알고리즘은 그대로 유지합니다. [모바일 설치·사용·빌드](docs/mobile.md)를 참고하세요.
 
 v2.3.1은 카메라 버전의 설치 오류를 수정합니다. 기존 TensorFlow/사용자 NumPy를 상속하던 환경을 백업하고 전용 환경으로 분리하며, 실제 ONNX 추론과 ROS 의존성 확인 후에만 설치 성공을 표시합니다. v2.3.0의 지도 중심 GUI·풍선 연속 추적·RC 보정·7397 출력 상한·안전 제어·도보 테스트는 유지합니다. [카메라 버전 사용·배포](docs/vision.md)에 실행 명령과 실제 검증 범위를 정리했습니다.
 
@@ -68,7 +70,7 @@ bash deployment/jetson/install_vision_dependencies.sh
 bash deployment/jetson/install_jetson_ros.sh
 ```
 
-각 명령이 오류 없이 끝나야 다음 명령을 실행합니다. 완료 조건은 `VISION INSTALL VERIFIED`와 `RUNNING GATEWAY VERIFIED: v2.3.1`입니다. `DEPLOY_ROS.cmd`는 소스 전송만 수행합니다. 자세한 환경 준비와 설정은 [설치·실행 안내](docs/setup.md)를 따릅니다.
+각 명령이 오류 없이 끝나야 다음 명령을 실행합니다. 완료 조건은 `VISION INSTALL VERIFIED`와 `RUNNING GATEWAY VERIFIED: v2.3.2`입니다. `DEPLOY_ROS.cmd`는 소스 전송만 수행합니다. 자세한 환경 준비와 설정은 [설치·실행 안내](docs/setup.md)를 따릅니다.
 
 ## 문서
 
@@ -100,6 +102,6 @@ docs/                    설치·운용·개발 문서
 
 ## 버전 및 시험 범위
 
-정식 소스는 `main`의 [VERSION](VERSION), 실행 파일과 전체 ZIP은 [v2.3.1 릴리스](https://github.com/smini131-maker/RC-BOAT/releases/tag/v2.3.1)를 기준으로 사용합니다. 이전 버전은 Git 이력과 과거 릴리스에 남아 있으며 최신 설치 대상으로 안내하지 않습니다. 로컬 실행 폴더는 `RCBoatControl_v2.3.1`, 실행 파일은 `dist/RCBoatControl_ROS_v2.3.1.exe`입니다.
+정식 소스는 `main`의 [VERSION](VERSION), 실행 파일과 전체 ZIP은 [v2.3.2 릴리스](https://github.com/smini131-maker/RC-BOAT/releases/tag/v2.3.2)를 기준으로 사용합니다. 이전 버전은 Git 이력과 과거 릴리스에 남아 있으며 최신 설치 대상으로 안내하지 않습니다. 로컬 실행 폴더는 `RCBoatControl_v2.3.1`, 실행 파일은 `dist/RCBoatControl_ROS_v2.3.2.exe`입니다.
 
 기본 제어는 `HEADING` 모드와 고정 순항 PWM을 사용하며, 속도 피드백 제어는 기본적으로 꺼져 있습니다. 로그의 GPS 진행 방향은 선체 자세 센서 값과 다르고, `actual_*_pwm`은 장치에 보낸 명령 확인값입니다. 실물 출력 시험은 프로펠러를 제거한 상태에서 중립·RC 수동 전환·E-STOP을 먼저 확인합니다. 세부 조건과 한계는 [운항·시험](docs/operation.md)과 [로그 해석](docs/data-analysis.md)에 정리했습니다.

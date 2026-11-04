@@ -177,7 +177,7 @@ def build_route_workspace(w,operation,record,layers,multipath,settings,reload_bu
     w.route_detail_tabs=grouped_pages([('편집',edit),('항로 기록',record_panel),('표시·설정',advanced)])
     w.route_detail_tabs.setMinimumWidth(300)
     map_page=QWidget();mp=QVBoxLayout(map_page);mp.setContentsMargins(0,0,0,0);bar=QHBoxLayout()
-    hint=QLabel('드래그: 이동 · Ctrl+휠: 확대/축소');hint.setObjectName('sectionHint');hint.setWordWrap(True);hint.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred);bar.addWidget(hint);bar.addStretch()
+    hint=QLabel('드래그: 이동 · 휠: 확대/축소');hint.setObjectName('sectionHint');hint.setWordWrap(True);hint.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred);bar.addWidget(hint);bar.addStretch()
     background=QCheckBox('지도 배경');background.toggled.connect(w.route_plot.set_basemap_enabled);bar.addWidget(background)
     for label,factor in [('+',1.25),('−',.8)]:
         button=QPushButton(label);button.setMaximumWidth(35);button.clicked.connect(lambda checked=False,f=factor:w.route_plot.zoom_by(f));bar.addWidget(button)

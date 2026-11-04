@@ -8,7 +8,7 @@ v2.3.1은 설치 환경 수정입니다. NumPy 1.23.5·ONNX Runtime 1.16.3과 RO
 
 - 상단: 연결·독립 상태 표시, 모드, 순항 목표 PWM, E-STOP. `연결 설정`을 누르면 SSH 정보와 상세 장치 상태가 나옵니다.
 - 실시간 관제: 큰 지도, 운항 핵심 수치. GPS·RC 입력은 지도 옆 보조 탭, 출력 차트는 접기 버튼에 있습니다. 정상은 초록, 주의는 노랑, 오류·stale은 빨강, 미수신은 회색으로 표시합니다.
-- 항로·Multi-Path: **대루트/소루트 선택·주행 시작·정지는 지도 위에 고정**합니다. 오른쪽 `항로 기록`에서 기존 GPS 기록·정지 후 저장·취소를 그대로 사용합니다. 편집과 표시 설정만 별도 탭으로 묶습니다. 일반 휠은 지도 확대에 사용하지 않고 Ctrl+휠 또는 +/− 버튼으로 확대합니다.
+- 항로·Multi-Path: **대루트/소루트 선택·주행 시작·정지는 지도 위에 고정**합니다. 오른쪽 `항로 기록`에서 기존 GPS 기록·정지 후 저장·취소를 그대로 사용합니다. 편집과 표시 설정만 별도 탭으로 묶습니다. 지도 위에서는 마우스 휠만으로 커서 위치를 기준으로 확대·축소합니다. Ctrl+휠과 +/− 버튼도 유지합니다. 지도 밖의 기존 스크롤은 그대로입니다.
 - GPS·RTK: 핵심 GPS 상태와 RTK 연결 두 탭입니다. 상세 품질·참고 기준·GPS 원시 기록은 GPS 상태 아래의 접기 영역에 모았습니다. RTK 설정은 **Jetson의 기존 `~/rcboat_ros_data/ntrip.env`**에서 읽습니다. `Jetson 설정 불러오기`는 조회만 하며, 빈 비밀번호 입력은 기존 비밀번호를 유지합니다. 연결이 잠시 끊겨도 입력란을 빈값으로 덮어쓰지 않습니다.
 - 풍선 추적: 카메라 켜기 → 연속 핑크 풍선 검출 확인 → 추적 주행 시작. 정지·카메라 끄기·대상 다시 잡기와 로그 가져오기를 제공합니다. 화면에 표시되는 SIMULATION은 실제 카메라나 모터 검증이 아닙니다.
 
@@ -64,7 +64,7 @@ bash deployment/jetson/install_vision_dependencies.sh
 bash deployment/jetson/install_jetson_ros.sh
 ```
 
-완료 조건은 `RUNNING GATEWAY VERIFIED: v2.3.1`입니다. 기존 항로·NTRIP 로컬 파일·시험 로그는 유지됩니다. 카메라 설정은 `~/.rcboat/vision.json`에 저장하고 부팅 시 카메라·추적은 꺼진 상태로 시작합니다.
+완료 조건은 `RUNNING GATEWAY VERIFIED: v2.3.2`입니다. 기존 항로·NTRIP 로컬 파일·시험 로그는 유지됩니다. 카메라 설정은 `~/.rcboat/vision.json`에 저장하고 부팅 시 카메라·추적은 꺼진 상태로 시작합니다.
 
 설치 때 `tensorflow ... numpy ... incompatible`이 표시되면 기존 환경의 상속이 남은 것입니다. 전역 TensorFlow를 삭제하지 말고 새 설치 스크립트를 실행합니다. 성공 문구 앞에 `RuntimeError`, `ImportError`가 있던 이전 설치 결과는 완료로 인정하지 않습니다. 새 설치의 NumPy 경로는 `~/.rcboat/vision-venv/` 아래여야 합니다.
 
@@ -96,7 +96,7 @@ roslaunch rcboat_ros rcboat.launch
 
 ```powershell
 # 새 폴더의 빌드된 앱
-.\dist\RCBoatControl_ROS_v2.3.1.exe
+.\dist\RCBoatControl_ROS_v2.3.2.exe
 # 다시 빌드할 때
 .\BUILD_ROS_GUI.cmd
 ```

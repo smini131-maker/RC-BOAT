@@ -4,7 +4,7 @@ import sys,json
 from unittest.mock import patch
 ROOT=Path(__file__).resolve().parents[1]
 sys.path[:0]=[str(ROOT/'windows_gui'),str(ROOT/'catkin_ws/src/rcboat_ros/src')]
-from PySide6.QtCore import Qt,QPoint,QPointF
+from PySide6.QtCore import Qt,QPoint,QPointF,QRectF
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import QApplication,QPushButton,QScrollArea
 from rcboat_gui.main_window import MainWindow
@@ -40,11 +40,21 @@ assert edit_area.horizontalScrollBar().maximum()==0,edit_area.horizontalScrollBa
 w.route_detail_tabs.setCurrentIndex(1);app.processEvents()
 assert w.route_record_start.isVisible() and w.route_record_save.isVisible()
 plot=w.route_plot;scale=plot._pixels_per_meter
-def wheel(mod):
-    ev=QWheelEvent(QPointF(100,100),QPointF(100,100),QPoint(0,0),QPoint(0,120),Qt.NoButton,mod,Qt.NoScrollPhase,False)
+def wheel(mod=Qt.NoModifier,angle=120,pixel=0):
+    ev=QWheelEvent(QPointF(100,100),QPointF(100,100),QPoint(0,pixel),QPoint(0,angle),Qt.NoButton,mod,Qt.NoScrollPhase,False)
     QApplication.sendEvent(plot,ev);return ev
-assert not wheel(Qt.NoModifier).isAccepted() and plot._pixels_per_meter==scale
+anchor=plot._screen_point(QPointF(7,11),plot.rect().adjusted(36,34,-26,-38))
+area=QRectF(plot.rect()).adjusted(36,34,-26,-38)
+cursor_world=QPointF(plot._center_m.x()+(100-area.center().x())/scale,
+                    plot._center_m.y()-(100-area.center().y())/scale)
+assert wheel().isAccepted() and abs(plot._pixels_per_meter-scale*1.25)<1e-8
+assert (plot._screen_point(cursor_world,area)-QPointF(100,100)).manhattanLength()<1e-6
+assert wheel(angle=-120).isAccepted() and abs(plot._pixels_per_meter-scale)<1e-8
+after=plot._screen_point(QPointF(7,11),plot.rect().adjusted(36,34,-26,-38))
+assert (anchor-after).manhattanLength()<1e-6  # Cursor-anchored zoom returns to the same position.
 wheel(Qt.ControlModifier);assert plot._pixels_per_meter>scale
+scale=plot._pixels_per_meter;assert wheel(angle=0,pixel=15).isAccepted() and plot._pixels_per_meter>scale
+scale=plot._pixels_per_meter;assert not wheel(angle=0).isAccepted() and plot._pixels_per_meter==scale
 update_dashboard_quality(w,dict(gps=dict(hdop=1.1,satellites=9,last_fix_age_s=.2),gps_settings={'navigation_max_hdop':None}))
 assert '#38d996' in w.value_labels['hdop'].value_label.styleSheet()
 update_dashboard_quality(w,dict(gps=dict(hdop=4,satellites=6,last_fix_age_s=3),gps_settings={'navigation_max_hdop':5}))

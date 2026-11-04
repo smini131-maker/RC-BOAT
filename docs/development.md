@@ -55,12 +55,12 @@ Remove-Item Env:QT_QPA_PLATFORM
 .\BUILD_ROS_GUI.cmd
 ```
 
-빌드 도구는 `%LOCALAPPDATA%\RCBoatBuild` 아래 전용 가상환경과 작업 경로를 사용합니다. 결과는 저장소의 `dist\RCBoatControl_ROS_v2.3.1.exe`입니다. `dist`와 빌드 캐시는 Git에 올리지 않습니다.
+빌드 도구는 `%LOCALAPPDATA%\RCBoatBuild` 아래 전용 가상환경과 작업 경로를 사용합니다. 결과는 저장소의 `dist\RCBoatControl_ROS_v2.3.2.exe`입니다. `dist`와 빌드 캐시는 Git에 올리지 않습니다.
 
 빌드 후에는 `--smoke-test`로 시작·종료를 확인할 수 있습니다.
 
 ```powershell
-.\dist\RCBoatControl_ROS_v2.3.1.exe --smoke-test
+.\dist\RCBoatControl_ROS_v2.3.2.exe --smoke-test
 ```
 
 ## 버전·배포 기준
@@ -112,3 +112,5 @@ v2.1.13은 RC 입력 보정·순항 PWM 적용 확인·항로 지연·HDOP 저�
 - [v2.1.12 — Ground Test GPS 유예](validation/v2.1.12.md)
 - [v2.1.11 — 기록 유지 및 heartbeat](validation/v2.1.11.md)
 - [v2.1.10 — GUI 수명 및 부팅 점검](validation/v2.1.10.md)
+
+v2.3.2는 공통 상승률을 120 PWM/s로 낮춥니다. 다른 기존 제어 동작은 그대로 유지하며 별도 `mobile_android` 클라이언트를 추가했습니다. 모바일은 기존 TCP gateway를 사용하므로 ROS 토픽·서비스와 항법·추적 알고리즘을 바꾸지 않습니다. Android 빌드·검증은 [모바일 안내](mobile.md)를 따릅니다.

@@ -164,7 +164,7 @@ class RoutePlot(QWidget):
         self.setMinimumHeight(240)
         self.setMouseTracking(True)
         self.setToolTip(
-            "마우스 왼쪽 드래그: 지도 이동 · Ctrl+휠: 확대/축소 · 더블클릭: 전체 경로 맞춤"
+            "마우스 왼쪽 드래그: 지도 이동 · 휠: 확대/축소 · 더블클릭: 전체 경로 맞춤"
         )
 
     def set_basemap_enabled(self,enabled):
@@ -412,7 +412,7 @@ class RoutePlot(QWidget):
         painter.setFont(QFont("Malgun Gothic", 8))
         painter.drawText(
             QPointF(area.left(), self.rect().bottom() - 10),
-            "동일 축척 미터 좌표 · 드래그 이동 · Ctrl+휠 확대/축소 · 더블클릭 전체 맞춤",
+            "동일 축척 미터 좌표 · 드래그 이동 · 휠 확대/축소 · 더블클릭 전체 맞춤",
         )
 
     def zoom_by(self,factor):
@@ -452,17 +452,16 @@ class RoutePlot(QWidget):
         super().mouseReleaseEvent(event)
 
     def wheelEvent(self, event) -> None:
-        if not (event.modifiers() & Qt.ControlModifier):
+        delta = event.angleDelta().y() or event.pixelDelta().y()
+        if delta == 0:
             event.ignore()
-            return
-        if event.angleDelta().y() == 0:
             return
         area = QRectF(self.rect()).adjusted(36, 34, -26, -38)
         cursor = event.position()
         old_scale = max(self._pixels_per_meter, 1e-9)
         world_x = self._center_m.x() + (cursor.x() - area.center().x()) / old_scale
         world_y = self._center_m.y() - (cursor.y() - area.center().y()) / old_scale
-        factor = 1.25 if event.angleDelta().y() > 0 else 0.8
+        factor = 1.25 ** max(-6.0, min(6.0, delta / 120.0))
         new_scale = max(0.02, min(80.0, old_scale * factor))
         self._pixels_per_meter = new_scale
         self._center_m = QPointF(

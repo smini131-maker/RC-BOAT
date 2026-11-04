@@ -1,0 +1,35 @@
+name: Android
+on:
+  push:
+    branches: [main]
+    paths: ['mobile_android/**', 'VERSION', '.github/workflows/android.yml']
+  pull_request:
+    paths: ['mobile_android/**', 'VERSION', '.github/workflows/android.yml']
+permissions:
+  contents: read
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
+      - run: bash gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
+        working-directory: mobile_android
+  responsive-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --ignore-scripts
+        working-directory: mobile_android
+      - run: npx playwright install --with-deps chromium
+        working-directory: mobile_android
+      - run: npm test
+        working-directory: mobile_android
