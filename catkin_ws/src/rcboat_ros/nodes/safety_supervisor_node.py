@@ -328,7 +328,7 @@ class Supervisor:
                 msg.header.stamp=rospy.Time.now();msg.mode=self.mode;msg.source=source
                 msg.steering_pwm=int(s);msg.throttle_pwm=int(t);msg.actuator_locked=lock
                 self.cmd.publish(msg)
-                self.state.publish(pack(software_version="2.3.2",mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
+                self.state.publish(pack(software_version="2.3.3",mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
                                         mode_since_monotonic=self.mode_since,
                                         ground_test_actuation_enabled=self.ground_test_actuation_enabled,
                                         gps_grace_active=self.ground_gps_gap_since is not None or self.balloon_gps_gap_since is not None,

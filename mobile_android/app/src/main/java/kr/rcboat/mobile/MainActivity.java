@@ -65,7 +65,21 @@ public class MainActivity extends Activity {
         poll.scheduleWithFixedDelay(this::pollStatus,300,700,TimeUnit.MILLISECONDS);
         lease.scheduleWithFixedDelay(this::heartbeat,100,250,TimeUnit.MILLISECONDS);
         health.scheduleWithFixedDelay(this::checkSsh,500,1500,TimeUnit.MILLISECONDS);
+        importProfile(getIntent());
     }
+    private JSONObject savedProfile(){try{return new JSONObject(getPreferences(MODE_PRIVATE).getString("ntrip_profile","{}"));}catch(Exception e){return new JSONObject();}}
+    private void cacheProfile(JSONObject incoming){try{JSONObject p=NtripProfile.merge(savedProfile(),incoming);if(p.optString("host").isEmpty()||p.optString("mountpoint").isEmpty())return;if(!p.toString().equals(savedProfile().toString())){getPreferences(MODE_PRIVATE).edit().putString("ntrip_profile",p.toString()).apply();emit("ntrip_profile",p);}}catch(Exception ignored){}}
+    private void importProfile(Intent intent){
+        if(intent==null||!Intent.ACTION_SEND.equals(intent.getAction()))return;
+        String raw=intent.getStringExtra(Intent.EXTRA_TEXT);if(raw==null||raw.length()>4096)return;
+        try{JSONObject input=new JSONObject(raw);if(input.optInt("rcboat_ntrip_profile")!=1)return;JSONObject profile=NtripProfile.merge(new JSONObject(),input);
+            if(profile.optString("host").isEmpty()||profile.optString("mountpoint").isEmpty())return;
+            new AlertDialog.Builder(this).setTitle("RTK 로컬 설정 가져오기").setMessage(profile.optString("host")+":"+profile.optInt("port",2101)+"\n"+profile.optString("mountpoint")+"\n사용자: "+profile.optString("username")+"\n\n휴대폰에 설정만 저장합니다. Jetson 연결·보정 서버 접속은 시작하지 않습니다. 비밀번호는 가져오지 않습니다.")
+                .setPositiveButton("저장",(d,w)->{cacheProfile(profile);notice("기존 RTK 프로필을 휴대폰에 저장했습니다");}).setNegativeButton("취소",null).show();
+        }catch(Exception e){notice("RTK 프로필 형식 오류");}
+        intent.removeExtra(Intent.EXTRA_TEXT);
+    }
+    @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);importProfile(intent);}
     private void emit(String event,JSONObject data){main.post(()->{if(web!=null)web.evaluateJavascript("window.onNative&&window.onNative("+JSONObject.quote(event)+","+data+")",null);});}
     private static JSONObject obj(String raw)throws JSONException{return new JSONObject(raw);}
     private static JSONObject data(String k,Object v){JSONObject o=new JSONObject();try{o.put(k,v);}catch(Exception ignored){}return o;}
@@ -79,6 +93,7 @@ public class MainActivity extends Activity {
             latest=status;backendVersion=status.optString("version");lastStatus=SystemClock.elapsedRealtime();
             JSONObject tele=status.optJSONObject("telemetry");JSONObject safe=tele==null?null:tele.optJSONObject("safety");mode=safe==null?"":safe.optString("mode");
             JSONObject vision=tele==null?null:tele.optJSONObject("vision");if(vision!=null)previewPort=vision.optInt("preview_port",8766);
+            JSONObject ntrip=tele==null?null:tele.optJSONObject("ntrip");if(ntrip!=null&&!ntrip.optString("host").isEmpty()&&!ntrip.optString("mountpoint").isEmpty())cacheProfile(ntrip);
             status.put("mobile",new JSONObject().put("ssh",sshState).put("control",owned).put("app_version",BuildConfig.VERSION_NAME));emit("status",status);
             if(preview && vision!=null && vision.optBoolean("enabled") && frameBusy.compareAndSet(false,true))frames.execute(()->fetchFrame(g,gen));
         }catch(Exception e){if(gen==generation)emit("offline",data("error",e.getMessage()));}
@@ -87,7 +102,7 @@ public class MainActivity extends Activity {
         GatewayClient g=gateway;if(!connected || !foreground || !owned || g==null)return;
         try{
             g.request("operator_link",new JSONObject().put("ssh_connected",!sshState.equals("disconnected")).put("ssh_state",sshState),700,4096);
-            if(mode.equals("REMOTE") && remoteHeld && SystemClock.elapsedRealtime()-remoteAt<500){
+            if(mode.equals("REMOTE") && remoteHeld && SystemClock.elapsedRealtime()-remoteAt<500 && SystemClock.elapsedRealtime()-lastStatus<2500){
                 g.request("set_remote_pwm",new JSONObject().put("steering_pwm",remoteSteering).put("throttle_pwm",remoteThrottle),600,8192);
             }
         }catch(Exception ignored){}
@@ -126,7 +141,7 @@ public class MainActivity extends Activity {
             GatewayClient g=gateway;if(g==null||!connected)throw new IOException("먼저 Jetson에 연결하세요");
             if(!allowed.contains(action))throw new IOException("지원하지 않는 명령");
             if(action.equals("ground_start")||action.equals("ground_resume")||action.equals("set_mode")&&Arrays.asList("NAVIGATION","BALLOON","REMOTE","AUTO").contains(args.optString("mode")))canMove();
-            JSONObject result=g.request(action,args,10000,6*1024*1024);result.put("id",id).put("action",action);emit("ack",result);
+            JSONObject result=g.request(action,args,10000,6*1024*1024);if(action.equals("configure"))cacheProfile(args);result.put("id",id).put("action",action);emit("ack",result);
         }catch(Exception e){JSONObject failure=data("id",id);try{failure.put("success",false).put("error",e.getMessage());}catch(JSONException ignored){}emit("ack",failure);}
     }
     private void disconnect(boolean notify){
@@ -156,15 +171,15 @@ public class MainActivity extends Activity {
         notice("다운로드/RCBoat/"+filename+" 저장 완료");
     }
     public class AppBridge {
-        @JavascriptInterface public void ready(){ready=true;JSONObject c=new JSONObject();android.content.SharedPreferences p=getPreferences(MODE_PRIVATE);try{c.put("host",p.getString("host","10.123.65.215")).put("username",p.getString("username","jetson")).put("gateway_port",p.getInt("gateway_port",8765)).put("ssh_port",p.getInt("ssh_port",22)).put("version",BuildConfig.VERSION_NAME);}catch(Exception ignored){}emit("settings",c);}
+        @JavascriptInterface public void ready(){ready=true;JSONObject c=new JSONObject();android.content.SharedPreferences p=getPreferences(MODE_PRIVATE);try{c.put("host",p.getString("host","")).put("username",p.getString("username","jetson")).put("gateway_port",p.getInt("gateway_port",8765)).put("ssh_port",p.getInt("ssh_port",22)).put("version",BuildConfig.VERSION_NAME);}catch(Exception ignored){}emit("settings",c);emit("ntrip_profile",savedProfile());}
         @JavascriptInterface public void connect(String json){try{JSONObject c=obj(json);String host=c.getString("host").trim();int port=c.optInt("gateway_port",8765);GatewayClient next=new GatewayClient(host,port,c.optString("token"));MainActivity.this.disconnect(false);gateway=next;token=c.optString("token");connected=true;sshState=c.optString("password").isEmpty()?"disconnected":"connecting";int gen=generation;c.put("host",host);
             getPreferences(MODE_PRIVATE).edit().putString("host",host).putString("username",c.optString("username","jetson")).putInt("gateway_port",port).putInt("ssh_port",c.optInt("ssh_port",22)).apply();
             health.execute(()->connectSsh(c,gen));notice("ROS gateway 연결 중");}catch(Exception e){notice(e.getMessage());}}
         @JavascriptInterface public void disconnect(){MainActivity.this.disconnect(true);}
-        @JavascriptInterface public void command(String id,String action,String json){try{JSONObject args=obj(json);int gen=generation;(action.equals("estop")||action.equals("ground_stop")||action.equals("set_mode")&&args.optString("mode").equals("MANUAL")?urgent:commands).execute(()->perform(id,action,args,gen));}catch(Exception e){notice(e.getMessage());}}
+        @JavascriptInterface public void command(String id,String action,String json){try{JSONObject args=obj(json);int gen=generation;(action.equals("estop")||action.equals("ground_stop")||action.equals("set_mode")&&Arrays.asList("MANUAL","AUTO_SAFE").contains(args.optString("mode"))?urgent:commands).execute(()->perform(id,action,args,gen));}catch(Exception e){notice(e.getMessage());}}
         @JavascriptInterface public void preview(boolean enabled){preview=enabled;}
         @JavascriptInterface public void remote(int steering,int throttle,boolean held){if(steering<4900||steering>7300||throttle<5800||throttle>7397)return;remoteSteering=steering;remoteThrottle=throttle;remoteAt=SystemClock.elapsedRealtime();remoteHeld=held;
-            if(!held && gateway!=null)urgent.execute(()->{try{gateway.request("set_remote_pwm",new JSONObject().put("steering_pwm",6000).put("throttle_pwm",6450),700,8192);}catch(Exception ignored){}});}
+            if(!held && gateway!=null && mode.equals("REMOTE"))urgent.execute(()->{try{gateway.request("set_remote_pwm",new JSONObject().put("steering_pwm",6000).put("throttle_pwm",6450),700,8192);}catch(Exception ignored){}});}
         @JavascriptInterface public void export(String filename,String mime,String text){commands.execute(()->{try{if(text.length()>4*1024*1024)throw new IOException("내보내기 크기 제한");saveFile(filename,mime,text.getBytes(java.nio.charset.StandardCharsets.UTF_8));}catch(Exception e){notice(e.getMessage());}});}
         @JavascriptInterface public void download(String action,String testId){if(!Arrays.asList("download_ground_test","download_vision_log").contains(action))return;commands.execute(()->{try{if(gateway==null)throw new IOException("연결 필요");JSONObject r=gateway.request(action,data("test_id",testId),30000,48*1024*1024).getJSONObject("response");byte[] raw=android.util.Base64.decode(r.getString("zip_base64"),android.util.Base64.DEFAULT);byte[] digest=MessageDigest.getInstance("SHA-256").digest(raw);StringBuilder hex=new StringBuilder();for(byte b:digest)hex.append(String.format(Locale.ROOT,"%02x",b&255));if(!hex.toString().equals(r.getString("sha256")))throw new IOException("ZIP 무결성 검증 실패");saveFile(r.getString("filename"),"application/zip",raw);}catch(Exception e){notice(e.getMessage());}});}
     }

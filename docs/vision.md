@@ -64,7 +64,7 @@ bash deployment/jetson/install_vision_dependencies.sh
 bash deployment/jetson/install_jetson_ros.sh
 ```
 
-완료 조건은 `RUNNING GATEWAY VERIFIED: v2.3.2`입니다. 기존 항로·NTRIP 로컬 파일·시험 로그는 유지됩니다. 카메라 설정은 `~/.rcboat/vision.json`에 저장하고 부팅 시 카메라·추적은 꺼진 상태로 시작합니다.
+완료 조건은 `RUNNING GATEWAY VERIFIED: v2.3.3`입니다. 기존 항로·NTRIP 로컬 파일·시험 로그는 유지됩니다. 카메라 설정은 `~/.rcboat/vision.json`에 저장하고 부팅 시 카메라·추적은 꺼진 상태로 시작합니다.
 
 설치 때 `tensorflow ... numpy ... incompatible`이 표시되면 기존 환경의 상속이 남은 것입니다. 전역 TensorFlow를 삭제하지 말고 새 설치 스크립트를 실행합니다. 성공 문구 앞에 `RuntimeError`, `ImportError`가 있던 이전 설치 결과는 완료로 인정하지 않습니다. 새 설치의 NumPy 경로는 `~/.rcboat/vision-venv/` 아래여야 합니다.
 
@@ -96,7 +96,7 @@ roslaunch rcboat_ros rcboat.launch
 
 ```powershell
 # 새 폴더의 빌드된 앱
-.\dist\RCBoatControl_ROS_v2.3.2.exe
+.\dist\RCBoatControl_ROS_v2.3.3.exe
 # 다시 빌드할 때
 .\BUILD_ROS_GUI.cmd
 ```
