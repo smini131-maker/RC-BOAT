@@ -41,15 +41,15 @@ class TrackerTests(unittest.TestCase):
         controller=TrackingController();target=self.acquire()
         target['center_x_normalized']=0
         self.assertEqual(controller.command(target,100,100,self.c,7397,100)['desired_throttle_pwm'],6650)
-        self.assertEqual(controller.command(target,104.5,104.5,self.c,7397,100)['desired_throttle_pwm'],7397)
+        self.assertEqual(controller.command(target,106.225,106.225,self.c,7397,100)['desired_throttle_pwm'],7397)
         target['center_x_normalized']=.9
-        reduced=controller.command(target,104.6,104.6,self.c,7397,100)['desired_throttle_pwm']
+        reduced=controller.command(target,106.3,106.3,self.c,7397,100)['desired_throttle_pwm']
         self.assertLess(reduced,7397)
         target['center_x_normalized']=0
-        value=controller.command(target,104.85,104.85,self.c,7397,100)['desired_throttle_pwm']
+        value=controller.command(target,106.55,106.55,self.c,7397,100)['desired_throttle_pwm']
         self.assertLessEqual(value,reduced+math.ceil(NAV_RAMP_RATE*.25)+1)
-        self.assertEqual(controller.command(target,105,105,self.c,6480,100)['desired_throttle_pwm'],6480)
-        self.assertEqual(controller.command(target,106,106,self.c,7397,106)['desired_throttle_pwm'],6650)
+        self.assertEqual(controller.command(target,107,107,self.c,6480,100)['desired_throttle_pwm'],6480)
+        self.assertEqual(controller.command(target,108,108,self.c,7397,108)['desired_throttle_pwm'],6650)
     def test_stale_camera_never_becomes_motion_prediction(self):
         target=self.acquire();out=TrackingController().command(target,100,103,self.c)
         self.assertFalse(out['valid']);self.assertEqual(out['desired_throttle_pwm'],6450)

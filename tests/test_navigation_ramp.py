@@ -12,26 +12,26 @@ from rcboat_ros.control_config import NavigationThrottleRamp,NAV_RAMP_RATE
 
 
 class RampMathTests(unittest.TestCase):
-    def test_existing_rate_and_7397_ceiling(self):
-        self.assertAlmostEqual(NAV_RAMP_RATE,250/1.5)
+    def test_120_pwm_per_second_and_7397_ceiling(self):
+        self.assertEqual(NAV_RAMP_RATE,120.0)
         ramp=NavigationThrottleRamp()
         self.assertEqual(ramp.update(7397,100),6650)
-        self.assertEqual(ramp.update(7397,101),6817)
+        self.assertEqual(ramp.update(7397,101),6770)
         self.assertLess(ramp.update(7397,104.25),7397)
         self.assertEqual(ramp.update(7397,100+(7397-6650)/NAV_RAMP_RATE),7397)
         self.assertEqual(ramp.update(7397,110),7397)
 
-    def test_6900_at_1_5_seconds_with_4hz_ticks(self):
+    def test_6900_at_2_083_seconds_and_4hz_ticks(self):
         ramp=NavigationThrottleRamp()
-        values=[ramp.update(6900,100+i*.25) for i in range(7)]
-        self.assertEqual(values,[6650,6692,6733,6775,6817,6858,6900])
+        values=[ramp.update(6900,100+i*.25) for i in range(10)]
+        self.assertEqual(values,[6650,6680,6710,6740,6770,6800,6830,6860,6890,6900])
         self.assertEqual(ramp.update(6900,110),6900)
 
     def test_elapsed_time_not_loop_count(self):
         ramp=NavigationThrottleRamp();self.assertEqual(ramp.update(6900,100),6650)
         self.assertEqual(ramp.update(6900,100),6650)
-        self.assertEqual(ramp.update(6900,100.9),6800)
-        self.assertEqual(ramp.update(6900,101.5),6900)
+        self.assertEqual(ramp.update(6900,100.9),6758)
+        self.assertEqual(ramp.update(6900,100+250/120),6900)
 
     def test_targets_low_default_intermediate_and_maximum(self):
         for target in (6480,6650,6750,7397):
@@ -44,20 +44,20 @@ class RampMathTests(unittest.TestCase):
 
     def test_raise_from_current_lower_immediately_and_no_turn_rebound(self):
         ramp=NavigationThrottleRamp();ramp.update(7000,100)
-        self.assertEqual(ramp.update(7000,100.6),6750)
-        self.assertEqual(ramp.update(6900,100.9),6800)
+        self.assertEqual(ramp.update(7000,100.6),6722)
+        self.assertEqual(ramp.update(6900,100.9),6758)
         self.assertEqual(ramp.update(6680,100.9),6680)
         self.assertEqual(ramp.update(6450,101),6450)
-        self.assertEqual(ramp.update(7000,101.25),6492)
+        self.assertEqual(ramp.update(7000,101.25),6480)
         self.assertLessEqual(ramp.current,6450+NAV_RAMP_RATE*.25+1e-8)
         ramp.reset();self.assertEqual(ramp.update(7000,102),6650)
 
     def test_increase_target_after_reaching_old_target(self):
         ramp=NavigationThrottleRamp();ramp.update(6750,100)
-        self.assertEqual(ramp.update(6750,100.75),6750)
-        self.assertEqual(ramp.update(7000,100.75),6750)
-        self.assertEqual(ramp.update(7000,101),6792)
-        self.assertEqual(ramp.update(6700,101),6700)
+        self.assertEqual(ramp.update(6750,101),6750)
+        self.assertEqual(ramp.update(7000,101),6750)
+        self.assertEqual(ramp.update(7000,101.25),6780)
+        self.assertEqual(ramp.update(6700,101.25),6700)
 
 
 class NavigationRampTests(unittest.TestCase):
@@ -82,7 +82,7 @@ class NavigationRampTests(unittest.TestCase):
         self.assertEqual(self.output()['desired_throttle_pwm'],6650)
         self.now=100.75
         self.nav.route={'active_route_id':'other_subroute'}
-        self.assertEqual(self.output()['desired_throttle_pwm'],6775)
+        self.assertEqual(self.output()['desired_throttle_pwm'],6740)
         self.state['mode']='MANUAL';self.nav.update_safety(json.dumps(self.state))
         self.state.update(mode='NAVIGATION',mode_since_monotonic=100.8)
         self.now=100.8
@@ -120,7 +120,7 @@ class NavigationRampTests(unittest.TestCase):
              patch.object(self.module.rospy,'is_shutdown',side_effect=[False,False,False,True],create=True):
             self.nav.run()
         rows=[json.loads(item) for item in self.nav.pub.messages]
-        self.assertEqual([row['desired_throttle_pwm'] for row in rows],[6650,6600,6642])
+        self.assertEqual([row['desired_throttle_pwm'] for row in rows],[6650,6600,6630])
         self.assertTrue(all(row['ramp_active'] for row in rows))
         self.assertEqual(rows[-1]['auto_cruise_pwm'],6900)
 

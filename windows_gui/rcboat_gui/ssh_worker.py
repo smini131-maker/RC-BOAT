@@ -17,7 +17,7 @@ from PySide6.QtCore import QThread, Signal
 from rcboat_ros.control_config import validate_cruise,output_in_range
 
 
-GUI_VERSION = "2.3.1"
+GUI_VERSION = "2.3.2"
 
 REMOTE_BRIDGE = r'''p=/home/jetson/rcboat_ros_ws/deployment/jetson/bridge_client.py
 [ -f "$p" ] && exec python3 "$p"
@@ -322,7 +322,7 @@ class SSHWorker(QThread):
         }
         logger_state = str(ground.get("state") or ("recording" if ground.get("active") else "idle"))
         return {
-            "type": "telemetry", "software_version": response.get("version", "2.3.1"),
+            "type": "telemetry", "software_version": response.get("version", "2.3.2"),
             "backend": {"name": str(response.get("backend") or "ROS Noetic"),
                         "ready": bool(response.get("gateway_online", True)), "node_count": len(nodes),
                         "master_online": bool(response.get("master_online")),
@@ -671,7 +671,7 @@ class SSHWorker(QThread):
                         self._backend_error = ""
                     except Exception as exc:
                         message = str(exc)
-                        offline = {"success": True, "version": "2.3.1", "backend": "ROS Noetic",
+                        offline = {"success": True, "version": "2.3.2", "backend": "ROS Noetic",
                                    "master_online": False, "gateway_online": False, "telemetry": {}, "nodes": []}
                         self.telemetry.emit(self._normalize(offline, self._ssh_confirmed))
                         if message != self._backend_error or now - self._backend_error_at >= 15.0:

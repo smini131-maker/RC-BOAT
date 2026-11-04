@@ -7,7 +7,7 @@ THROTTLE_FORWARD_MAX = 7397
 CRUISE_MAX = THROTTLE_FORWARD_MAX
 CRUISE_STEP = 10
 CRUISE_DEFAULT = 6650
-NAV_RAMP_RATE = 250.0 / 1.5  # 6650 -> 6900 in 1.5 s; fixed PWM/s, not vessel speed.
+NAV_RAMP_RATE = 120.0  # PWM/s; 6650 -> 6900 in 2.083 s, not vessel speed.
 RC_STALE_S = .75
 RC_DEFAULTS = {
     'steering': dict(min_us=1004.0, center_us=1620.0, max_us=1985.0,

@@ -414,7 +414,7 @@ class MockWorker(QThread):
             self.telemetry.emit(
                 {
                     "type": "telemetry",
-                    "backend": {"name": "SIM", "version":"2.3.1", "ready": True, "node_count": 10,
+                    "backend": {"name": "SIM", "version":"2.3.2", "ready": True, "node_count": 10,
                                 "master_online": True, "gateway_online": True,
                                 "ssh_connected": False,
                                 "logger_state": "recording" if self.ground_test_active else "idle"},
