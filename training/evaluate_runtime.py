@@ -9,8 +9,9 @@ def iou(a,b):
     inter=max(0,min(a[2],b[2])-max(a[0],b[0]))*max(0,min(a[3],b[3])-max(a[1],b[1]))
     return inter/max(1e-6,(a[2]-a[0])*(a[3]-a[1])+(b[2]-b[0])*(b[3]-b[1])-inter)
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument('dataset',type=Path);args=parser.parse_args()
-    c=validate_config(dict(model_path=str(ROOT/'models/balloon_yolov8n.onnx'),model_manifest=str(ROOT/'models/model_manifest.json'),backend='onnxruntime'))
+    parser=argparse.ArgumentParser();parser.add_argument('dataset',type=Path)
+    parser.add_argument('--model-dir',type=Path,default=ROOT/'models');parser.add_argument('--output',type=Path,default=ROOT/'models/runtime_evaluation.json');args=parser.parse_args()
+    c=validate_config(dict(model_path=str(args.model_dir/'balloon_yolov8n.onnx'),model_manifest=str(args.model_dir/'model_manifest.json'),backend='onnxruntime',long_range_enabled=False))
     # Known decoder geometry, invalid shapes and pink/green colour boundaries.
     pred=np.array([[[160,160,80,80,.9],[160,160,80,80,.8],[100,100,-1,20,.99]]],np.float32)
     decoded=decode_predictions(pred,(480,640,3),320,.5,(0,40),.35,.45,cv2)
@@ -55,5 +56,5 @@ def main():
         checks=dict(decoder_geometry=True,nms=True,pink_green_filter=True,model_hash=True,opencv_fallback_loaded=True),
         examples=examples,actual_competition_test=False,jetson_benchmark=False,
         limitation='Public balloon images. Pink subset is an HSV proxy, not independent human colour labels. No no-balloon marine negative set; false-positive rate in water scenes is not established.')
-    (ROOT/'models/runtime_evaluation.json').write_text(json.dumps(report,indent=2),encoding='utf-8');print(json.dumps(report,indent=2))
+    args.output.write_text(json.dumps(report,indent=2),encoding='utf-8');print(json.dumps(report,indent=2))
 if __name__=='__main__':main()

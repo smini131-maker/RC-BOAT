@@ -12,7 +12,7 @@ from rcboat_ros.common import pack,unpack,fresh
 from rcboat_ros.control_config import validate_cruise
 from rcboat_ros.balloon_tracking import validate_config,TargetTracker,TrackingController
 
-VERSION='2.3.3'
+VERSION='2.4.0'
 def public_config(c):
     c=dict(c)
     if c['camera_type']=='rtsp':
@@ -134,6 +134,20 @@ class Vision:
             x=int(max(0,min(w-1,(target['center_x_normalized']+1)/2*w)));cv2.arrowedLine(image,(w//2,h//2),(x,h//2),(0,210,255),3)
         cv2.line(image,(w//2,0),(w//2,h),(220,220,220),1);cv2.putText(image,target.get('phase','NO_TARGET'),(10,24),cv2.FONT_HERSHEY_SIMPLEX,.65,(0,210,255),2)
         scale=min(c['preview_width']/w,360/h,1);image=cv2.resize(image,(max(1,round(w*scale)),max(1,round(h*scale))))
+        # Native pixels are magnified for the operator only, never fed back as
+        # extra detections. Full-resolution camera data stays on the Jetson.
+        if target.get('acquired') and not target.get('predicted') and target.get('source_span_px',100)<40:
+            from rcboat_ros.long_range import square_crop
+            bounds=square_crop(target['bbox'],frame.shape,64,4)
+            x1,y1,x2,y2=bounds;roi=frame[y1:y2,x1:x2]
+            edge=min(132,image.shape[0]//2,image.shape[1]//3)
+            if roi.size and edge>=40:
+                enlarged=cv2.resize(roi,(edge,edge),interpolation=cv2.INTER_NEAREST)
+                px=8 if target.get('center_x_normalized',0)>0 else image.shape[1]-edge-8
+                py=image.shape[0]-edge-8
+                image[py:py+edge,px:px+edge]=enlarged
+                cv2.rectangle(image,(px,py),(px+edge,py+edge),(80,235,130),1)
+                cv2.putText(image,'ZOOM / %.1fpx raw'%target['source_span_px'],(px,max(12,py-5)),cv2.FONT_HERSHEY_SIMPLEX,.36,(80,235,130),1)
         ok,encoded=cv2.imencode('.jpg',image,[cv2.IMWRITE_JPEG_QUALITY,c['preview_jpeg_quality']])
         if ok and len(encoded)<=150000:
             with self.lock:self.preview=encoded.tobytes();self.preview_at=stamp
@@ -167,7 +181,9 @@ class Vision:
                     if self.detector is None:desired['valid']=False
                     self.desired=desired;self.detail=dict(reason=target['phase'],target=target,detections=detections,inference_ms=round((end-start)*1000,1),
                         processed_fps=round(1/(end-last_end),2) if last_end and end>last_end else None,backend=self.detector.backend_name if self.detector else 'unavailable',
-                        prediction_source='bearing_triangulation' if target.get('world_estimate') else 'image_motion')
+                        prediction_source='bearing_triangulation' if target.get('world_estimate') else 'image_motion',
+                        detector_view=dict(getattr(self.detector,'last_view',{})),
+                        range_validation='not_field_validated',design_goal_distance_m=100)
                     if self.detector is not None:self.error=''
                 last_end=end
                 if end-last_preview>=1/c['preview_hz'] and end-self.preview_requested_at<3:last_preview=end;self.make_preview(frame,detections,target,c,stamp)

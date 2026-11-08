@@ -98,6 +98,17 @@ p.request_sent('VISION_CONFIGURE','one',{});p.on_ack(dict(request_id='old',ok=Tr
 p.source.setText('/dev/video3');p.edited();p.on_ack(dict(request_id='one',ok=True,configuration=dict(DEFAULTS,camera_source='/dev/video1'),applied_monotonic=3))
 assert p.source.text()=='/dev/video3' and p.dirty
 p.request_sent('VISION_CONFIGURE','two',{});p.timeout('two');assert p.pending is None and p.dirty
+# Native resolution and range selection share the existing dirty/ACK lifecycle.
+p.dirty=False;p.sync_config(DEFAULTS,4,force=True)
+assert p.resolution.currentData()=='1920x1080' and p.long_range.isChecked()
+p.resolution.setCurrentIndex(p.resolution.findData('1280x720'));p.long_range.setChecked(False)
+configs=[];p.request.connect(lambda command,args:configs.append((command,args)))
+p.save_config();assert configs[-1][1]['width']==1280 and configs[-1][1]['height']==720
+assert configs[-1][1]['long_range_enabled'] is False
+p.sync_config(DEFAULTS,5);assert p.resolution.currentData()=='1280x720'
+p.request_sent('VISION_CONFIGURE','range',configs[-1][1])
+p.on_ack(dict(request_id='range',ok=True,configuration=dict(DEFAULTS,width=1280,height=720,long_range_enabled=False),applied_monotonic=6))
+assert not p.dirty and p.resolution.currentData()=='1280x720' and not p.long_range.isChecked()
 # Explicit start turns on the camera, waits for fresh actual detection, and arms once.
 p.set_connected(True);p.camera_enabled=False;requests=[];starts=[]
 p.request.connect(lambda command,args:requests.append(command));p.start_tracking.connect(lambda:starts.append(True))

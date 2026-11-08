@@ -1,5 +1,5 @@
 {
-  "model_sha256": "75487e7a11d600412e34b1ca49e80935225d5106ff7184614e37116d9deeacbe",
+  "model_sha256": "74e73d17c01b32589ff8cff51e87c45415c153ec51502fa7dad9333f56c604dc",
   "backend": "ONNX Runtime CPU, 2 threads",
   "device": "Windows PC; not Jetson Nano",
   "input_size": 320,
@@ -7,17 +7,17 @@
   "ground_truth_boxes": 1089,
   "confidence": 0.35,
   "iou_threshold": 0.5,
-  "true_positive_boxes": 638,
-  "false_positive_boxes": 223,
-  "precision": 0.7409988385598142,
-  "recall": 0.5858585858585859,
+  "true_positive_boxes": 666,
+  "false_positive_boxes": 200,
+  "precision": 0.76905311778291,
+  "recall": 0.6115702479338843,
   "large_boxes_area_at_least_1pct": 566,
-  "large_box_recall": 0.8215547703180212,
+  "large_box_recall": 0.842756183745583,
   "pink_colour_proxy_ground_truth_boxes": 433,
-  "pink_colour_proxy_matches": 191,
-  "pink_detections": 255,
-  "mean_inference_ms": 16.22,
-  "p95_inference_ms": 18.8,
+  "pink_colour_proxy_matches": 199,
+  "pink_detections": 254,
+  "mean_inference_ms": 31.27,
+  "p95_inference_ms": 41.51,
   "checks": {
     "decoder_geometry": true,
     "nms": true,
@@ -47,7 +47,7 @@
     {
       "image_id": "01119d5193801092",
       "ground_truth_boxes": 1,
-      "detected": 13,
+      "detected": 12,
       "pink_detected": 0
     },
     {
@@ -95,11 +95,12 @@
     {
       "image_id": "062f38b15ded6d7a",
       "ground_truth_boxes": 18,
-      "detected": 18,
+      "detected": 17,
       "pink_detected": 8
     }
   ],
   "actual_competition_test": false,
   "jetson_benchmark": false,
-  "limitation": "Public balloon images. Pink subset is an HSV proxy, not independent human colour labels. No no-balloon marine negative set; false-positive rate in water scenes is not established."
+  "limitation": "Public balloon images. Pink subset is an HSV proxy, not independent human colour labels. No no-balloon marine negative set; false-positive rate in water scenes is not established.",
+  "timing_context": "PC CPU, concurrent development benchmark; not a Nano throughput claim"
 }

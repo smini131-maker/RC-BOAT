@@ -55,12 +55,12 @@ Remove-Item Env:QT_QPA_PLATFORM
 .\BUILD_ROS_GUI.cmd
 ```
 
-빌드 도구는 `%LOCALAPPDATA%\RCBoatBuild` 아래 전용 가상환경과 작업 경로를 사용합니다. 결과는 저장소의 `dist\RCBoatControl_ROS_v2.3.3.exe`입니다. `dist`와 빌드 캐시는 Git에 올리지 않습니다.
+빌드 도구는 `%LOCALAPPDATA%\RCBoatBuild` 아래 전용 가상환경과 작업 경로를 사용합니다. 결과는 저장소의 `dist\RCBoatControl_ROS_v2.4.0.exe`입니다. `dist`와 빌드 캐시는 Git에 올리지 않습니다.
 
 빌드 후에는 `--smoke-test`로 시작·종료를 확인할 수 있습니다.
 
 ```powershell
-.\dist\RCBoatControl_ROS_v2.3.3.exe --smoke-test
+.\dist\RCBoatControl_ROS_v2.4.0.exe --smoke-test
 ```
 
 ## 버전·배포 기준
@@ -114,3 +114,8 @@ v2.1.13은 RC 입력 보정·순항 PWM 적용 확인·항로 지연·HDOP 저�
 - [v2.1.10 — GUI 수명 및 부팅 점검](validation/v2.1.10.md)
 
 v2.3.3는 공통 상승률을 120 PWM/s로 낮춥니다. 다른 기존 제어 동작은 그대로 유지하며 별도 `mobile_android` 클라이언트를 추가했습니다. 모바일은 기존 TCP gateway를 사용하므로 ROS 토픽·서비스와 항법·추적 알고리즘을 바꾸지 않습니다. Android 빌드·검증은 [모바일 안내](mobile.md)를 따릅니다.
+
+
+v2.4.0은 네이티브 1080p 후보 영역의 단일 추론과 작은 대상 연속 관측, 200m 위치 추정 상한, 추가 학습 모델을 적용합니다. 카메라 프로필은 한 번만 백업·변경하며 원거리 끄기/사용자 해상도를 이후 덮어쓰지 않습니다. 실제 100m 성능은 별도 거리·지름·화각 자료로 검증합니다.
+
+2026-11-08 v2.4.0 검증: Python 164개, Qt 5개, 4개 모바일 화면 크기(새 해상도/원거리 설정 전송·편집 유지 포함), Android 단위 9개·lint·APK 서명, EXE smoke 종료 0을 확인했습니다. Python 3.8.10/NumPy 1.23.5/ORT 1.16.3/OpenCV 4.8.0 조합에서 새 ONNX의 실제 1080p 영역 추론을 PC에서 실행했습니다. 배포 staging은 61개 runtime hash를 검증합니다. Jetson·실물 카메라·실측 100m·수상 주행은 이번 버전에서 미검증입니다.

@@ -15,6 +15,7 @@ if systemctl cat rcboat_ros.service >/dev/null 2>&1; then
   sudo systemctl stop rcboat_ros.service
 fi
 python3 deployment/jetson/verify_release.py --sources-only --idle --clean-build
+python3 deployment/jetson/upgrade_vision_profile.py
 mkdir -p /home/jetson/rcboat_ros_data/logs/ground_tests /home/jetson/rcboat_ros_data/gps_logs
 if [[ -f /home/jetson/rcboat_ros_data/ntrip.env ]]; then
   chmod 600 /home/jetson/rcboat_ros_data/ntrip.env
@@ -39,4 +40,4 @@ sudo systemctl is-active --quiet rcboat_ros.service || {
   exit 4
 }
 python3 deployment/jetson/verify_release.py --timeout 45
-echo 'RCBoat ROS Noetic v2.3.3 source AND running gateway verified.'
+echo 'RCBoat ROS Noetic v2.4.0 source AND running gateway verified.'

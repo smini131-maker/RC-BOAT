@@ -54,6 +54,7 @@ class CameraAdapterTests(unittest.TestCase):
             def set(self,*a):pass
             def isOpened(self):return self.opened
             def release(self):self.released=True
+            def read(self):return True,types.SimpleNamespace(ndim=3,shape=(1080,1920,3))
         caps=[]
         def capture(source,backend):
             cap=Cap(backend!=1);caps.append(cap);return cap
@@ -63,6 +64,25 @@ class CameraAdapterTests(unittest.TestCase):
         self.assertEqual(kind,'csi');self.assertTrue(live);self.assertTrue(caps[0].released)
         cap,kind,live=open_camera(validate_config(dict(camera_type='file',camera_source='fixture.mp4')),cv)
         self.assertEqual(kind,'file');self.assertFalse(live)
+    def test_open_but_unreadable_usb_releases_and_falls_back_without_dropping_probe(self):
+        from rcboat_ros.camera_io import open_camera
+        frame=types.SimpleNamespace(ndim=3,shape=(1080,1920,3))
+        captures=[];sources=[]
+        class Cap:
+            def __init__(self,good):self.good=good;self.released=False;self.reads=0
+            def set(self,*a):pass
+            def isOpened(self):return True
+            def read(self):self.reads+=1;return (True,frame) if self.good else (False,None)
+            def release(self):self.released=True
+        def capture(source,backend):
+            cap=Cap(backend==2);captures.append(cap);sources.append(source);return cap
+        cv=types.SimpleNamespace(VideoCapture=capture,CAP_V4L2=1,CAP_GSTREAMER=2,CAP_FFMPEG=3,CAP_ANY=4,
+            CAP_PROP_FRAME_WIDTH=5,CAP_PROP_FRAME_HEIGHT=6,CAP_PROP_FPS=7,CAP_PROP_BUFFERSIZE=8)
+        with patch('pathlib.Path.exists',return_value=True):cap,kind,live=open_camera(validate_config({}),cv)
+        self.assertTrue(captures[0].released);self.assertEqual(kind,'csi');self.assertTrue(live)
+        self.assertIn('width=1920,height=1080',sources[1])
+        self.assertIs(cap.read()[1],frame);self.assertEqual(captures[1].reads,1)
+        cap.release();self.assertTrue(captures[1].released)
 
 class VisionGatewayTests(unittest.TestCase):
     def test_service_routing_and_complete_line_snapshot_hash(self):

@@ -1,4 +1,4 @@
-version: '2.3.3'
+version: '2.4.0'
 gui_gateway_bind: '0.0.0.0'
 gui_gateway_port: 8765
 ground_test_log_root: '~/rcboat_ros_data/logs/ground_tests'
@@ -77,6 +77,9 @@ no_progress_timeout_s: 15.0
 vision:
   camera_type: auto
   camera_source: /dev/video0
+  width: 1920
+  height: 1080
+  long_range_enabled: true
   inference_hz: 5.0
   input_size: 320
   preview_hz: 5.0

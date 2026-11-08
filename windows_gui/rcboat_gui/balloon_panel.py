@@ -31,8 +31,12 @@ class BalloonPanel(QWidget):
         self.camera=QComboBox()
         for label,value in [('자동 (USB → CSI)','auto'),('USB','usb'),('Pi CSI','csi'),('RTSP · 보기 전용','rtsp'),('파일 · 보기 전용','file')]:self.camera.addItem(label,value)
         self.source=QLineEdit('/dev/video0');self.sensor=QSpinBox();self.sensor.setRange(0,3)
+        self.resolution=QComboBox()
+        for label,value in [('1920×1080 · 원거리','1920x1080'),('1280×720','1280x720'),('640×480','640x480')]:self.resolution.addItem(label,value)
+        self.long_range=QCheckBox('작은 풍선 원거리 감지');self.long_range.setChecked(True)
         self.save_button=QPushButton('카메라 설정 저장');self.save_button.clicked.connect(self.save_config)
         for label,widget in [('연결 방식',self.camera),('장치 주소',self.source),('CSI 번호',self.sensor)]:form.addRow(label,widget)
+        form.addRow('촬영 해상도',self.resolution);form.addRow(self.long_range)
         form.addRow(self.save_button);self.config_status=QLabel('');self.config_status.setWordWrap(True);self.config_status.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred);form.addRow(self.config_status)
         self.image=QLabel('카메라를 켜면 실시간 감지 화면이 표시됩니다');self.image.setAlignment(Qt.AlignCenter);self.image.setMinimumSize(280,180)
         self.image.setStyleSheet('background:#060e18;border:1px solid #30465f;border-radius:10px;color:#92a9c1;')
@@ -44,8 +48,9 @@ class BalloonPanel(QWidget):
         self.drawer_animation.finished.connect(lambda:self.camera_drawer.hide() if not self.settings_toggle.isChecked() else None)
         self.settings_toggle.toggled.connect(self.toggle_camera_settings)
         self.shared_speed=QLabel('목표 PWM — · 최종 출력 —');layout.addWidget(self.shared_speed)
-        self.editors=(self.camera,self.source,self.sensor)
+        self.editors=(self.camera,self.source,self.sensor,self.resolution,self.long_range)
         self.camera.currentIndexChanged.connect(self.edited);self.source.textEdited.connect(self.edited);self.sensor.valueChanged.connect(self.edited)
+        self.resolution.currentIndexChanged.connect(self.edited);self.long_range.toggled.connect(self.edited)
         self.timer=QTimer(self);self.timer.setInterval(200);self.timer.timeout.connect(self.fetch_frame);self.timer.start();self.set_connected(False)
     def toggle_camera_settings(self,opened):
         self.drawer_animation.stop();start=self.camera_drawer.width() if self.camera_drawer.isVisible() else 0
@@ -71,7 +76,9 @@ class BalloonPanel(QWidget):
         folder=QFileDialog.getExistingDirectory(self,'풍선 추적 로그 저장')
         if folder:self.request.emit('DOWNLOAD_VISION_LOG',{'destination':folder})
     def save_config(self):
-        self.request.emit('VISION_CONFIGURE',dict(camera_type=self.camera.currentData(),camera_source=self.source.text().strip(),csi_sensor_id=self.sensor.value()))
+        width,height=map(int,self.resolution.currentData().split('x'))
+        self.request.emit('VISION_CONFIGURE',dict(camera_type=self.camera.currentData(),camera_source=self.source.text().strip(),csi_sensor_id=self.sensor.value(),
+            width=width,height=height,long_range_enabled=self.long_range.isChecked()))
     def request_sent(self,command,request,args):
         if command=='VISION_CONFIGURE' and request:
             self.pending=(request,self.generation);self.save_button.setEnabled(False);self.config_status.setText('저장 확인 중')
@@ -93,6 +100,9 @@ class BalloonPanel(QWidget):
         try:
             self.camera.setCurrentIndex(max(0,self.camera.findData(c.get('camera_type'))));self.source.setText(str(c.get('camera_source',DEFAULTS['camera_source'])))
             self.sensor.setValue(c.get('csi_sensor_id',0));self.synced=True;self.stamp=stamp
+            resolution=str(c.get('width',DEFAULTS['width']))+'x'+str(c.get('height',DEFAULTS['height']))
+            if self.resolution.findData(resolution)<0:self.resolution.addItem(resolution,resolution)
+            self.resolution.setCurrentIndex(self.resolution.findData(resolution));self.long_range.setChecked(c.get('long_range_enabled',True))
         finally:self.syncing=False
     def update_state(self,state,host):
         v=state.get('vision') or {};d=state.get('vision_desired') or {};t=v.get('target') or {};self.host=host;self.port=int(v.get('preview_port') or 8766)
@@ -115,6 +125,12 @@ class BalloonPanel(QWidget):
         def fmt(value,suffix=''):return '—' if value is None else f'{float(value):.1f}{suffix}'
         self.metrics.setText(('풍선 감지' if visible else '추적 유지' if active and t.get('predicted') else '감지 대기')+
             ' · '+fmt(v.get('processed_fps'),' fps')+' · '+fmt(v.get('inference_ms'),' ms'))
+        view=v.get('detector_view') or {}
+        if view.get('native_width'):
+            text=f" · {view['native_width']}×{view['native_height']}"
+            if view.get('requested_resolution_met') is False:text+=' 해상도 확인 필요'
+            elif t.get('source_span_px') is not None:text+=' · '+fmt(t['source_span_px'],' px')
+            self.metrics.setText(self.metrics.text()+text)
         self.shared_speed.setText('목표 PWM '+str(state.get('auto_cruise_pwm') or v.get('shared_cruise_pwm') or '—')+' · 최종 출력 '+str((state.get('pca') or {}).get('throttle_pwm','—')))
         if self.mock:self.image.setPixmap(QPixmap());self.image.setText('SIMULATION · 모의 감지 상태\n실제 카메라 영상 아님')
         elif not self.camera_enabled:self.image.setPixmap(QPixmap());self.image.setText('카메라 꺼짐')

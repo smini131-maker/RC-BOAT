@@ -2,6 +2,7 @@
 import hashlib,json
 from pathlib import Path
 import numpy as np
+from .long_range import RegionPlanner
 
 def verify_model(path,manifest_path,input_size):
     model=Path(path).expanduser();meta=Path(manifest_path).expanduser()
@@ -39,6 +40,24 @@ def pink_fraction(frame,bbox,config,cv2):
     yy,xx=np.ogrid[:roi.shape[0],:roi.shape[1]]
     ellipse=((xx-roi.shape[1]/2)/max(1,roi.shape[1]/2))**2+((yy-roi.shape[0]/2)/max(1,roi.shape[0]/2))**2<=1
     return float(np.count_nonzero(mask[ellipse]))/max(1,int(np.count_nonzero(ellipse)))
+
+def small_pink_shape_supported(frame,bbox,config,cv2):
+    """Reject thin colour strips when a target has few native pixels.
+
+    This is only a confirmation veto after neural inference, never a detector.
+    At this scale the largest pink component must occupy both image axes;
+    elongated hull edges/paint lines are not enough evidence to acquire a target.
+    """
+    x1,y1,x2,y2=[int(v) for v in bbox];roi=frame[y1:y2,x1:x2]
+    if not roi.size:return False
+    hsv=cv2.cvtColor(roi,cv2.COLOR_BGR2HSV)
+    mask=cv2.inRange(hsv,np.array([config['pink_hue_low'],config['pink_min_saturation'],config['pink_min_value']],np.uint8),
+        np.array([config['pink_hue_high'],255,255],np.uint8))
+    _,_,stats,_=cv2.connectedComponentsWithStats(mask,connectivity=8)
+    if len(stats)<2:return False
+    component=max(stats[1:],key=lambda row:row[4])
+    w,h,area=int(component[2]),int(component[3]),int(component[4])
+    return min(w,h)>=3 and min(w,h)/max(w,h)>=.5 and area/(w*h)>=.3
 
 class TensorRTBackend:
     """TensorRT 8 binding API (JetPack 4/5), optional and target-device generated."""
@@ -82,6 +101,7 @@ class BalloonDetector:
     def __init__(self,config):
         import cv2
         self.cv2=cv2;self.config=config;cv2.setNumThreads(2)
+        self.planner=RegionPlanner();self.last_view={}
         self.manifest=verify_model(config['model_path'],config['model_manifest'],config['input_size'])
         path=str(Path(config['model_path']).expanduser());self.backend=None;self.backend_name='';self.fallback=[]
         choices=['tensorrt','onnxruntime','opencv'] if config['backend']=='auto' else [config['backend']]
@@ -101,18 +121,33 @@ class BalloonDetector:
                 self.backend=None;self.fallback.append(name+': '+str(exc)[:160])
         if self.backend is None:raise RuntimeError('No usable inference backend: '+'; '.join(self.fallback))
     def detect(self,frame):
-        cv2=self.cv2;size=self.config['input_size'];h,w=frame.shape[:2];scale=min(size/w,size/h)
+        if not isinstance(frame,np.ndarray) or frame.ndim!=3 or frame.shape[2]!=3 or not frame.size or frame.dtype!=np.uint8:
+            raise ValueError('nonempty uint8 BGR frame required')
+        cv2=self.cv2;size=self.config['input_size']
+        crop,detail=self.planner.plan(frame,self.config,cv2)
+        x0,y0,xend,yend=crop;view=frame[y0:yend,x0:xend];h,w=view.shape[:2];scale=min(size/w,size/h)
         rw,rh=round(w*scale),round(h*scale);left,top=(size-rw)//2,(size-rh)//2
-        padded=np.full((size,size,3),114,np.uint8);padded[top:top+rh,left:left+rw]=cv2.resize(frame,(rw,rh))
+        padded=np.full((size,size,3),114,np.uint8);padded[top:top+rh,left:left+rw]=cv2.resize(view,(rw,rh))
         blob=cv2.dnn.blobFromImage(padded,1/255.,(size,size),swapRB=True,crop=False)
         if self.backend_name=='onnxruntime':prediction=self.backend.run(None,{self.backend.get_inputs()[0].name:blob})[0]
         elif self.backend_name=='tensorrt':prediction=self.backend.run(blob)
         else:self.backend.setInput(blob);prediction=self.backend.forward()
-        detections=decode_predictions(prediction,frame.shape,size,scale,(left,top),self.config['confidence'],self.config['nms_iou'],cv2)
+        detections=decode_predictions(prediction,view.shape,size,scale,(left,top),self.config['confidence'],self.config['nms_iou'],cv2)
         for item in detections:
+            b=item['bbox'];item['bbox']=[b[0]+x0,b[1]+y0,b[2]+x0,b[3]+y0]
             fraction=pink_fraction(frame,item['bbox'],self.config,cv2)
-            item.update(pink_fraction=round(fraction,4),pink_confirmed=fraction>=self.config['pink_min_fraction'])
+            span=min(b[2]-b[0],b[3]-b[1])
+            supported=span>=self.config.get('min_source_span_px',4.0)
+            shape_supported=span>=40 or small_pink_shape_supported(frame,item['bbox'],self.config,cv2)
+            item.update(pink_fraction=round(fraction,4),pink_confirmed=fraction>=self.config['pink_min_fraction'] and supported and shape_supported,
+                        small_shape_supported=shape_supported,
+                        source_span_px=round(span,2),pixel_support='limited' if span<8 else 'adequate',detector_view=detail['kind'])
             if item['pink_confirmed']:item['label']='pink_balloon'
+        self.planner.observe(detections)
+        detail['model_input']=size;detail['requested_resolution_met']=frame.shape[1]>=self.config['width'] and frame.shape[0]>=self.config['height']
+        self.last_view=detail
         return detections
+    def reset_search(self):
+        self.planner=RegionPlanner()
     def close(self):
         if hasattr(self.backend,'close'):self.backend.close()

@@ -9,6 +9,15 @@ permissions:
   contents: read
 
 jobs:
+  vision-numeric:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: python -m pip install numpy==1.26.4 opencv-python-headless==4.8.1.78
+      - run: python -m unittest discover -s tests -p 'test_long_range_vision.py' -v
   python-regression:
     strategy:
       matrix:

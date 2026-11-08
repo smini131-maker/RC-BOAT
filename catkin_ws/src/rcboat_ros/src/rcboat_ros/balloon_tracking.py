@@ -6,7 +6,7 @@ from .control_config import number,validate_cruise,NavigationThrottleRamp,THROTT
 
 DEFAULTS={
     'camera_type':'auto','camera_source':'/dev/video0','csi_sensor_id':0,
-    'width':640,'height':480,'camera_fps':15,'input_size':320,
+    'width':1920,'height':1080,'camera_fps':15,'input_size':320,
     'model_path':'~/rcboat_ros_ws/models/balloon_yolov8n.onnx',
     'model_manifest':'~/rcboat_ros_ws/models/model_manifest.json','backend':'auto',
     'confidence':.35,'nms_iou':.45,'pink_min_fraction':.12,'pink_hue_low':140,'pink_hue_high':179,
@@ -15,6 +15,9 @@ DEFAULTS={
     'predict_s':2.0,'search_timeout_s':15.0,'search_period_s':5.0,'search_turn_strength':.8,
     'camera_hfov_deg':62.0,'camera_yaw_deg':0.0,'preview_port':8766,'preview_hz':5.,
     'preview_width':640,'preview_jpeg_quality':55,
+    'long_range_enabled':True,'roi_min_size':96,'roi_context_scale':4.0,
+    'roi_max_candidates':12,'roi_full_interval':4,'min_source_span_px':4.0,
+    'max_target_distance_m':200.0,
 }
 
 def validate_config(values):
@@ -22,6 +25,7 @@ def validate_config(values):
     c=dict(DEFAULTS,**values)
     if c['camera_type'] not in ('auto','usb','csi','rtsp','file'):raise ValueError('unsupported camera type')
     if c['backend'] not in ('auto','tensorrt','onnxruntime','opencv'):raise ValueError('unsupported inference backend')
+    if type(c['long_range_enabled']) is not bool:raise ValueError('long_range_enabled must be boolean')
     if c['camera_type'] in ('auto','usb') and not str(c['camera_source']).startswith('/dev/video'):
         raise ValueError('USB/auto source must be a local /dev/video device')
     if c['camera_type']=='rtsp' and not str(c['camera_source']).startswith(('rtsp://','rtsps://')):raise ValueError('RTSP URL required')
@@ -32,9 +36,12 @@ def validate_config(values):
         'steering_gain':(.05,1.5),'steering_deadband':(0,.3),'predict_s':(.2,4),
         'search_timeout_s':(3,30),'search_period_s':(2,12),'search_turn_strength':(.2,1),
         'camera_hfov_deg':(20,150),'camera_yaw_deg':(-180,180),'csi_sensor_id':(0,3),
-        'preview_port':(1024,65535),'preview_hz':(.5,5),'preview_width':(160,640),'preview_jpeg_quality':(30,80)}
+        'preview_port':(1024,65535),'preview_hz':(.5,5),'preview_width':(160,640),'preview_jpeg_quality':(30,80),
+        'roi_min_size':(64,320),'roi_context_scale':(2,8),'roi_max_candidates':(1,24),
+        'roi_full_interval':(2,12),'min_source_span_px':(2,16),'max_target_distance_m':(100,300)}
     integers={'width','height','camera_fps','input_size','acquire_frames','pink_hue_low','pink_hue_high',
-        'pink_min_saturation','pink_min_value','csi_sensor_id','preview_port','preview_width','preview_jpeg_quality'}
+        'pink_min_saturation','pink_min_value','csi_sensor_id','preview_port','preview_width','preview_jpeg_quality',
+        'roi_min_size','roi_max_candidates','roi_full_interval'}
     for key,(lo,hi) in limits.items():
         value=number(c[key])
         if not lo<=value<=hi or (key in integers and not value.is_integer()):raise ValueError(key+' outside supported range')
@@ -80,7 +87,7 @@ class BearingEstimator:
         tx,ty=(d*u-b*v)/det,(a*v-b*u)/det
         distances=[abs(-dy*(tx-px)+dx*(ty-py)) for px,py,dx,dy,_ in obs]
         forward=sum((tx-px)*dx+(ty-py)*dy>0 for px,py,dx,dy,_ in obs)
-        if forward<len(obs)*.8 or max(distances)>2 or not .5<math.hypot(tx-x,ty-y)<80:return
+        if forward<len(obs)*.8 or max(distances)>2 or not .5<math.hypot(tx-x,ty-y)<config['max_target_distance_m']:return
         self.estimate=(tx,ty);self.updated_at=now
     def relative(self,gps,now):
         pose=self.pose(gps,now)
@@ -116,6 +123,13 @@ class TargetTracker:
             else:target=max(candidates,key=lambda t:t['confidence']*math.sqrt(t['area_ratio']))
         if candidates:
             if age>=config['search_timeout_s']:self.acquired=False;self.was_close=False;self.estimator.reset()
+            if not self.acquired and self.target is not None:
+                # Tiny detections at unrelated positions must not build one acquisition streak.
+                previous=self.target
+                small=min(target['bbox'][2]-target['bbox'][0],target['bbox'][3]-target['bbox'][1])<32
+                span=max(.05,3*(previous['bbox'][2]-previous['bbox'][0])/width)
+                ratio=target['area_ratio']/max(previous['area_ratio'],1e-9)
+                if small and (abs(target['center_x_normalized']-previous['center_x_normalized'])>span or not .25<=ratio<=4):self.streak=0
             if self.target is not None and .02<age<1.5:
                 residual=target['center_x_normalized']-(self.target['center_x_normalized']+self.velocity*age)
                 self.velocity=clamp(self.velocity+.12*residual/age,-1.5,1.5)
