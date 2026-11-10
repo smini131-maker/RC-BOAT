@@ -30,6 +30,13 @@ for width,height in [(1440,900),(1280,800),(1024,768)]:
         pos=b.mapTo(w,b.rect().topLeft())
         assert b.isVisible() and pos.y()+b.height()<height-30,(width,height,b.text(),pos,w.size())
         assert pos.x()+b.width()<=w.width(),(width,b.text(),pos,w.size())
+    assert w.route_plot.height()>=520
+    assert w.route_map_scroll.horizontalScrollBar().maximum()==0
+    if height<=800:
+        assert w.route_map_scroll.verticalScrollBar().maximum()>0
+        w.route_map_scroll.verticalScrollBar().setValue(w.route_map_scroll.verticalScrollBar().maximum())
+        app.processEvents()
+        assert w.multipath_start_button.isVisible()
     for index in range(w.route_detail_tabs.count()):
         w.route_detail_tabs.setCurrentIndex(index);app.processEvents()
         area=w.route_detail_tabs.currentWidget();area.verticalScrollBar().setValue(area.verticalScrollBar().maximum());app.processEvents()
@@ -55,6 +62,20 @@ assert (anchor-after).manhattanLength()<1e-6  # Cursor-anchored zoom returns to 
 wheel(Qt.ControlModifier);assert plot._pixels_per_meter>scale
 scale=plot._pixels_per_meter;assert wheel(angle=0,pixel=15).isAccepted() and plot._pixels_per_meter>scale
 scale=plot._pixels_per_meter;assert not wheel(angle=0).isAccepted() and plot._pixels_per_meter==scale
+scale=plot._pixels_per_meter
+assert not wheel(Qt.ShiftModifier).isAccepted() and plot._pixels_per_meter==scale
+# Routes panned beyond the map must not paint across the coordinate footer.
+from PySide6.QtGui import QImage,QPainter,QColor
+from rcboat_gui.widgets import RoutePlot
+isolated=RoutePlot();isolated.resize(660,520)
+isolated.update_data([dict(id='sample',name='경로 이름',waypoints=[dict(lat=35,lon=129),dict(lat=35.001,lon=129)])],{},'sample')
+isolated._auto_fit_pending=False;isolated._pixels_per_meter=2
+map_area=QRectF(isolated.rect()).adjusted(36,34,-26,-38)
+isolated._center_m=QPointF(0,(20-map_area.center().y())/2)
+image=QImage(isolated.size(),QImage.Format_ARGB32);image.fill(QColor('#000000'))
+isolated.render(image)
+assert image.pixelColor(int(map_area.center().x()),20).name()=='#0b1423'
+isolated.close()
 update_dashboard_quality(w,dict(gps=dict(hdop=1.1,satellites=9,last_fix_age_s=.2),gps_settings={'navigation_max_hdop':None}))
 assert '#38d996' in w.value_labels['hdop'].value_label.styleSheet()
 update_dashboard_quality(w,dict(gps=dict(hdop=4,satellites=6,last_fix_age_s=3),gps_settings={'navigation_max_hdop':5}))
@@ -127,5 +148,16 @@ assert p.camera_drawer.horizontalScrollBar().maximum()==0
 p.settings_toggle.setChecked(False);QTest.qWait(220);app.processEvents()
 assert not p.camera_drawer.isVisible()
 w.rc_graph.append(None,None);assert w.rc_graph.series[0][-1] is None
+locked=SSHWorker._normalize(dict(success=True,version='2.4.3',gateway_online=True,master_online=True,telemetry={
+    'safety':dict(mode='MANUAL',estop=True,actuator_locked=True,estop_reason='MAINTENANCE_CHECK',estop_time_utc='2026-11-10T10:00:00Z'),
+    'vision':dict(enabled=True,model_ready=True,camera_online=True,target={'acquired':True,'predicted':False})}))
+w.update_telemetry(locked);app.processEvents()
+assert w.estop_banner.isVisible() and '점검 중' in w.estop_banner_text.text() and '19:00:00 KST' in w.estop_banner_text.text()
+assert '비상정지' in w.balloon_panel.summary.text() and not w.balloon_panel.start_button.isEnabled()
+for index in range(w.tabs.count()):
+    w.tabs.setCurrentIndex(index);app.processEvents();assert w.estop_banner.isVisible()
+w._set_connected(False);assert w.estop_banner.isVisible() and '현재 출력 확인 불가' in w.estop_banner_text.text()
+assert not w.estop_banner_clear.isEnabled()
+locked['estop']=False;w.update_telemetry(locked);app.processEvents();assert not w.estop_banner.isVisible()
 w.close();app.processEvents()
 print('PASS: 34 existing button attributes; pinned group execution at 1440/1280/1024; route recording remains with map; no horizontal edit clipping; wheel routing; threshold hints/colours/no-data; camera edit ACK lifecycle')

@@ -49,7 +49,7 @@ from .widgets import MetricCard, RoutePlot, StatusCard, TelemetryGraph
 from rcboat_ros.control_config import CRUISE_MIN,CRUISE_MAX,CRUISE_DEFAULT,CRUISE_STEP,validate_cruise,validate_rc,THROTTLE_FORWARD_MAX
 
 
-APP_VERSION = "2.4.2"
+APP_VERSION = "2.4.3"
 
 
 from .ui_shell import STYLE
@@ -84,6 +84,7 @@ class MainWindow(QMainWindow):
         self.pending_route_start_request: str | None = None
         self.pending_multipath_start_request: str | None = None
         self.current_mode = "MANUAL"
+        self._last_estop=False
         self._mode_dirty = False
         self._syncing_mode = False
         self._pending_mode_request: str | None = None
@@ -887,6 +888,9 @@ class MainWindow(QMainWindow):
         worker.start()
 
     def _set_connected(self, connected: bool) -> None:
+        self.estop_banner_clear.setEnabled(connected)
+        if not connected and self._last_estop:
+            self.estop_banner_text.setText('■ 마지막 확인: 비상정지 작동 · 연결이 끊겨 현재 출력 확인 불가')
         if not connected:
             self._confirmed_cruise_pwm = None
             self._cruise_applied_stamp = 0.0
@@ -1107,7 +1111,7 @@ class MainWindow(QMainWindow):
         self._set_auto_speed_editor(CRUISE_DEFAULT, dirty=True)
 
     def clear_estop(self) -> None:
-        answer = QMessageBox.question(self, "비상정지 해제", "비상정지 잠금을 해제할까요? 해제 후에도 자동 안전 모드에서 조향 6000, 스로틀 6450을 유지합니다.")
+        answer = QMessageBox.question(self, "비상정지 해제", "비상정지 잠금을 해제할까요? 수동 모드에서 조종기 스로틀 중립 0.3초 확인 후 수동 조종이 가능합니다. 추적·항로 주행은 자동으로 재시작하지 않습니다.")
         if answer == QMessageBox.Yes:
             self.command("CLEAR_ESTOP")
 
@@ -1884,6 +1888,19 @@ class MainWindow(QMainWindow):
     @Slot(dict)
     def update_telemetry(self, state: dict) -> None:
         if self._disconnecting or self._closing:return
+        self._last_estop=state.get('estop') is True
+        self.estop_banner.setVisible(self._last_estop)
+        if self._last_estop:
+            reason={'MAINTENANCE_CHECK':'점검 중 출력 잠금','OPERATOR_ESTOP':'조작자 정지 요청'}.get(state.get('estop_reason'),'비상정지 요청')
+            at=state.get('estop_time_utc') or '시각 확인 전'
+            try:at=dt.datetime.fromisoformat(at.replace('Z','+00:00')).astimezone(dt.timezone(dt.timedelta(hours=9))).strftime('%H:%M:%S KST')
+            except ValueError:pass
+            self.estop_banner_text.setText(f'■ 비상정지 작동 중 · ESC·서보 출력 잠금\n{reason} · {at}')
+            self.safety_badge.setText('■ 비상정지 ON');self.safety_badge.setStyleSheet('background:#8b2034;color:white;font-weight:900;')
+        else:
+            self.safety_badge.setText('출력 잠금' if state.get('actuator_locked') else '출력 허용')
+            self.safety_badge.setStyleSheet('')
+        self.estop_button.setText('■ 비상정지 작동 중' if self._last_estop else '비상 정지')
         self.balloon_panel.update_state(state,self.host.text().strip())
         devices, gps, rc, pca = state.get("devices", {}), state.get("gps", {}), state.get("rc", {}), state.get("pca", {})
         mode = state.get("mode", "-")
@@ -2010,6 +2027,7 @@ class MainWindow(QMainWindow):
             "BOOT_SAFE": "부팅 안전",
             "BOOT_WAITING_RC": "부팅 후 조종기 입력 대기",
             "EMERGENCY_STOP": "비상정지",
+            "BALLOON_POP_ESTIMATED": "근접 풍선 소실 · 파열 추정 · 수동 전환",
             "REMOTE_HEARTBEAT_TIMEOUT": "PC 연결 신호 끊김",
             "GPS_NO_FIX": "GPS 위치 미수신",
             "GPS_STALE": "GPS 데이터 지연",

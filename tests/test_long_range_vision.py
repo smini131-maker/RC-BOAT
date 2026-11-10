@@ -90,6 +90,20 @@ class ProfileMigrationTests(unittest.TestCase):
             with self.assertRaises(ValueError):module.upgrade(p)
             self.assertEqual(p.read_bytes(),before)
 
+    def test_default_rate_upgrade_preserves_camera_and_later_user_edits(self):
+        spec=importlib.util.spec_from_file_location('vision_rate_upgrade',ROOT/'deployment/jetson/upgrade_vision_profile.py')
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'vision.json';before=dict(camera_type='csi',csi_sensor_id=1,width=1280,height=720,inference_hz=5.,preview_hz=5.,preview_width=640,preview_jpeg_quality=55,long_range_enabled=False)
+            original=json.dumps(before).encode();path.write_bytes(original)
+            self.assertTrue(module.upgrade_rates(path));after=json.loads(path.read_text())
+            self.assertEqual((after['inference_hz'],after['preview_hz']),(12.,12.))
+            self.assertEqual((after['preview_width'],after['preview_jpeg_quality']),(480,50))
+            self.assertEqual((after['width'],after['height'],after['csi_sensor_id']),(1280,720,1));self.assertFalse(after['long_range_enabled'])
+            self.assertEqual(next(Path(folder).glob('*.before_v2.4.3_*')).read_bytes(),original)
+            after['preview_hz']=3;path.write_text(json.dumps(after));self.assertFalse(module.upgrade_rates(path))
+            self.assertEqual(json.loads(path.read_text())['preview_hz'],3)
+
     def test_field_capture_refuses_active_camera_or_unlocked_outputs(self):
         spec=importlib.util.spec_from_file_location('field_capture',ROOT/'deployment/jetson/capture_range_test.py')
         module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)

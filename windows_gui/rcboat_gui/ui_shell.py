@@ -46,6 +46,7 @@ QCheckBox {spacing:6px;} QToolTip {background:#17283b;color:#edf5ff;border:1px s
 
 def scroll_page(page):
     area=QScrollArea();area.setWidgetResizable(True);area.setWidget(page)
+    page.setAutoFillBackground(False);area.viewport().setAutoFillBackground(False)
     area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded);area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
     return area
 
@@ -66,7 +67,14 @@ def build_shell(w):
     sub=QLabel('실시간 항로 · GNSS · 핑크 풍선 추적   /   v'+version);sub.setObjectName('appSubtitle');titles.addWidget(sub)
     header.addLayout(titles);header.addStretch()
     w.simulation_badge=QLabel('SIMULATION');w.simulation_badge.setObjectName('simulationBadge');w.simulation_badge.hide();header.addWidget(w.simulation_badge)
-    safety=QLabel('중립 6450  ·  조향 중앙 6000');safety.setObjectName('safetyBadge');header.addWidget(safety);outer.addLayout(header)
+    safety=QLabel('출력 상태 확인 전');safety.setObjectName('safetyBadge');w.safety_badge=safety;header.addWidget(safety);outer.addLayout(header)
+    w.estop_banner=QFrame();w.estop_banner.setObjectName('estopBanner')
+    w.estop_banner.setStyleSheet('QFrame#estopBanner {background:#8b2034;border:2px solid #ff7c89;border-radius:8px;}')
+    emergency_row=QHBoxLayout(w.estop_banner);emergency_row.setContentsMargins(12,9,12,9)
+    w.estop_banner_text=QLabel('■ 비상정지 작동 중 · ESC·서보 출력 잠금');w.estop_banner_text.setWordWrap(True)
+    w.estop_banner_text.setStyleSheet('color:#ffffff;font-size:12pt;font-weight:800;');emergency_row.addWidget(w.estop_banner_text,1)
+    w.estop_banner_clear=QPushButton('비상정지 해제');w.estop_banner_clear.clicked.connect(w.clear_estop);emergency_row.addWidget(w.estop_banner_clear)
+    w.estop_banner.hide();outer.addWidget(w.estop_banner)
     connect=QGroupBox('장치 연결');grid=QGridLayout(connect);grid.setContentsMargins(10,8,10,8)
     w.host=QLineEdit('10.123.65.215');w.port=QSpinBox();w.port.setRange(1,65535);w.port.setValue(22);w.port.setMaximumWidth(85)
     w.username=QLineEdit('jetson');w.password=QLineEdit();w.password.setEchoMode(QLineEdit.Password)
@@ -123,7 +131,7 @@ def build_dashboard(w):
     row=QHBoxLayout();title=QLabel('LIVE MISSION');title.setObjectName('eyebrow');row.addWidget(title);row.addStretch()
     w.map_background=QCheckBox('거리 지도 배경');w.map_background.setToolTip('OpenStreetMap 온라인 타일 · 네트워크가 없으면 좌표 지도로 계속 표시')
     fit=QPushButton('전체 항로');row.addWidget(w.map_background);row.addWidget(fit);layout.addLayout(row)
-    split=QSplitter(Qt.Horizontal);w.live_map=RoutePlot();split.addWidget(w.live_map)
+    split=QSplitter(Qt.Horizontal);split.setChildrenCollapsible(False);w.live_map=RoutePlot();split.addWidget(w.live_map)
     w.map_background.toggled.connect(w.live_map.set_basemap_enabled);fit.clicked.connect(w.live_map.fit_to_data)
     panel=QWidget();panel.setMinimumWidth(300);right=QVBoxLayout(panel);right.setContentsMargins(6,0,0,0)
     details=QTabWidget();w.dashboard_detail_tabs=details
@@ -134,7 +142,7 @@ def build_dashboard(w):
         card=StatusCard(title);w.value_labels[key]=card
         target,index=(values,i) if i<6 else (extra,i-6);target.addWidget(card,index//2,index%2)
     details.addTab(scroll_page(primary),'운항');details.addTab(scroll_page(secondary),'GPS · RC 입력')
-    right.addWidget(details);split.addWidget(panel);split.setSizes([850,330]);layout.addWidget(split,1)
+    right.addWidget(details);split.addWidget(panel);split.setSizes([850,330]);w.dashboard_map_scroll=scroll_page(split);layout.addWidget(w.dashboard_map_scroll,1)
     graphs=QTabWidget();w.rc_graph=TelemetryGraph('RC 입력 (조향 / 스로틀, µs)',1000,2100,('#66d7ed','#f2c16d'))
     w.pwm_graph=TelemetryGraph('최종 출력 (조향 / 스로틀)',4800,7500,('#43d6b4','#f08eaa'))
     graphs.addTab(w.rc_graph,'RC 입력');graphs.addTab(w.pwm_graph,'PCA 출력');graphs.setMaximumHeight(200);w.dashboard_charts=graphs;w.chart_toggle=QPushButton('출력 차트 보기');row.addWidget(w.chart_toggle);w.chart_toggle.setCheckable(True);w.chart_toggle.toggled.connect(graphs.setVisible);graphs.hide();layout.addWidget(graphs)
@@ -177,12 +185,12 @@ def build_route_workspace(w,operation,record,layers,multipath,settings,reload_bu
     w.route_detail_tabs=grouped_pages([('편집',edit),('항로 기록',record_panel),('표시·설정',advanced)])
     w.route_detail_tabs.setMinimumWidth(300)
     map_page=QWidget();mp=QVBoxLayout(map_page);mp.setContentsMargins(0,0,0,0);bar=QHBoxLayout()
-    hint=QLabel('드래그: 이동 · 휠: 확대/축소');hint.setObjectName('sectionHint');hint.setWordWrap(True);hint.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred);bar.addWidget(hint);bar.addStretch()
+    hint=QLabel('휠: 확대/축소 · Shift+휠: 화면 스크롤');hint.setObjectName('sectionHint');hint.setWordWrap(True);hint.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred);bar.addWidget(hint,1)
     background=QCheckBox('지도 배경');background.toggled.connect(w.route_plot.set_basemap_enabled);bar.addWidget(background)
     for label,factor in [('+',1.25),('−',.8)]:
         button=QPushButton(label);button.setMaximumWidth(35);button.clicked.connect(lambda checked=False,f=factor:w.route_plot.zoom_by(f));bar.addWidget(button)
     fit=QPushButton('전체 항로');fit.clicked.connect(w.route_plot_fit);bar.addWidget(fit);mp.addLayout(bar);mp.addWidget(w.route_plot,1)
-    split=QSplitter(Qt.Horizontal);split.setChildrenCollapsible(False);split.addWidget(map_page);split.addWidget(w.route_detail_tabs);split.setSizes([800,350]);layout.addWidget(split,1)
+    split=QSplitter(Qt.Horizontal);split.setChildrenCollapsible(False);split.addWidget(map_page);split.addWidget(w.route_detail_tabs);split.setSizes([800,350]);w.route_map_scroll=scroll_page(split);layout.addWidget(w.route_map_scroll,1)
     # Old group shells no longer own any visible controls. Their buttons were reparented above.
     operation.hide();multipath.hide();record.hide()
     return page

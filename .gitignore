@@ -50,6 +50,7 @@ Desktop.ini
 /training/downloads/
 /training/runs/
 *.engine
+*.engine.tmp
 *.engine.json
 *.pt
 /yolo11n.pt

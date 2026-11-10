@@ -45,7 +45,7 @@ def prepare(target):
     print('Isolated vision environment: ' + str(target), flush=True)
 
 
-def discover_bindings():
+def discover_bindings(user_gpu=False):
     # Use the base interpreter without PYTHONPATH or ~/.local. Finding specs does not
     # import cv2/NumPy, so a broken host NumPy ABI cannot hide the camera installation.
     names = BINDINGS + CUDA_HELPERS
@@ -57,7 +57,15 @@ for name in json.loads(sys.argv[1]):
         found[name]={'origin':spec.origin,'package':list(spec.submodule_search_locations or [])}
 print(json.dumps(found))
 '''
-    return json.loads(subprocess.check_output([sys.executable, '-I', '-c', code, json.dumps(names)], text=True))
+    found=json.loads(subprocess.check_output([sys.executable, '-I', '-c', code, json.dumps(names)], text=True))
+    if user_gpu and 'tensorrt' not in found:
+        # Locate this one native binding without adding ~/.local to sys.path.
+        probe='''import importlib.machinery,json,site
+spec=importlib.machinery.PathFinder.find_spec('tensorrt',[site.getusersitepackages()])
+print(json.dumps({'tensorrt':{'origin':spec.origin,'package':list(spec.submodule_search_locations or [])}} if spec and spec.origin else {}))
+'''
+        found.update(json.loads(subprocess.check_output([sys.executable,'-I','-c',probe],text=True)))
+    return found
 
 
 def binding_plan(found):
@@ -67,7 +75,7 @@ def binding_plan(found):
     return {name: found[name] for name in names if name in found}
 
 
-def link_bindings(target, found):
+def link_bindings(target, found, gpu_only=False):
     target = Path(target).resolve()
     py = target / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python3')
     purelib = Path(subprocess.check_output([str(py), '-I', '-c',
@@ -75,7 +83,8 @@ def link_bindings(target, found):
     if not inside(purelib, target):
         raise RuntimeError('Vision site-packages is outside the virtual environment')
     plan = binding_plan(found)
-    if 'cv2' not in plan:
+    if gpu_only:plan={name:spec for name,spec in plan.items() if name=='tensorrt'}
+    if not gpu_only and 'cv2' not in plan:
         raise RuntimeError('System OpenCV not found. Install python3-opencv; do not install a pip OpenCV wheel.')
     linked = {}
     for name, spec in plan.items():
@@ -95,7 +104,9 @@ def link_bindings(target, found):
             continue
         dest.symlink_to(source, target_is_directory=bool(spec['package']))
         linked[name] = str(source)
-    (target / 'rcboat_bindings.json').write_text(json.dumps(linked, indent=2) + '\n', encoding='utf-8')
+    record=target/'rcboat_bindings.json'
+    previous=json.loads(record.read_text()) if gpu_only and record.is_file() else {}
+    record.write_text(json.dumps(dict(previous,**linked), indent=2) + '\n', encoding='utf-8')
     print('Shared host bindings (no global package directory): ' + ', '.join(linked), flush=True)
 
 
@@ -145,6 +156,7 @@ def main():
     modes = parser.add_mutually_exclusive_group(required=True)
     modes.add_argument('--prepare', type=Path)
     modes.add_argument('--bridge', type=Path)
+    modes.add_argument('--gpu-bridge', type=Path)
     modes.add_argument('--check', action='store_true')
     parser.add_argument('--ros', action='store_true')
     args = parser.parse_args()
@@ -154,6 +166,8 @@ def main():
         prepare(args.prepare)
     elif args.bridge:
         link_bindings(args.bridge, discover_bindings())
+    elif args.gpu_bridge:
+        link_bindings(args.gpu_bridge,discover_bindings(user_gpu=True),gpu_only=True)
     else:
         check(args.ros)
 

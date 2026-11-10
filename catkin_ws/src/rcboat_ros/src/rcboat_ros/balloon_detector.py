@@ -19,8 +19,8 @@ def decode_predictions(prediction,shape,size,scale,padding,confidence,nms,cv2):
     if rows.ndim==2 and rows.shape[0]==5:rows=rows.T
     if rows.ndim!=2 or rows.shape[1]!=5:raise ValueError('YOLOv8 single class [1,5,N] expected')
     height,width=shape[:2];boxes=[];scores=[]
-    for row in rows[np.isfinite(rows).all(axis=1)]:
-        if row[4]<confidence or row[2]<=0 or row[3]<=0:continue
+    candidates=rows[np.isfinite(rows).all(axis=1)&(rows[:,4]>=confidence)&(rows[:,2]>0)&(rows[:,3]>0)]
+    for row in candidates:
         x,y,w,h=[float(v) for v in row[:4]]
         x1=max(0,min(width,(x-w/2-padding[0])/scale));x2=max(0,min(width,(x+w/2-padding[0])/scale))
         y1=max(0,min(height,(y-h/2-padding[1])/scale));y2=max(0,min(height,(y+h/2-padding[1])/scale))
@@ -62,40 +62,49 @@ def small_pink_shape_supported(frame,bbox,config,cv2):
 class TensorRTBackend:
     """TensorRT 8 binding API (JetPack 4/5), optional and target-device generated."""
     def __init__(self,path,onnx_hash):
-        self.device_context=None;self.buffers=[]
+        self.buffers=[];self.stream=None
         try:self.initialize(path,onnx_hash)
         except Exception:
             self.close();raise
     def initialize(self,path,onnx_hash):
         import tensorrt as trt
-        import pycuda.driver as cuda
+        from .cuda_runtime import CudaRuntime
         engine_path=Path(path).with_suffix('.engine');manifest=engine_path.with_suffix('.engine.json')
         meta=json.loads(manifest.read_text())
         if meta.get('onnx_sha256')!=onnx_hash or meta.get('engine_sha256')!=hashlib.sha256(engine_path.read_bytes()).hexdigest():
             raise ValueError('TensorRT engine does not match this model')
-        cuda.init();self.cuda=cuda;self.device_context=cuda.Device(0).make_context()
-        self.runtime=trt.Runtime(trt.Logger(trt.Logger.WARNING));self.engine=self.runtime.deserialize_cuda_engine(engine_path.read_bytes())
+        self.cuda=CudaRuntime()
+        self.logger=trt.Logger(trt.Logger.WARNING);self.runtime=trt.Runtime(self.logger);self.engine=self.runtime.deserialize_cuda_engine(engine_path.read_bytes())
         if self.engine is None:raise ValueError('engine incompatible with this TensorRT/device')
         if not hasattr(self.engine,'num_bindings'):raise ValueError('TensorRT 8 engine API required; use ONNX fallback')
-        self.context=self.engine.create_execution_context();self.stream=cuda.Stream();self.bindings=[];self.buffers=[]
+        self.context=self.engine.create_execution_context();self.stream=self.cuda.stream();self.bindings=[];self.buffers=[]
+        if self.engine.num_bindings!=2:raise ValueError('one static image input and one YOLO output required')
         for i in range(self.engine.num_bindings):
             shape=tuple(self.context.get_binding_shape(i))
             if any(s<=0 for s in shape):raise ValueError('static engine required')
-            host=cuda.pagelocked_empty(int(np.prod(shape)),trt.nptype(self.engine.get_binding_dtype(i)))
-            dev=cuda.mem_alloc(host.nbytes);self.bindings.append(int(dev));self.buffers.append((host,dev,shape,self.engine.binding_is_input(i)))
+            host,dev,pinned=self.cuda.allocate(shape,trt.nptype(self.engine.get_binding_dtype(i)))
+            self.bindings.append(dev.value);self.buffers.append((host,dev,shape,self.engine.binding_is_input(i),pinned))
+        if sum(item[3] for item in self.buffers)!=1:raise ValueError('single input/output engine required')
     def run(self,blob):
-        for host,dev,shape,is_input in self.buffers:
-            if is_input:np.copyto(host,blob.astype(host.dtype).reshape(-1));self.cuda.memcpy_htod_async(dev,host,self.stream)
-        if not self.context.execute_async_v2(self.bindings,self.stream.handle):raise RuntimeError('TensorRT inference failed')
-        for host,dev,shape,is_input in self.buffers:
-            if not is_input:self.cuda.memcpy_dtoh_async(host,dev,self.stream)
-        self.stream.synchronize()
-        return next(host.reshape(shape).copy() for host,dev,shape,is_input in self.buffers if not is_input)
+        for host,dev,shape,is_input,pinned in self.buffers:
+            if is_input:
+                if tuple(blob.shape)!=shape:raise ValueError('TensorRT input shape mismatch')
+                np.copyto(host,blob.reshape(-1),casting='same_kind')
+                self.cuda.copy(dev,pinned,host.nbytes,1,self.stream)
+        if not self.context.execute_async_v2(self.bindings,self.stream.value):raise RuntimeError('TensorRT inference failed')
+        for host,dev,shape,is_input,pinned in self.buffers:
+            if not is_input:self.cuda.copy(pinned,dev,host.nbytes,2,self.stream)
+        self.cuda.call('cudaStreamSynchronize',self.stream)
+        return next(host.reshape(shape).copy() for host,dev,shape,is_input,pinned in self.buffers if not is_input)
     def close(self):
-        if getattr(self,'device_context',None):
-            for host,dev,shape,is_input in self.buffers:dev.free()
-            self.buffers=[];self.stream=None;self.context=None;self.engine=None;self.runtime=None
-            self.device_context.pop();self.device_context.detach();self.device_context=None
+        cuda=getattr(self,'cuda',None)
+        if cuda:
+            if self.stream:cuda.call('cudaStreamSynchronize',self.stream)
+            for host,dev,shape,is_input,pinned in self.buffers:
+                cuda.call('cudaFree',dev);cuda.call('cudaFreeHost',pinned)
+            self.buffers=[]
+            if self.stream:cuda.call('cudaStreamDestroy',self.stream);self.stream=None
+        self.context=None;self.engine=None;self.runtime=None;self.logger=None
 
 class BalloonDetector:
     def __init__(self,config):

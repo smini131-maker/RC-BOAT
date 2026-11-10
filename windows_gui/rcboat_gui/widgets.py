@@ -161,10 +161,11 @@ class RoutePlot(QWidget):
         self._last_mouse = QPointF()
         from .map_tiles import TileLayer
         self.tile_layer=TileLayer(self)
-        self.setMinimumHeight(240)
+        self.setMinimumHeight(520)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setMouseTracking(True)
         self.setToolTip(
-            "마우스 왼쪽 드래그: 지도 이동 · 휠: 확대/축소 · 더블클릭: 전체 경로 맞춤"
+            "드래그: 지도 이동 · 휠: 확대/축소 · Shift+휠: 화면 스크롤 · 더블클릭: 전체 항로"
         )
 
     def set_basemap_enabled(self,enabled):
@@ -326,6 +327,9 @@ class RoutePlot(QWidget):
             )
             return
 
+        # Map geometry must never paint into the toolbar or footer after panning.
+        painter.save()
+        painter.setClipRect(area)
         # Metric grid. Both axes use exactly the same pixels-per-metre scale.
         grid_m = self._nice_scale_distance(80.0)
         grid_px = grid_m * self._pixels_per_meter
@@ -370,7 +374,8 @@ class RoutePlot(QWidget):
                 painter.drawEllipse(point, radius, radius)
             painter.setPen(QColor("#dbe8fb"))
             painter.setFont(QFont("Malgun Gothic", 9, QFont.DemiBold))
-            painter.drawText(screen_points[0] + QPointF(8, -8), str(route.get("name") or route_id))
+            if area.contains(screen_points[0]):
+                self._draw_map_label(painter, area, screen_points[0], str(route.get("name") or route_id))
 
         if self.position:
             world = self._to_local_m(*self.position, origin)
@@ -379,7 +384,10 @@ class RoutePlot(QWidget):
             painter.setBrush(QColor("#ff6474"))
             painter.drawEllipse(point, 7, 7)
             painter.setPen(QColor("#ffffff"))
-            painter.drawText(point + QPointF(11, -9), "현재 보트")
+            if area.contains(point):
+                self._draw_map_label(painter, area, point, "현재 보트")
+
+        painter.restore()
 
         painter.setPen(QColor("#7f94b4"))
         painter.setFont(QFont("Malgun Gothic", 8))
@@ -410,10 +418,17 @@ class RoutePlot(QWidget):
 
         painter.setPen(QColor("#6f86a8"))
         painter.setFont(QFont("Malgun Gothic", 8))
-        painter.drawText(
-            QPointF(area.left(), self.rect().bottom() - 10),
-            "동일 축척 미터 좌표 · 드래그 이동 · 휠 확대/축소 · 더블클릭 전체 맞춤",
-        )
+        footer = "드래그 이동 · 휠 확대/축소 · Shift+휠 화면 스크롤"
+        painter.drawText(QPointF(area.left(), self.rect().bottom() - 10),
+                         painter.fontMetrics().elidedText(footer, Qt.ElideRight, int(area.width())))
+
+    @staticmethod
+    def _draw_map_label(painter, area, point, text):
+        metrics = painter.fontMetrics()
+        text = metrics.elidedText(text, Qt.ElideRight, max(20, int(min(240, area.width() - 16))))
+        x = max(area.left() + 4, min(point.x() + 10, area.right() - metrics.horizontalAdvance(text) - 4))
+        y = max(area.top() + metrics.ascent() + 4, min(point.y() - 9, area.bottom() - 4))
+        painter.drawText(QPointF(x, y), text)
 
     def zoom_by(self,factor):
         self._pixels_per_meter=max(.02,min(40,self._pixels_per_meter*factor));self._auto_fit_pending=False;self.update()
@@ -452,6 +467,10 @@ class RoutePlot(QWidget):
         super().mouseReleaseEvent(event)
 
     def wheelEvent(self, event) -> None:
+        if event.modifiers() & Qt.ShiftModifier:
+            # Let the surrounding scroll area move the page, without zooming.
+            event.ignore()
+            return
         delta = event.angleDelta().y() or event.pixelDelta().y()
         if delta == 0:
             event.ignore()

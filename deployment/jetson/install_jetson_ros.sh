@@ -30,6 +30,7 @@ set -u
 VISION_PY="$HOME/.rcboat/vision-venv/bin/python3"
 [[ -x "$VISION_PY" ]] || { echo 'Run bash deployment/jetson/install_vision_dependencies.sh first'; exit 5; }
 PYTHONNOUSERSITE=1 "$VISION_PY" "$ROOT/deployment/jetson/vision_environment.py" --check --ros
+bash "$ROOT/deployment/jetson/enable_vision_acceleration.sh"
 sudo cp systemd/rcboat_ros.service /etc/systemd/system/rcboat_ros.service
 sudo systemctl daemon-reload
 sudo systemctl reset-failed rcboat_ros.service
@@ -40,4 +41,4 @@ sudo systemctl is-active --quiet rcboat_ros.service || {
   exit 4
 }
 python3 deployment/jetson/verify_release.py --timeout 45
-echo 'RCBoat ROS Noetic v2.4.2 source AND running gateway verified.'
+echo 'RCBoat ROS Noetic v2.4.3 source AND running gateway verified.'

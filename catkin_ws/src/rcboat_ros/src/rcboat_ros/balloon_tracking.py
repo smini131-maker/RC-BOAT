@@ -10,11 +10,11 @@ DEFAULTS={
     'model_path':'~/rcboat_ros_ws/models/balloon_yolov8n.onnx',
     'model_manifest':'~/rcboat_ros_ws/models/model_manifest.json','backend':'auto',
     'confidence':.35,'nms_iou':.45,'pink_min_fraction':.12,'pink_hue_low':140,'pink_hue_high':179,
-    'pink_min_saturation':45,'pink_min_value':55,'inference_hz':5.,'max_frame_age_s':1.5,
+    'pink_min_saturation':45,'pink_min_value':55,'inference_hz':12.,'max_frame_age_s':1.5,
     'acquire_frames':3,'steering_gain':.85,'steering_deadband':.04,'steering_right_sign':-1,
     'predict_s':2.0,'search_timeout_s':15.0,'search_period_s':5.0,'search_turn_strength':.8,
-    'camera_hfov_deg':62.0,'camera_yaw_deg':0.0,'preview_port':8766,'preview_hz':5.,
-    'preview_width':640,'preview_jpeg_quality':55,
+    'camera_hfov_deg':62.0,'camera_yaw_deg':0.0,'preview_port':8766,'preview_hz':12.,
+    'preview_width':480,'preview_jpeg_quality':50,
     'long_range_enabled':True,'roi_min_size':96,'roi_context_scale':4.0,
     'roi_max_candidates':12,'roi_full_interval':4,'min_source_span_px':4.0,
     'max_target_distance_m':200.0,
@@ -32,11 +32,11 @@ def validate_config(values):
     limits={'width':(160,1920),'height':(120,1080),'camera_fps':(1,60),'input_size':(160,640),
         'confidence':(.05,.99),'nms_iou':(.05,.9),'pink_min_fraction':(.01,.9),
         'pink_hue_low':(0,179),'pink_hue_high':(0,179),'pink_min_saturation':(0,255),'pink_min_value':(0,255),
-        'inference_hz':(.5,10),'max_frame_age_s':(.3,2),'acquire_frames':(1,12),
+        'inference_hz':(.5,15),'max_frame_age_s':(.3,2),'acquire_frames':(1,12),
         'steering_gain':(.05,1.5),'steering_deadband':(0,.3),'predict_s':(.2,4),
         'search_timeout_s':(3,30),'search_period_s':(2,12),'search_turn_strength':(.2,1),
         'camera_hfov_deg':(20,150),'camera_yaw_deg':(-180,180),'csi_sensor_id':(0,3),
-        'preview_port':(1024,65535),'preview_hz':(.5,5),'preview_width':(160,640),'preview_jpeg_quality':(30,80),
+        'preview_port':(1024,65535),'preview_hz':(.5,15),'preview_width':(160,640),'preview_jpeg_quality':(30,80),
         'roi_min_size':(64,320),'roi_context_scale':(2,8),'roi_max_candidates':(1,24),
         'roi_full_interval':(2,12),'min_source_span_px':(2,16),'max_target_distance_m':(100,300)}
     integers={'width','height','camera_fps','input_size','acquire_frames','pink_hue_low','pink_hue_high',
@@ -102,7 +102,7 @@ class TargetTracker:
     def __init__(self):self.reset()
     def reset(self):
         self.target=None;self.streak=0;self.observed_at=None;self.velocity=0.;self.scale_velocity=0.;self.side=1
-        self.estimator=BearingEstimator();self.acquired=False;self.was_close=False
+        self.estimator=BearingEstimator();self.acquired=False;self.was_close=False;self.near_streak=0;self.absent_frames=0
     def update(self,detections,width,height,now,config,gps=None):
         candidates=[]
         for item in detections:
@@ -137,12 +137,22 @@ class TargetTracker:
             else:self.velocity=0;self.scale_velocity=0
             if age>1.5:self.streak=0
             self.target=target;self.observed_at=now;self.streak+=1;self.acquired=self.acquired or self.streak>=config['acquire_frames']
+            self.absent_frames=0
             self.side=1 if target['center_x_normalized']>=.03 else -1 if target['center_x_normalized']<=-.03 else self.side
             self.was_close=self.was_close or target['area_ratio']>.12 or target['box_height_ratio']>.55
+            nearly_touching=(target['box_height_ratio']>=.80 or target['area_ratio']>=.40) and abs(target['center_x_normalized'])<.45
+            self.near_streak=self.near_streak+1 if nearly_touching else 0
             self.estimator.observe(target,gps or {},now,config)
             return dict(target,phase='TRACKING' if self.acquired else 'ACQUIRING',acquired=self.acquired,
                 predicted=False,lost_age_s=0.,velocity_x=self.velocity,world_estimate=self.estimator.relative(gps or {},now))
         if self.target is None or not self.acquired:return dict(phase='NO_TARGET',acquired=False,predicted=False,lost_age_s=None)
+        self.absent_frames+=1
+        if self.near_streak>=2:
+            completed=age>=.35 and self.absent_frames>=3
+            return dict(self.target,phase='POP_ESTIMATED' if completed else 'POP_PENDING',acquired=True,
+                predicted=True,lost_age_s=age,motion_hold=True,
+                completion_reason='BALLOON_POP_ESTIMATED' if completed else None,
+                completion_evidence='centered_near_target_then_absent',world_estimate=self.estimator.relative(gps or {},now))
         if age>=config['search_timeout_s']:return dict(self.target,phase='LOST_TIMEOUT',acquired=False,predicted=True,lost_age_s=age)
         target=dict(self.target);world=self.estimator.relative(gps or {},now)
         predicted=clamp(target['center_x_normalized']+self.velocity*min(age,config['predict_s']),-1.5,1.5)
@@ -163,6 +173,10 @@ class TrackingController:
         out=dict(valid=False,desired_steering_pwm=SAFE_STEERING,desired_throttle_pwm=SAFE_THROTTLE,
             monotonic=frame_time,reason=target.get('phase','NO_TARGET'),phase=target.get('phase','NO_TARGET'),
             target_pwm=cruise,tracking_session=session,predicted=bool(target.get('predicted')))
+        if fresh(frame_time,config['max_frame_age_s'],now) and target.get('motion_hold'):
+            self.ramp.reset()
+            out.update(valid=True,completion_reason=target.get('completion_reason'),completion_evidence=target.get('completion_evidence'))
+            return out
         if not fresh(frame_time,config['max_frame_age_s'],now) or not target.get('acquired'):
             self.ramp.reset();return out
         if self.session!=session:self.ramp.reset();self.session=session

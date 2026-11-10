@@ -4,6 +4,7 @@ import json
 import time
 import threading
 import math
+import datetime as dt
 import rospy
 from std_msgs.msg import String
 from rcboat_ros.msg import ControlCommand
@@ -20,7 +21,7 @@ class Supervisor:
     def __init__(self):
         self.rc_calibration=load_rc(rospy.get_param)
         self.output_calibration=load_output(rospy.get_param)
-        self.mode='AUTO_SAFE';self.armed=False;self.estop=False
+        self.mode='AUTO_SAFE';self.armed=False;self.estop=False;self.estop_reason=None;self.estop_time_utc=None;self.estop_origin=None
         self.vision={};self.vision_desired={};self.balloon_gps_gap_since=None
         self.lock=threading.RLock();self.reason='';self.link={};self.actuator={};self.propulsion={};self.decision_snapshot={}
         self.progress=ProgressMonitor();self.mode_since=time.monotonic()
@@ -72,8 +73,11 @@ class Supervisor:
             args=json.loads(req.arguments_json or '{}')
             if not isinstance(args,dict):raise ValueError('request must be JSON object')
             if req.action=='estop':
+                self.estop_reason=args.get('reason') if args.get('reason') in ('OPERATOR_ESTOP','MAINTENANCE_CHECK') else 'OPERATOR_ESTOP'
+                self.estop_origin=args.get('origin') if args.get('origin') in ('desktop','mobile','maintenance') else 'gateway'
+                self.estop_time_utc=dt.datetime.now(dt.timezone.utc).isoformat(timespec='seconds').replace('+00:00','Z')
                 self.estop=True;self._manual('EMERGENCY_STOP')
-                self.events.publish(pack(type='ESTOP',at=time.time()))
+                self.events.publish(pack(type='ESTOP',at=time.time(),reason=self.estop_reason,origin=self.estop_origin,utc=self.estop_time_utc))
             elif req.action=='reset_estop':
                 # Requires physical-safe mode; reset never restores navigation automatically.
                 if self.mode not in ('MANUAL','AUTO_SAFE'):raise ValueError('select MANUAL first')
@@ -268,6 +272,9 @@ class Supervisor:
         return ''
 
     def _balloon_fault(self,now,gps_ok,delay):
+        if (self.vision_desired.get('completion_reason')=='BALLOON_POP_ESTIMATED' and
+                safe_balloon_output(self.vision,self.vision_desired,now,self.mode_since)==(SAFE_STEERING,SAFE_THROTTLE)):
+            return 'BALLOON_POP_ESTIMATED'
         if not gps_ok:
             if not delay:return 'GPS_INVALID_OR_STALE'
             if self.balloon_gps_gap_since is None:
@@ -345,7 +352,8 @@ class Supervisor:
                 msg.header.stamp=rospy.Time.now();msg.mode=self.mode;msg.source=source
                 msg.steering_pwm=int(s);msg.throttle_pwm=int(t);msg.actuator_locked=lock
                 self.cmd.publish(msg)
-                self.state.publish(pack(software_version="2.4.2",mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
+                self.state.publish(pack(software_version="2.4.3",mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
+                                        estop_reason=self.estop_reason,estop_time_utc=self.estop_time_utc,estop_origin=self.estop_origin,
                                         mode_since_monotonic=self.mode_since,
                                         ground_test_actuation_enabled=self.ground_test_actuation_enabled,
                                         gps_grace_active=self.ground_gps_gap_since is not None or self.balloon_gps_gap_since is not None,

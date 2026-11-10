@@ -17,7 +17,7 @@ from PySide6.QtCore import QThread, Signal
 from rcboat_ros.control_config import validate_cruise,output_in_range
 
 
-GUI_VERSION = "2.4.2"
+GUI_VERSION = "2.4.3"
 
 REMOTE_BRIDGE = r'''p=/home/jetson/rcboat_ros_ws/deployment/jetson/bridge_client.py
 [ -f "$p" ] && exec python3 "$p"
@@ -195,6 +195,7 @@ class SSHWorker(QThread):
     def _translate(request: dict[str, Any]) -> dict[str, Any]:
         command = str(request["command"]).upper()
         kwargs = {k: v for k, v in request.items() if k not in {"command", "request_id"}}
+        if command=='EMERGENCY_STOP':kwargs.update(origin='desktop',reason='OPERATOR_ESTOP')
         if command=='REMOTE_CONTROL' and not output_in_range(kwargs.get('steering_pwm'),kwargs.get('throttle_pwm')):
             raise ValueError('remote PWM outside calibration')
         direct = {
@@ -322,7 +323,7 @@ class SSHWorker(QThread):
         }
         logger_state = str(ground.get("state") or ("recording" if ground.get("active") else "idle"))
         return {
-            "type": "telemetry", "software_version": response.get("version", "2.4.2"),
+            "type": "telemetry", "software_version": response.get("version", "2.4.3"),
             "backend": {"name": str(response.get("backend") or "ROS Noetic"),
                         "ready": bool(response.get("gateway_online", True)), "node_count": len(nodes),
                         "master_online": bool(response.get("master_online")),
@@ -339,6 +340,8 @@ class SSHWorker(QThread):
                 "MANUAL_ACTIVE" if mode == "MANUAL" else ros_mode),
             "navigation_active": ros_mode == "NAVIGATION" and bool(safety.get("armed")) and not safety.get('gps_grace_active'),
             "estop": bool(safety.get("estop")), "failsafe_reason": safety.get("reason") or "",
+            "estop_reason":safety.get("estop_reason"),"estop_time_utc":safety.get("estop_time_utc"),"estop_origin":safety.get("estop_origin"),
+            "actuator_locked":bool(safety.get("actuator_locked",True)),
             "manual_waiting_for_neutral": bool(safety.get("manual_rearm_pending")),
             "auto_cruise_pwm": nav.get("auto_cruise_pwm") if nav.get('fresh',False) else None,
             "ramp_throttle_pwm": nav.get('ramp_throttle_pwm') if nav.get('fresh',False) else None,
@@ -671,7 +674,7 @@ class SSHWorker(QThread):
                         self._backend_error = ""
                     except Exception as exc:
                         message = str(exc)
-                        offline = {"success": True, "version": "2.4.2", "backend": "ROS Noetic",
+                        offline = {"success": True, "version": "2.4.3", "backend": "ROS Noetic",
                                    "master_online": False, "gateway_online": False, "telemetry": {}, "nodes": []}
                         self.telemetry.emit(self._normalize(offline, self._ssh_confirmed))
                         if message != self._backend_error or now - self._backend_error_at >= 15.0:

@@ -73,7 +73,7 @@ public class MainActivity extends Activity {
         web.addJavascriptInterface(new AppBridge(),"Boat");
         web.loadUrl("https://appassets.androidplatform.net/assets/index.html");
         poll.scheduleWithFixedDelay(this::pollStatus,300,1000,TimeUnit.MILLISECONDS);
-        frames.scheduleWithFixedDelay(this::previewTick,300,100,TimeUnit.MILLISECONDS);
+        frames.scheduleWithFixedDelay(this::previewTick,300,10,TimeUnit.MILLISECONDS);
         lease.scheduleWithFixedDelay(this::heartbeat,100,250,TimeUnit.MILLISECONDS);
         health.scheduleWithFixedDelay(this::checkSsh,500,2500,TimeUnit.MILLISECONDS);
         importProfile(getIntent());
@@ -184,28 +184,29 @@ public class MainActivity extends Activity {
         if(!connected||!foreground||!preview||g==null||vision==null||!vision.optBoolean("enabled")||now<nextFrameAt||!frameBusy.compareAndSet(false,true))return;
         try{fetchFrame(g,gen);}finally{frameBusy.set(false);}
     }
-    private void fetchFrame(GatewayClient g,int gen){HttpURLConnection conn=null;long start=SystemClock.elapsedRealtime();
+    private void fetchFrame(GatewayClient g,int gen){HttpURLConnection conn=null;boolean reusable=false;long start=SystemClock.elapsedRealtime();
         try{
             String h=g.host.contains(":")?"["+g.host+"]":g.host;
             conn=(HttpURLConnection)new URL("http://"+h+":"+previewPort+"/frame.jpg").openConnection();activeFrame=conn;conn.setConnectTimeout(1000);conn.setReadTimeout(1500);conn.setUseCaches(false);
             if(!token.isEmpty())conn.setRequestProperty("X-RCBoat-Token",token);
             String previous=previewStore.etag();if(!previous.isEmpty())conn.setRequestProperty("If-None-Match",previous);
             int code=conn.getResponseCode();long duration=SystemClock.elapsedRealtime()-start;
-            if(code==304){if(gen==generation)emit("frame_health",data("state","waiting"));nextFrameAt=SystemClock.elapsedRealtime()+500;return;}
+            if(code==304){conn.getInputStream().close();reusable=true;if(gen==generation)emit("frame_health",data("state","waiting"));nextFrameAt=Math.max(start+60,SystemClock.elapsedRealtime()+15);return;}
             if(code!=200)throw new IOException(code==503?"새 카메라 영상 대기":"영상 HTTP "+code);
             String etag=conn.getHeaderField("ETag");double age=0;
             try{age=Double.parseDouble(conn.getHeaderField("X-Frame-Age"))*1000;}catch(Exception ignored){}
             if(!Double.isFinite(age)||age<0||age>2000)throw new IOException("Jetson 영상이 오래됐습니다");
             byte[] raw=readLimited(conn.getInputStream(),150000);
+            reusable=true;
             if(gen!=generation||!preview||!foreground)return;
             if(previewStore.offer(raw,etag==null?"":etag,SystemClock.elapsedRealtime())){
                 JSONObject packet=new JSONObject().put("url","https://appassets.androidplatform.net/preview.jpg?v="+gen+"_"+SystemClock.elapsedRealtime())
                     .put("source_age_ms",Math.round(age)).put("request_ms",duration).put("bytes",raw.length);
                 emit("frame",packet);
             }
-            nextFrameAt=SystemClock.elapsedRealtime()+500;
+            nextFrameAt=start+60;
         }catch(Exception e){if(gen==generation&&preview){emit("frame_health",data("state","delayed"));nextFrameAt=SystemClock.elapsedRealtime()+1000;}}
-        finally{if(conn!=null)conn.disconnect();activeFrame=null;}
+        finally{if(conn!=null&&!reusable)conn.disconnect();activeFrame=null;}
     }
     private static byte[] readLimited(InputStream in,int limit)throws IOException{try(InputStream input=in;ByteArrayOutputStream out=new ByteArrayOutputStream()){byte[] b=new byte[16384];int n;while((n=input.read(b))!=-1){if(out.size()+n>limit)throw new IOException("파일 크기 제한 초과");out.write(b,0,n);}return out.toByteArray();}}
     private void saveFile(String filename,String mime,byte[] raw)throws Exception{

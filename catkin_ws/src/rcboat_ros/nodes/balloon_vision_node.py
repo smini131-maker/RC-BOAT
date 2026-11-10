@@ -2,6 +2,7 @@
 """Optional camera node; no actuator ownership. Latest frame only and on-demand JPEG."""
 import datetime as dt
 import json,os,threading,time
+from collections import deque
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from urllib.parse import urlsplit,urlunsplit
@@ -12,7 +13,7 @@ from rcboat_ros.common import pack,unpack,fresh
 from rcboat_ros.control_config import validate_cruise
 from rcboat_ros.balloon_tracking import validate_config,TargetTracker,TrackingController
 
-VERSION='2.4.2'
+VERSION='2.4.3'
 def public_config(c):
     c=dict(c)
     if c['camera_type']=='rtsp':
@@ -28,7 +29,7 @@ class Vision:
         self.config=validate_config(dict(rospy.get_param('/rcboat/vision',{}),**local));self.applied_at=time.monotonic()
         self.frame=None;self.frame_at=0.;self.frame_id=0;self.live_source=False;self.source_type='none'
         self.preview=b'';self.preview_at=0.;self.preview_requested_at=0.;self.preview_bytes=0;self.preview_count=0;self.preview_sequence=0
-        self.error='';self.preview_error='';self.model_ready=False;self.detector=None;self.desired={};self.detail={}
+        self.error='';self.preview_error='';self.model_ready=False;self.detector=None;self.desired={};self.detail={};self.processed_frames=0
         self.tracker=TargetTracker();self.controller=TrackingController();self.safety={};self.gps={};self.actuator={};self.log_file=None
         self.status_pub=rospy.Publisher('/rcboat/vision/status',String,queue_size=1)
         self.desired_pub=rospy.Publisher('/rcboat/vision/desired',String,queue_size=1)
@@ -37,7 +38,8 @@ class Vision:
         rospy.Subscriber('/rcboat/gps/status',String,lambda m:setattr(self,'gps',unpack(m)))
         rospy.Subscriber('/rcboat/actuator/status',String,lambda m:setattr(self,'actuator',unpack(m)))
         rospy.Service('/rcboat/vision/execute',Execute,self.execute);rospy.on_shutdown(self.close)
-        self.start_preview();threading.Thread(target=self.capture,daemon=True).start()
+        self.start_preview();self.capture_thread=threading.Thread(target=self.capture,daemon=True);self.capture_thread.start()
+        self.preview_thread=threading.Thread(target=self.preview_loop,daemon=True);self.preview_thread.start()
         self.timer=rospy.Timer(rospy.Duration(.2),self.publish)
     def execute(self,request):
         try:
@@ -92,6 +94,8 @@ class Vision:
     def start_preview(self):
         owner=self;token=os.getenv('RCBOAT_GATEWAY_TOKEN','');slots=threading.BoundedSemaphore(4)
         class Handler(BaseHTTPRequestHandler):
+            protocol_version='HTTP/1.1'
+            disable_nagle_algorithm=True
             def do_GET(self):
                 self.connection.settimeout(1)
                 if token and self.headers.get('X-RCBoat-Token','')!=token:self.send_error(401);return
@@ -117,29 +121,48 @@ class Vision:
             threading.Thread(target=self.server.serve_forever,daemon=True).start()
         except OSError as exc:self.server=None;self.preview_error=str(exc)
     def publish(self,_event):
-        now=time.monotonic()
         with self.lock:
-            c=dict(self.config);c['steering_right_sign']=-1 if rospy.get_param('/rcboat/nav_invert_steering',True) else 1;online=self.enabled and fresh(self.frame_at,c['max_frame_age_s'],now);desired=dict(self.desired)
+            c=dict(self.config);c['steering_right_sign']=-1 if rospy.get_param('/rcboat/nav_invert_steering',True) else 1
+            now=time.monotonic();online=self.enabled and fresh(self.frame_at,c['max_frame_age_s'],now);desired=dict(self.desired)
             if not online or not self.model_ready or not fresh(float(desired.get('monotonic') or 0),c['max_frame_age_s'],now):desired.update(valid=False,desired_steering_pwm=6000,desired_throttle_pwm=6450)
             status=dict(self.detail,software_version=VERSION,enabled=self.enabled,model_ready=self.model_ready,camera_online=online,live_source=self.live_source,
                 source_type=self.source_type,frame_age_s=round(now-self.frame_at,3) if self.frame_at else None,max_frame_age_s=c['max_frame_age_s'],
                 preview_port=c['preview_port'],preview_error=self.preview_error,preview_frames_sent=self.preview_count,preview_bytes_sent=self.preview_bytes,
+                preview_generated=self.preview_sequence,processed_frames=self.processed_frames,
                 configuration=public_config(c),applied_monotonic=self.applied_at,error=self.error,monotonic=now,shared_cruise_pwm=rospy.get_param('/rcboat/cruise_pwm',6650))
             self.status_pub.publish(pack(**status));self.desired_pub.publish(pack(**desired))
             if self.log_file:
                 self.log_file.write(json.dumps(dict(utc=dt.datetime.now(dt.timezone.utc).isoformat(),vision=status,desired=desired,
                     gps=self.gps,safety=self.safety,actuator=self.actuator),ensure_ascii=False,allow_nan=False)+'\n');self.log_file.flush()
-    def make_preview(self,frame,detections,target,c,stamp):
+    def preview_loop(self):
+        processed=-1
+        while not self.stopping and not rospy.is_shutdown():
+            start=time.monotonic()
+            with self.lock:
+                c=dict(self.config);frame=self.frame;stamp=self.frame_at;sequence=self.frame_id;revision=self.revision
+                active=self.enabled and fresh(stamp,c['max_frame_age_s'],start) and start-self.preview_requested_at<3
+                detail=dict(self.detail)
+            if not active or frame is None or sequence==processed:time.sleep(.015);continue
+            processed=sequence
+            try:
+                current=fresh(float(detail.get('processed_frame_monotonic') or 0),.5,start)
+                self.make_preview(frame,detail.get('detections',[]) if current else [],detail.get('target',{}) if current else {},c,stamp,revision)
+            except Exception as exc:
+                with self.lock:self.preview_error=str(exc)
+            time.sleep(max(.005,1/c['preview_hz']-(time.monotonic()-start)))
+
+    def make_preview(self,frame,detections,target,c,stamp,revision=None):
         import cv2
-        image=frame.copy();h,w=image.shape[:2]
+        h,w=frame.shape[:2];scale=min(c['preview_width']/w,360/h,1)
+        image=cv2.resize(frame,(max(1,round(w*scale)),max(1,round(h*scale))))
         for item in detections:
-            colour=(130,235,80) if item['pink_confirmed'] else (155,155,155);x1,y1,x2,y2=[int(v) for v in item['bbox']]
+            colour=(130,235,80) if item['pink_confirmed'] else (155,155,155);x1,y1,x2,y2=[int(v*scale) for v in item['bbox']]
             cv2.rectangle(image,(x1,y1),(x2,y2),colour,2)
             cv2.putText(image,'%s %.2f PINK %.0f%%'%(item['label'],item['confidence'],item['pink_fraction']*100),(x1,max(16,y1-5)),cv2.FONT_HERSHEY_SIMPLEX,.43,colour,1)
         if target.get('predicted') and target.get('acquired'):
-            x=int(max(0,min(w-1,(target['center_x_normalized']+1)/2*w)));cv2.arrowedLine(image,(w//2,h//2),(x,h//2),(0,210,255),3)
-        cv2.line(image,(w//2,0),(w//2,h),(220,220,220),1);cv2.putText(image,target.get('phase','NO_TARGET'),(10,24),cv2.FONT_HERSHEY_SIMPLEX,.65,(0,210,255),2)
-        scale=min(c['preview_width']/w,360/h,1);image=cv2.resize(image,(max(1,round(w*scale)),max(1,round(h*scale))))
+            iw,ih=image.shape[1],image.shape[0];x=int(max(0,min(iw-1,(target['center_x_normalized']+1)/2*iw)));cv2.arrowedLine(image,(iw//2,ih//2),(x,ih//2),(0,210,255),2)
+        iw,ih=image.shape[1],image.shape[0]
+        cv2.line(image,(iw//2,0),(iw//2,ih),(220,220,220),1);cv2.putText(image,target.get('phase','NO_TARGET'),(10,24),cv2.FONT_HERSHEY_SIMPLEX,.55,(0,210,255),1)
         # Native pixels are magnified for the operator only, never fed back as
         # extra detections. Full-resolution camera data stays on the Jetson.
         if target.get('acquired') and not target.get('predicted') and target.get('source_span_px',100)<40:
@@ -156,9 +179,11 @@ class Vision:
                 cv2.putText(image,'ZOOM / %.1fpx raw'%target['source_span_px'],(px,max(12,py-5)),cv2.FONT_HERSHEY_SIMPLEX,.36,(80,235,130),1)
         ok,encoded=cv2.imencode('.jpg',image,[cv2.IMWRITE_JPEG_QUALITY,c['preview_jpeg_quality']])
         if ok and len(encoded)<=150000:
-            with self.lock:self.preview=encoded.tobytes();self.preview_at=stamp;self.preview_sequence+=1
+            with self.lock:
+                if self.enabled and (revision is None or revision==self.revision):
+                    self.preview=encoded.tobytes();self.preview_at=stamp;self.preview_sequence+=1;self.preview_error=''
     def run(self):
-        revision=-1;processed=-1;last_preview=0;last_load=0;last_end=None
+        revision=-1;processed=-1;last_load=0;ends=deque(maxlen=60)
         while not rospy.is_shutdown() and not self.stopping:
             if not self.enabled:
                 if self.detector is not None:self.detector.close();self.detector=None
@@ -168,6 +193,7 @@ class Vision:
                 c=dict(self.config)
                 c['steering_right_sign']=-1 if rospy.get_param('/rcboat/nav_invert_steering',True) else 1
                 if revision!=self.revision or self.detector is None and start-last_load>5:
+                    ends.clear()
                     if self.detector is not None:self.detector.close()
                     self.detector=None;revision=self.revision;last_load=start
                     from rcboat_ros.balloon_detector import BalloonDetector
@@ -179,24 +205,29 @@ class Vision:
                 with self.lock:frame=self.frame;stamp=self.frame_at;frame_id=self.frame_id
                 if frame is None or frame_id==processed:time.sleep(.02);continue
                 processed=frame_id;detections=self.detector.detect(frame) if self.detector else [];end=time.monotonic()
+                if self.detector is not None:ends.append(end)
                 with self.lock:
                     if not self.enabled or revision!=self.revision:continue
                     target=self.tracker.update(detections,frame.shape[1],frame.shape[0],end,c,self.gps)
                     session=self.safety.get('mode_since_monotonic') if self.safety.get('mode')=='BALLOON' else None
                     desired=self.controller.command(target,stamp,end,c,validate_cruise(rospy.get_param('/rcboat/cruise_pwm',6650)),session)
                     if self.detector is None:desired['valid']=False
-                    self.desired=desired;self.detail=dict(reason=target['phase'],target=target,detections=detections,inference_ms=round((end-start)*1000,1),
-                        processed_fps=round(1/(end-last_end),2) if last_end and end>last_end else None,backend=self.detector.backend_name if self.detector else 'unavailable',
+                    self.desired=desired
+                    if self.detector is not None:self.processed_frames+=1
+                    self.desired_pub.publish(pack(**desired))
+                    self.detail=dict(reason=target['phase'],target=target,detections=detections,inference_ms=round((end-start)*1000,1),processed_frame_monotonic=stamp,
+                        processed_fps=round((len(ends)-1)/(ends[-1]-ends[0]),2) if self.detector is not None and len(ends)>1 and ends[-1]>ends[0] else None,backend=self.detector.backend_name if self.detector else 'unavailable',
                         prediction_source='bearing_triangulation' if target.get('world_estimate') else 'image_motion',
                         detector_view=dict(getattr(self.detector,'last_view',{})),
                         range_validation='not_field_validated',design_goal_distance_m=100)
                     if self.detector is not None:self.error=''
-                last_end=end
-                if end-last_preview>=1/c['preview_hz'] and end-self.preview_requested_at<3:last_preview=end;self.make_preview(frame,detections,target,c,stamp)
             except Exception as exc:
                 with self.lock:self.desired={};self.error='VISION_ERROR: '+str(exc)
                 rospy.logwarn_throttle(5,'Vision: %s',exc)
-            time.sleep(max(.01,1/self.config['inference_hz']-(time.monotonic()-start)))
+            time.sleep(max(.002,1/self.config['inference_hz']-(time.monotonic()-start)))
+        # Let Argus/GStreamer release its buffers before process teardown.
+        for thread in (self.capture_thread,self.preview_thread):
+            if thread is not threading.current_thread():thread.join(timeout=3)
         if self.detector is not None:self.detector.close()
     def close(self):
         self.stopping=True;self.enabled=False

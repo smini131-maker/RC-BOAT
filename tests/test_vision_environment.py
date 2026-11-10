@@ -118,6 +118,19 @@ class BindingTests(unittest.TestCase):
             self.assertEqual(json.loads((target / 'rcboat_bindings.json').read_text()), {'cv2': str(host)})
 
 
+    def test_gpu_only_bridge_preserves_camera_and_excludes_other_user_packages(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);target=root/'venv';site_dir=target/'lib/site-packages';site_dir.mkdir(parents=True)
+            source=root/'host/tensorrt';source.mkdir(parents=True)
+            record=target/'rcboat_bindings.json';record.write_text(json.dumps({'cv2':'existing-camera-binding'}))
+            found={name:dict(origin=str(source/'__init__.py'),package=[str(source)]) for name in ('tensorrt','tensorflow','numpy')}
+            linked=[]
+            with patch.object(env.subprocess,'check_output',return_value=str(site_dir)),patch.object(Path,'symlink_to',lambda dest,src,**kwargs:linked.append((dest,src))):
+                env.link_bindings(target,found,gpu_only=True)
+            self.assertEqual(linked,[(site_dir/'tensorrt',source)])
+            self.assertEqual(json.loads(record.read_text()),dict(cv2='existing-camera-binding',tensorrt=str(source)))
+
+
 class PreflightTests(unittest.TestCase):
     @contextlib.contextmanager
     def preflight(self, inherited=False, array_ok=True, providers=True, tensorflow=False):

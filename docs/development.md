@@ -55,12 +55,12 @@ Remove-Item Env:QT_QPA_PLATFORM
 .\BUILD_ROS_GUI.cmd
 ```
 
-빌드 도구는 `%LOCALAPPDATA%\RCBoatBuild` 아래 전용 가상환경과 작업 경로를 사용합니다. 결과는 저장소의 `dist\RCBoatControl_ROS_v2.4.2.exe`입니다. `dist`와 빌드 캐시는 Git에 올리지 않습니다.
+빌드 도구는 `%LOCALAPPDATA%\RCBoatBuild` 아래 전용 가상환경과 작업 경로를 사용합니다. 결과는 저장소의 `dist\RCBoatControl_ROS_v2.4.3.exe`입니다. `dist`와 빌드 캐시는 Git에 올리지 않습니다.
 
 빌드 후에는 `--smoke-test`로 시작·종료를 확인할 수 있습니다.
 
 ```powershell
-.\dist\RCBoatControl_ROS_v2.4.2.exe --smoke-test
+.\dist\RCBoatControl_ROS_v2.4.3.exe --smoke-test
 ```
 
 ## 버전·배포 기준
@@ -127,3 +127,8 @@ v2.4.1은 모바일 연결 건강 상태와 영상 전송 수정입니다. Conne
 v2.4.2: `tests/test_control_snapshot.py`는 실제 ROS node 메서드와 가상 단조시각을 사용해 콜백 도착 순서를 강제로 겹칩니다. 이전 actuator에서는 새 명령이 판정 시각보다 앞서 보이며 `6000/6450/TIMEOUT`이 재현됐습니다. 수정본은 supervisor의 판단·입력 교체, actuator의 명령·수신 시각·시각 조회를 같은 잠금으로 처리합니다. 풍선과 MANUAL 출력 유지, RC/link/GPS/vision 갱신 경합, 실제 stale/future 거부·잠금·범위 초과 중립, 실제 actuator 유실 시 수동 전환과 진단 로그를 검사합니다. 하드웨어 I/O를 열지 않으며 물리적 서보 소음·전원·링크 검증을 대신하지 않습니다.
 
 2026-11-10 v2.4.2 검증: Python 172개(신규 경합 재현 8개 포함), Python 3.8 소스 컴파일, Qt workspace, 모바일 화면 4종, Android 단위 15개·lint·서명 release 빌드, EXE smoke 종료 0, staging 61개 hash를 확인했습니다. SM-S938N에 APK를 업데이트 설치하고 패키지 versionName 2.4.2/versionCode 20402를 확인했습니다. Jetson에 백업 후 설치하여 소스 61개 hash·실행 gateway 2.4.2·service active/NRestarts=0을 확인했습니다. E-STOP/6000·6450 잠금 상태 50회 조회에서 command age 0.000440~0.069476 s, actuator age 0.019755~0.059332 s였으며 모두 LOCKED였습니다. 기존 ntrip.env와 routes.json hash는 그대로입니다. 실제 비중립 출력·수상 추적·서보 소음 재현 시험은 하지 않았습니다.
+
+
+v2.4.3: CUDA runtime의 pinned input/output·stream 동기화·해제를 가짜 C API로 검사하고, 실제 Nano에서는 기존 ONNX의 장치 FP16 엔진을 생성해 실행했습니다. 신규 단위 검증은 CUDA 전송/실패 시 해제/버퍼 제한, 근접 소실 중립과 파열 추정 수동 전환, 일반 지나침 예측 유지, 오래된 session·카메라 거부, E-STOP 요청 이력·해제 후 비재시작, GPU binding 격리, fps 기본값 일회 마이그레이션, vision 시각 snapshot을 포함합니다. 기존 172개와 합쳐 Python 184개를 로컬에서 통과했습니다. Qt 회귀는 큰 지도·작은 창의 세로 스크롤·상단 주행 버튼 고정·휠 확대와 Shift 스크롤·지도 여백 그리기 차단·모든 탭 E-STOP 표시를 포함합니다. Python 3.8 컴파일, Android 단위 15개·lint·서명 APK, 모바일 화면 4종, EXE smoke 종료 0, 배포 63개 hash를 확인했습니다. 실제 CSI/GPU/JPEG 진단의 120초 수치와 실제 ROS/PC Wi-Fi의 30초 수치는 docs/vision.md에 있습니다. 3개 원본 입력의 CPU/GPU 수치 비교를 실제 검출률로 해석하지 않습니다.
+
+사용자 승인·프로펠러 제거 확인 후 기존 gateway/BALLOON 모드로 3초 및 8초 시험을 진행했습니다. 새 풍선 검출이 없을 때는 arming을 보류했고, 실제 SSH 세션을 유지하며 Jetson에도 별도 종료 시한을 두었습니다. 8초 시험의 13개 상태 표본은 모두 BALLOON으로, 조향 전송값 5191~7300·스로틀 6580~6642와 command_applied를 확인했습니다. 이는 I2C 쓰기 성공 보고이며 전기적 펄스 계측은 아닙니다. 사용자는 풍선을 좌우로 이동시킨 시험 후 서보·모터 모두 움직였다고 확인했습니다. 종료 후 AUTO_SAFE·출력 잠금·6000/6450을 확인했습니다. 실제 파열·수상 주행·장시간 출력 안정성 시험은 별도입니다.

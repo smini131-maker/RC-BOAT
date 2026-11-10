@@ -1,5 +1,5 @@
 """Optional vision-node lifecycle, preview and camera fallback; fake ROS/device only."""
-import json,sys,tempfile,types,urllib.request,urllib.error,unittest,base64,hashlib,io,zipfile
+import json,sys,tempfile,types,urllib.request,urllib.error,unittest,base64,hashlib,io,zipfile,http.client
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'catkin_ws/src/rcboat_ros/src'))
@@ -30,6 +30,16 @@ class VisionNodeTests(unittest.TestCase):
         self.assertTrue(self.v.config_path.is_file())
         self.v.enabled=True;self.assertFalse(self.execute('vision_configure',confidence=.5).success)
         self.assertFalse(self.execute('vision_enable',enabled='yes').success)
+    def test_publish_samples_clock_after_frame_snapshot_is_available(self):
+        clock=[100.]
+        self.v.enabled=True;self.v.model_ready=True
+        def parameter(key,default=None):
+            clock[0]=100.02;self.v.frame_at=100.01
+            self.v.desired=dict(valid=True,monotonic=100.01,desired_steering_pwm=6200,desired_throttle_pwm=6650)
+            return default
+        with patch.object(self.m.time,'monotonic',side_effect=lambda:clock[0]),patch.object(self.m.rospy,'get_param',side_effect=parameter):self.v.publish(None)
+        self.assertTrue(json.loads(self.v.status_pub.messages[-1])['camera_online'])
+        self.assertTrue(json.loads(self.v.desired_pub.messages[-1])['valid'])
     def test_authenticated_preview_and_stale_image_rejection(self):
         self.v.config['preview_port']=0
         with patch.dict(self.m.os.environ,{'RCBOAT_GATEWAY_TOKEN':'test-token'}):self.v.start_preview()
@@ -48,6 +58,15 @@ class VisionNodeTests(unittest.TestCase):
         self.assertEqual(unchanged.exception.code,304);self.assertEqual(unchanged.exception.read(),b'')
         self.v.preview=b'new-frame';self.v.preview_sequence+=1
         with urllib.request.urlopen(duplicate,timeout=2) as response:self.assertEqual(response.read(),b'new-frame')
+        client=http.client.HTTPConnection('127.0.0.1',self.v.server.server_port,timeout=2)
+        try:
+            client.request('GET','/frame.jpg',headers={'X-RCBoat-Token':'test-token'})
+            response=client.getresponse();self.assertEqual(response.version,11);self.assertEqual(response.read(),b'new-frame')
+            current=response.getheader('ETag');endpoint=client.sock.getsockname()
+            client.request('GET','/frame.jpg',headers={'X-RCBoat-Token':'test-token','If-None-Match':current})
+            response=client.getresponse();self.assertEqual(response.status,304);self.assertEqual(response.read(),b'')
+            self.assertEqual(client.sock.getsockname(),endpoint)
+        finally:client.close()
         self.v.preview_at-=3
         with self.assertRaises(urllib.error.HTTPError) as error:urllib.request.urlopen(req,timeout=2)
         self.assertEqual(error.exception.code,503)

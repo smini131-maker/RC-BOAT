@@ -12,7 +12,7 @@ class BalloonPanel(QWidget):
     request=Signal(str,dict);start_tracking=Signal();stop_tracking=Signal()
     def __init__(self):
         super().__init__();self.network=QNetworkAccessManager(self);self.reply=None;self.host='';self.port=8766
-        self.remote_enabled=False;self.camera_enabled=False;self.mock=False;self.last_image=0;self.samples=deque(maxlen=12)
+        self.remote_enabled=False;self.camera_enabled=False;self.mock=False;self.last_image=0;self.samples=deque(maxlen=60);self.etag=''
         self.dirty=False;self.synced=False;self.syncing=False;self.generation=0;self.pending=None;self.stamp=0;self.waiting_start=False
         layout=QVBoxLayout(self);layout.setContentsMargins(0,4,0,0)
         bar=QHBoxLayout();self.summary=QLabel('카메라 연결 대기');self.summary.setObjectName('healthHeadline');bar.addWidget(self.summary,1)
@@ -51,7 +51,7 @@ class BalloonPanel(QWidget):
         self.editors=(self.camera,self.source,self.sensor,self.resolution,self.long_range)
         self.camera.currentIndexChanged.connect(self.edited);self.source.textEdited.connect(self.edited);self.sensor.valueChanged.connect(self.edited)
         self.resolution.currentIndexChanged.connect(self.edited);self.long_range.toggled.connect(self.edited)
-        self.timer=QTimer(self);self.timer.setInterval(200);self.timer.timeout.connect(self.fetch_frame);self.timer.start();self.set_connected(False)
+        self.timer=QTimer(self);self.timer.setInterval(60);self.timer.timeout.connect(self.fetch_frame);self.timer.start();self.set_connected(False)
     def toggle_camera_settings(self,opened):
         self.drawer_animation.stop();start=self.camera_drawer.width() if self.camera_drawer.isVisible() else 0
         if opened:self.camera_drawer.show()
@@ -113,8 +113,10 @@ class BalloonPanel(QWidget):
             self.waiting_start=False;self.start_tracking.emit()
         text='추적 중' if active else '감지 중' if visible else '풍선 감지 대기' if self.camera_enabled else '카메라 꺼짐'
         if self.waiting_start:text='풍선 감지 대기 · 자동 시작 대기'
+        if state.get('failsafe_reason')=='BALLOON_POP_ESTIMATED':text='풍선 파열 추정 · 수동 전환'
         if v.get('error'):text='카메라 / 모델 확인 필요';self.summary.setToolTip(str(v['error']))
-        self.summary.setText(text);self.summary.setStyleSheet('color:' + ('#61dfad' if visible else '#edbd66' if self.camera_enabled else '#9bacc0'))
+        if state.get('estop'):text='■ 비상정지 · 풍선 추적 출력 잠금'
+        self.summary.setText(text);self.summary.setStyleSheet('color:' + ('#ff788a' if state.get('estop') else '#61dfad' if visible else '#edbd66' if self.camera_enabled else '#9bacc0'))
         self.enable_button.setVisible(not self.camera_enabled);self.disable_button.setVisible(self.camera_enabled)
         self.enable_button.setEnabled(self.remote_enabled);self.disable_button.setEnabled(self.remote_enabled)
         self.start_button.setEnabled(self.remote_enabled and not active and not self.waiting_start and not state.get('estop'))
@@ -143,16 +145,21 @@ class BalloonPanel(QWidget):
         host='['+self.host+']' if ':' in self.host else self.host;req=QNetworkRequest(QUrl(f'http://{host}:{self.port}/frame.jpg'));req.setTransferTimeout(1500)
         token=os.getenv('RCBOAT_GATEWAY_TOKEN','')
         if token:req.setRawHeader(b'X-RCBoat-Token',token.encode())
+        if self.etag:req.setRawHeader(b'If-None-Match',self.etag.encode())
         self.reply=self.network.get(req);self.reply.finished.connect(self.frame_finished)
         self.reply.downloadProgress.connect(lambda received,total:self.reply.abort() if self.reply and received>200000 else None)
     def frame_finished(self):
         reply,self.reply=self.reply,None
         if reply is None:return
         if reply.error()==QNetworkReply.NoError:
+            if reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)==304:reply.deleteLater();return
             raw=bytes(reply.readAll());pix=QPixmap()
             if len(raw)<=150000 and pix.loadFromData(raw,'JPG'):
+                self.etag=bytes(reply.rawHeader(b'ETag')).decode('ascii',errors='ignore')
                 self.image.setPixmap(pix.scaled(self.image.size(),Qt.KeepAspectRatio,Qt.SmoothTransformation));self.last_image=time.monotonic();self.samples.append((self.last_image,len(raw)))
-                if len(self.samples)>1:self.bandwidth.setText(f'영상 약 {sum(n for _,n in list(self.samples)[1:])/max(.1,self.samples[-1][0]-self.samples[0][0])/1024:.1f} KiB/s')
+                if len(self.samples)>1:
+                    elapsed=max(.1,self.samples[-1][0]-self.samples[0][0])
+                    self.bandwidth.setText(f'미리보기 {(len(self.samples)-1)/elapsed:.1f} fps · {sum(n for _,n in list(self.samples)[1:])/elapsed/1024:.1f} KiB/s')
         elif not self.last_image or time.monotonic()-self.last_image>2:self.image.clear();self.image.setText('새 카메라 영상 없음')
         reply.deleteLater()
     def shutdown(self):
