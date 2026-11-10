@@ -55,12 +55,12 @@ Remove-Item Env:QT_QPA_PLATFORM
 .\BUILD_ROS_GUI.cmd
 ```
 
-빌드 도구는 `%LOCALAPPDATA%\RCBoatBuild` 아래 전용 가상환경과 작업 경로를 사용합니다. 결과는 저장소의 `dist\RCBoatControl_ROS_v2.4.0.exe`입니다. `dist`와 빌드 캐시는 Git에 올리지 않습니다.
+빌드 도구는 `%LOCALAPPDATA%\RCBoatBuild` 아래 전용 가상환경과 작업 경로를 사용합니다. 결과는 저장소의 `dist\RCBoatControl_ROS_v2.4.1.exe`입니다. `dist`와 빌드 캐시는 Git에 올리지 않습니다.
 
 빌드 후에는 `--smoke-test`로 시작·종료를 확인할 수 있습니다.
 
 ```powershell
-.\dist\RCBoatControl_ROS_v2.4.0.exe --smoke-test
+.\dist\RCBoatControl_ROS_v2.4.1.exe --smoke-test
 ```
 
 ## 버전·배포 기준
@@ -119,3 +119,7 @@ v2.3.3는 공통 상승률을 120 PWM/s로 낮춥니다. 다른 기존 제어 �
 v2.4.0은 네이티브 1080p 후보 영역의 단일 추론과 작은 대상 연속 관측, 200m 위치 추정 상한, 추가 학습 모델을 적용합니다. 카메라 프로필은 한 번만 백업·변경하며 원거리 끄기/사용자 해상도를 이후 덮어쓰지 않습니다. 실제 100m 성능은 별도 거리·지름·화각 자료로 검증합니다.
 
 2026-11-08 v2.4.0 검증: Python 164개, Qt 5개, 4개 모바일 화면 크기(새 해상도/원거리 설정 전송·편집 유지 포함), Android 단위 9개·lint·APK 서명, EXE smoke 종료 0을 확인했습니다. Python 3.8.10/NumPy 1.23.5/ORT 1.16.3/OpenCV 4.8.0 조합에서 새 ONNX의 실제 1080p 영역 추론을 PC에서 실행했습니다. 배포 staging은 61개 runtime hash를 검증합니다. Jetson·실물 카메라·실측 100m·수상 주행은 이번 버전에서 미검증입니다.
+
+v2.4.1은 모바일 연결 건강 상태와 영상 전송 수정입니다. ConnectionHealthTest는 일시 timeout/지속 실패/닫힌 세션/지연 회복을 가상 단조시각으로 검증하고 PreviewStoreTest는 최신 한 장·중복 프레임의 수신 시각 보존·잘못된 JPEG 제한을 검사합니다. 실제 HTTP preview 회귀는 인증·ETag 304·새 프레임·오래된 프레임 거부를 확인합니다. 모바일 화면 검사는 SSH/ROS 지연과 신선한 영상의 독립성, 숨긴 GPS DOM 유지, 영상 stale의 LIVE 해제까지 포함합니다. 실제 8m 풍선 사진은 별도 거리 확인 자료가 있어야 평가합니다.
+
+2026-11-10 v2.4.1 로컬 검증: Python 164개, Qt 화면 회귀, Android 단위 15개·lint·release 빌드, 모바일 화면 4종, EXE smoke 종료 0, 배포 staging 61개 hash를 통과했습니다. APK를 실제 연결 휴대폰에 업데이트 설치하고 v2.4.1 화면을 확인했습니다. 기존 YOLO 모델 hash와 PWM/항법/안전 정책은 그대로입니다.

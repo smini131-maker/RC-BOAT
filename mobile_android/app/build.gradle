@@ -5,7 +5,7 @@ if (signingFile.exists()) signingFile.withInputStream { signingValues.load(it) }
 android {
     namespace 'kr.rcboat.mobile'
     compileSdk 36
-    defaultConfig { applicationId 'kr.rcboat.mobile'; minSdk 29; targetSdk 36; versionCode 20400; versionName '2.4.0' }
+    defaultConfig { applicationId 'kr.rcboat.mobile'; minSdk 29; targetSdk 36; versionCode 20401; versionName '2.4.1' }
     signingConfigs { if (signingFile.exists()) { localRelease { storeFile file(signingValues['storeFile']); storePassword signingValues['storePassword']; keyAlias signingValues['keyAlias']; keyPassword signingValues['keyPassword'] } } }
     buildTypes { release { minifyEnabled false; if (signingFile.exists()) signingConfig signingConfigs.localRelease } }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }

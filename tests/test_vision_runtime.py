@@ -42,6 +42,12 @@ class VisionNodeTests(unittest.TestCase):
         self.v.enabled=True;self.v.preview=b'fixture-jpeg';self.v.preview_at=self.m.time.monotonic()
         with urllib.request.urlopen(req,timeout=2) as response:
             self.assertEqual(response.read(),b'fixture-jpeg');self.assertEqual(response.headers['Cache-Control'],'no-store')
+            etag=response.headers['ETag'];self.assertEqual(response.headers['X-Frame-Sequence'],'0')
+        duplicate=urllib.request.Request(url,headers={'X-RCBoat-Token':'test-token','If-None-Match':etag})
+        with self.assertRaises(urllib.error.HTTPError) as unchanged:urllib.request.urlopen(duplicate,timeout=2)
+        self.assertEqual(unchanged.exception.code,304);self.assertEqual(unchanged.exception.read(),b'')
+        self.v.preview=b'new-frame';self.v.preview_sequence+=1
+        with urllib.request.urlopen(duplicate,timeout=2) as response:self.assertEqual(response.read(),b'new-frame')
         self.v.preview_at-=3
         with self.assertRaises(urllib.error.HTTPError) as error:urllib.request.urlopen(req,timeout=2)
         self.assertEqual(error.exception.code,503)

@@ -26,7 +26,11 @@ public class MainActivity extends Activity {
     private final ScheduledExecutorService health=Executors.newSingleThreadScheduledExecutor();
     private final ExecutorService commands=Executors.newSingleThreadExecutor();
     private final ExecutorService urgent=Executors.newSingleThreadExecutor();
-    private final ExecutorService frames=Executors.newSingleThreadExecutor();
+    private final ScheduledExecutorService frames=Executors.newSingleThreadScheduledExecutor();
+    private final ConnectionHealth rosHealth=new ConnectionHealth(),sshHealth=new ConnectionHealth();
+    private final PreviewStore previewStore=new PreviewStore();
+    private volatile long nextFrameAt=0;
+    private volatile HttpURLConnection activeFrame;
     private final AtomicBoolean frameBusy=new AtomicBoolean(false);
     private volatile GatewayClient gateway;
     private volatile Session ssh;
@@ -54,7 +58,13 @@ public class MainActivity extends Activity {
         web.setWebViewClient(new WebViewClient(){
             @Override public WebResourceResponse shouldInterceptRequest(WebView view,WebResourceRequest req){
                 Uri u=req.getUrl();
-                if("appassets.androidplatform.net".equals(u.getHost()))return assets.shouldInterceptRequest(u);
+                if("appassets.androidplatform.net".equals(u.getHost())){
+                    if("/preview.jpg".equals(u.getPath())){
+                        byte[] jpeg=previewStore.snapshot();
+                        return new WebResourceResponse("image/jpeg",null,jpeg==null?503:200,jpeg==null?"No current frame":"OK",Collections.singletonMap("Cache-Control","no-store"),new ByteArrayInputStream(jpeg==null?new byte[0]:jpeg));
+                    }
+                    return assets.shouldInterceptRequest(u);
+                }
                 if("https".equals(u.getScheme()) && "tile.openstreetmap.org".equals(u.getHost()) && u.getPath().matches("/\\d+/\\d+/\\d+\\.png"))return null;
                 return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));
             }
@@ -62,9 +72,10 @@ public class MainActivity extends Activity {
         });
         web.addJavascriptInterface(new AppBridge(),"Boat");
         web.loadUrl("https://appassets.androidplatform.net/assets/index.html");
-        poll.scheduleWithFixedDelay(this::pollStatus,300,700,TimeUnit.MILLISECONDS);
+        poll.scheduleWithFixedDelay(this::pollStatus,300,1000,TimeUnit.MILLISECONDS);
+        frames.scheduleWithFixedDelay(this::previewTick,300,100,TimeUnit.MILLISECONDS);
         lease.scheduleWithFixedDelay(this::heartbeat,100,250,TimeUnit.MILLISECONDS);
-        health.scheduleWithFixedDelay(this::checkSsh,500,1500,TimeUnit.MILLISECONDS);
+        health.scheduleWithFixedDelay(this::checkSsh,500,2500,TimeUnit.MILLISECONDS);
         importProfile(getIntent());
     }
     private JSONObject savedProfile(){try{return new JSONObject(getPreferences(MODE_PRIVATE).getString("ntrip_profile","{}"));}catch(Exception e){return new JSONObject();}}
@@ -88,15 +99,22 @@ public class MainActivity extends Activity {
         GatewayClient g=gateway;int gen=generation;
         if(!connected || !foreground || g==null)return;
         try{
+            long start=SystemClock.elapsedRealtime();
             JSONObject status=g.request("status",null,1500,6*1024*1024);
             if(gen!=generation)return;
-            latest=status;backendVersion=status.optString("version");lastStatus=SystemClock.elapsedRealtime();
+            latest=status;backendVersion=status.optString("version");lastStatus=SystemClock.elapsedRealtime();rosHealth.success(lastStatus,lastStatus-start);
             JSONObject tele=status.optJSONObject("telemetry");JSONObject safe=tele==null?null:tele.optJSONObject("safety");mode=safe==null?"":safe.optString("mode");
             JSONObject vision=tele==null?null:tele.optJSONObject("vision");if(vision!=null)previewPort=vision.optInt("preview_port",8766);
             JSONObject ntrip=tele==null?null:tele.optJSONObject("ntrip");if(ntrip!=null&&!ntrip.optString("host").isEmpty()&&!ntrip.optString("mountpoint").isEmpty())cacheProfile(ntrip);
-            status.put("mobile",new JSONObject().put("ssh",sshState).put("control",owned).put("app_version",BuildConfig.VERSION_NAME));emit("status",status);
-            if(preview && vision!=null && vision.optBoolean("enabled") && frameBusy.compareAndSet(false,true))frames.execute(()->fetchFrame(g,gen));
-        }catch(Exception e){if(gen==generation)emit("offline",data("error",e.getMessage()));}
+            status.put("mobile",healthSnapshot());emit("status",status);
+        }catch(Exception e){if(gen==generation){rosHealth.failure(SystemClock.elapsedRealtime(),e instanceof ConnectException||e instanceof NoRouteToHostException);emit("link_health",healthSnapshot());}}
+    }
+    private JSONObject healthSnapshot(){
+        long now=SystemClock.elapsedRealtime();JSONObject value=new JSONObject();
+        try{value.put("ssh",sshState).put("control",owned).put("app_version",BuildConfig.VERSION_NAME)
+            .put("ros",rosHealth.state(now)).put("ros_age_ms",rosHealth.age(now)).put("ros_rtt_ms",rosHealth.rtt()).put("ros_failures",rosHealth.failures())
+            .put("ssh_age_ms",sshHealth.age(now)).put("ssh_rtt_ms",sshHealth.rtt()).put("ssh_failures",sshHealth.failures());}catch(JSONException ignored){}
+        return value;
     }
     private void heartbeat(){
         GatewayClient g=gateway;if(!connected || !foreground || !owned || g==null)return;
@@ -107,13 +125,23 @@ public class MainActivity extends Activity {
             }
         }catch(Exception ignored){}
     }
-    private void checkSsh(){Session current=ssh;int gen=generation;if(current==null)return;
-        if(!current.isConnected()){sshState="disconnected";return;}
-        try{current.sendKeepAliveMsg();if(gen==generation)sshState="connected";}
-        catch(Exception e){if(gen==generation)sshState="disconnected";}
+    private void checkSsh(){
+        Session current=ssh;int gen=generation;if(current==null)return;
+        ChannelExec channel=null;long start=SystemClock.elapsedRealtime();
+        try{
+            if(!current.isConnected())throw new EOFException("SSH transport closed");
+            channel=(ChannelExec)current.openChannel("exec");channel.setCommand("true");channel.setInputStream(null);channel.setOutputStream(new ByteArrayOutputStream());channel.setErrStream(new ByteArrayOutputStream());channel.connect(1200);
+            long deadline=SystemClock.elapsedRealtime()+1200;
+            while(!channel.isClosed()&&SystemClock.elapsedRealtime()<deadline)Thread.sleep(30);
+            if(!channel.isClosed())throw new SocketTimeoutException("SSH reply delayed");
+            if(channel.getExitStatus()!=0)throw new IOException("SSH probe failed");
+            if(gen==generation){sshHealth.success(SystemClock.elapsedRealtime(),SystemClock.elapsedRealtime()-start);sshState=sshHealth.state(SystemClock.elapsedRealtime()).equals("online")?"connected":"delayed";}
+        }catch(Exception e){if(gen==generation){sshHealth.failure(SystemClock.elapsedRealtime(),!current.isConnected());sshState=sshHealth.state(SystemClock.elapsedRealtime()).equals("offline")?"disconnected":"delayed";}}
+        finally{if(channel!=null)channel.disconnect();}
+        if(gen==generation)emit("link_health",healthSnapshot());
     }
     private void connectSsh(JSONObject c,int gen){
-        if(c.optString("password").isEmpty()){notice("조회 연결 · 제어하려면 SSH 비밀번호를 입력하세요");return;}
+        if(c.optString("password").isEmpty()){sshState="readonly";emit("link_health",healthSnapshot());notice("조회 연결 · 제어하려면 SSH 비밀번호를 입력하세요");return;}
         Session session=null;
         try{
             JSch j=new JSch();File known=new File(getFilesDir(),"known_hosts");if(!known.exists())known.createNewFile();j.setKnownHosts(known.getPath());
@@ -126,8 +154,8 @@ public class MainActivity extends Activity {
             });
             session.setServerAliveInterval(1500);session.setServerAliveCountMax(3);session.connect(5000);
             if(gen!=generation || !foreground){session.disconnect();return;}
-            ssh=session;owned=true;sshState="connected";notice("SSH 제어 연결 완료");
-        }catch(Exception e){if(session!=null)session.disconnect();if(gen==generation){sshState="disconnected";notice("SSH 연결 실패 · ROS 상태 조회는 계속합니다");}}
+            ssh=session;owned=true;sshHealth.success(SystemClock.elapsedRealtime(),0);sshState="connected";emit("link_health",healthSnapshot());notice("SSH 제어 연결 완료");
+        }catch(Exception e){if(session!=null)session.disconnect();if(gen==generation){sshState="disconnected";sshHealth.failure(SystemClock.elapsedRealtime(),true);emit("link_health",healthSnapshot());notice("SSH 연결 실패 · ROS 상태 조회는 계속합니다");}}
         finally{c.remove("password");}
     }
     private boolean canMove()throws Exception {
@@ -145,21 +173,39 @@ public class MainActivity extends Activity {
         }catch(Exception e){JSONObject failure=data("id",id);try{failure.put("success",false).put("error",e.getMessage());}catch(JSONException ignored){}emit("ack",failure);}
     }
     private void disconnect(boolean notify){
-        GatewayClient g=gateway;boolean wasOwned=owned;connected=false;owned=false;remoteHeld=false;preview=false;generation++;sshState="disconnected";
+        GatewayClient g=gateway;boolean wasOwned=owned;connected=false;owned=false;remoteHeld=false;preview=false;generation++;sshState="disconnected";previewStore.clear();HttpURLConnection active=activeFrame;if(active!=null)active.disconnect();
         Session old=ssh;ssh=null;if(old!=null)old.disconnect();
         if(g!=null && wasOwned)urgent.execute(()->{try{g.request("set_mode",data("mode","MANUAL"),1200,8192);}catch(Exception ignored){}try{g.request("operator_link",data("ssh_connected",false),700,4096);}catch(Exception ignored){}});
         if(notify)emit("disconnected",new JSONObject());
     }
-    private void fetchFrame(GatewayClient g,int gen){HttpURLConnection conn=null;
+    private void previewTick(){
+        GatewayClient g=gateway;int gen=generation;long now=SystemClock.elapsedRealtime();
+        JSONObject vision=latest.optJSONObject("telemetry");vision=vision==null?null:vision.optJSONObject("vision");
+        if(!connected||!foreground||!preview||g==null||vision==null||!vision.optBoolean("enabled")||now<nextFrameAt||!frameBusy.compareAndSet(false,true))return;
+        try{fetchFrame(g,gen);}finally{frameBusy.set(false);}
+    }
+    private void fetchFrame(GatewayClient g,int gen){HttpURLConnection conn=null;long start=SystemClock.elapsedRealtime();
         try{
-            if(!preview||!foreground)return;
             String h=g.host.contains(":")?"["+g.host+"]":g.host;
-            conn=(HttpURLConnection)new URL("http://"+h+":"+previewPort+"/frame.jpg").openConnection();conn.setConnectTimeout(1000);conn.setReadTimeout(1000);if(!token.isEmpty())conn.setRequestProperty("X-RCBoat-Token",token);
-            if(conn.getResponseCode()!=200)throw new IOException("새 영상 대기");
+            conn=(HttpURLConnection)new URL("http://"+h+":"+previewPort+"/frame.jpg").openConnection();activeFrame=conn;conn.setConnectTimeout(1000);conn.setReadTimeout(1500);conn.setUseCaches(false);
+            if(!token.isEmpty())conn.setRequestProperty("X-RCBoat-Token",token);
+            String previous=previewStore.etag();if(!previous.isEmpty())conn.setRequestProperty("If-None-Match",previous);
+            int code=conn.getResponseCode();long duration=SystemClock.elapsedRealtime()-start;
+            if(code==304){if(gen==generation)emit("frame_health",data("state","waiting"));nextFrameAt=SystemClock.elapsedRealtime()+500;return;}
+            if(code!=200)throw new IOException(code==503?"새 카메라 영상 대기":"영상 HTTP "+code);
+            String etag=conn.getHeaderField("ETag");double age=0;
+            try{age=Double.parseDouble(conn.getHeaderField("X-Frame-Age"))*1000;}catch(Exception ignored){}
+            if(!Double.isFinite(age)||age<0||age>2000)throw new IOException("Jetson 영상이 오래됐습니다");
             byte[] raw=readLimited(conn.getInputStream(),150000);
-            if(gen==generation&&preview)emit("frame",data("image",android.util.Base64.encodeToString(raw,android.util.Base64.NO_WRAP)));
-        }catch(Exception e){if(gen==generation)emit("frame_error",new JSONObject());}
-        finally{if(conn!=null)conn.disconnect();frameBusy.set(false);}
+            if(gen!=generation||!preview||!foreground)return;
+            if(previewStore.offer(raw,etag==null?"":etag,SystemClock.elapsedRealtime())){
+                JSONObject packet=new JSONObject().put("url","https://appassets.androidplatform.net/preview.jpg?v="+gen+"_"+SystemClock.elapsedRealtime())
+                    .put("source_age_ms",Math.round(age)).put("request_ms",duration).put("bytes",raw.length);
+                emit("frame",packet);
+            }
+            nextFrameAt=SystemClock.elapsedRealtime()+500;
+        }catch(Exception e){if(gen==generation&&preview){emit("frame_health",data("state","delayed"));nextFrameAt=SystemClock.elapsedRealtime()+1000;}}
+        finally{if(conn!=null)conn.disconnect();activeFrame=null;}
     }
     private static byte[] readLimited(InputStream in,int limit)throws IOException{try(InputStream input=in;ByteArrayOutputStream out=new ByteArrayOutputStream()){byte[] b=new byte[16384];int n;while((n=input.read(b))!=-1){if(out.size()+n>limit)throw new IOException("파일 크기 제한 초과");out.write(b,0,n);}return out.toByteArray();}}
     private void saveFile(String filename,String mime,byte[] raw)throws Exception{
@@ -172,12 +218,12 @@ public class MainActivity extends Activity {
     }
     public class AppBridge {
         @JavascriptInterface public void ready(){ready=true;JSONObject c=new JSONObject();android.content.SharedPreferences p=getPreferences(MODE_PRIVATE);try{c.put("host",p.getString("host","")).put("username",p.getString("username","jetson")).put("gateway_port",p.getInt("gateway_port",8765)).put("ssh_port",p.getInt("ssh_port",22)).put("version",BuildConfig.VERSION_NAME);}catch(Exception ignored){}emit("settings",c);emit("ntrip_profile",savedProfile());}
-        @JavascriptInterface public void connect(String json){try{JSONObject c=obj(json);String host=c.getString("host").trim();int port=c.optInt("gateway_port",8765);GatewayClient next=new GatewayClient(host,port,c.optString("token"));MainActivity.this.disconnect(false);gateway=next;token=c.optString("token");connected=true;sshState=c.optString("password").isEmpty()?"disconnected":"connecting";int gen=generation;c.put("host",host);
+        @JavascriptInterface public void connect(String json){try{JSONObject c=obj(json);String host=c.getString("host").trim();int port=c.optInt("gateway_port",8765);GatewayClient next=new GatewayClient(host,port,c.optString("token"));MainActivity.this.disconnect(false);gateway=next;token=c.optString("token");connected=true;long now=SystemClock.elapsedRealtime();lastStatus=0;rosHealth.reset(now);sshHealth.reset(now);sshState=c.optString("password").isEmpty()?"readonly":"connecting";int gen=generation;c.put("host",host);
             getPreferences(MODE_PRIVATE).edit().putString("host",host).putString("username",c.optString("username","jetson")).putInt("gateway_port",port).putInt("ssh_port",c.optInt("ssh_port",22)).apply();
             health.execute(()->connectSsh(c,gen));notice("ROS gateway 연결 중");}catch(Exception e){notice(e.getMessage());}}
         @JavascriptInterface public void disconnect(){MainActivity.this.disconnect(true);}
         @JavascriptInterface public void command(String id,String action,String json){try{JSONObject args=obj(json);int gen=generation;(action.equals("estop")||action.equals("ground_stop")||action.equals("set_mode")&&Arrays.asList("MANUAL","AUTO_SAFE").contains(args.optString("mode"))?urgent:commands).execute(()->perform(id,action,args,gen));}catch(Exception e){notice(e.getMessage());}}
-        @JavascriptInterface public void preview(boolean enabled){preview=enabled;}
+        @JavascriptInterface public void preview(boolean enabled){preview=enabled;nextFrameAt=0;if(!enabled){previewStore.clear();HttpURLConnection active=activeFrame;if(active!=null)active.disconnect();}}
         @JavascriptInterface public void remote(int steering,int throttle,boolean held){if(steering<4900||steering>7300||throttle<5800||throttle>7397)return;remoteSteering=steering;remoteThrottle=throttle;remoteAt=SystemClock.elapsedRealtime();remoteHeld=held;
             if(!held && gateway!=null && mode.equals("REMOTE"))urgent.execute(()->{try{gateway.request("set_remote_pwm",new JSONObject().put("steering_pwm",6000).put("throttle_pwm",6450),700,8192);}catch(Exception ignored){}});}
         @JavascriptInterface public void export(String filename,String mime,String text){commands.execute(()->{try{if(text.length()>4*1024*1024)throw new IOException("내보내기 크기 제한");saveFile(filename,mime,text.getBytes(java.nio.charset.StandardCharsets.UTF_8));}catch(Exception e){notice(e.getMessage());}});}

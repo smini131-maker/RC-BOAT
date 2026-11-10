@@ -12,7 +12,7 @@ from rcboat_ros.common import pack,unpack,fresh
 from rcboat_ros.control_config import validate_cruise
 from rcboat_ros.balloon_tracking import validate_config,TargetTracker,TrackingController
 
-VERSION='2.4.0'
+VERSION='2.4.1'
 def public_config(c):
     c=dict(c)
     if c['camera_type']=='rtsp':
@@ -27,7 +27,7 @@ class Vision:
         except (ValueError,OSError):local={}
         self.config=validate_config(dict(rospy.get_param('/rcboat/vision',{}),**local));self.applied_at=time.monotonic()
         self.frame=None;self.frame_at=0.;self.frame_id=0;self.live_source=False;self.source_type='none'
-        self.preview=b'';self.preview_at=0.;self.preview_requested_at=0.;self.preview_bytes=0;self.preview_count=0
+        self.preview=b'';self.preview_at=0.;self.preview_requested_at=0.;self.preview_bytes=0;self.preview_count=0;self.preview_sequence=0
         self.error='';self.preview_error='';self.model_ready=False;self.detector=None;self.desired={};self.detail={}
         self.tracker=TargetTracker();self.controller=TrackingController();self.safety={};self.gps={};self.actuator={};self.log_file=None
         self.status_pub=rospy.Publisher('/rcboat/vision/status',String,queue_size=1)
@@ -98,10 +98,16 @@ class Vision:
                 if self.path!='/frame.jpg':self.send_error(404);return
                 if not slots.acquire(False):self.send_error(429);return
                 try:
-                    with owner.lock:owner.preview_requested_at=time.monotonic();payload=owner.preview;stamp=owner.preview_at
+                    with owner.lock:
+                        owner.preview_requested_at=time.monotonic();payload=owner.preview;stamp=owner.preview_at
+                        sequence=getattr(owner,'preview_sequence',0)
                     if not payload or not owner.enabled or not fresh(stamp,2):self.send_error(503,'no fresh frame');return
-                    self.send_response(200);self.send_header('Content-Type','image/jpeg');self.send_header('Cache-Control','no-store')
-                    self.send_header('Content-Length',str(len(payload)));self.send_header('X-Frame-Age',str(round(time.monotonic()-stamp,3)));self.end_headers()
+                    etag='"%d-%.6f"'%(sequence,stamp)
+                    unchanged=self.headers.get('If-None-Match')==etag
+                    self.send_response(304 if unchanged else 200);self.send_header('Content-Type','image/jpeg');self.send_header('Cache-Control','no-store')
+                    self.send_header('ETag',etag);self.send_header('X-Frame-Sequence',str(sequence))
+                    self.send_header('Content-Length','0' if unchanged else str(len(payload)));self.send_header('X-Frame-Age',str(round(time.monotonic()-stamp,3)));self.end_headers()
+                    if unchanged:return
                     self.wfile.write(payload);owner.preview_count+=1;owner.preview_bytes+=len(payload)
                 except (OSError,TimeoutError):pass
                 finally:slots.release()
@@ -150,7 +156,7 @@ class Vision:
                 cv2.putText(image,'ZOOM / %.1fpx raw'%target['source_span_px'],(px,max(12,py-5)),cv2.FONT_HERSHEY_SIMPLEX,.36,(80,235,130),1)
         ok,encoded=cv2.imencode('.jpg',image,[cv2.IMWRITE_JPEG_QUALITY,c['preview_jpeg_quality']])
         if ok and len(encoded)<=150000:
-            with self.lock:self.preview=encoded.tobytes();self.preview_at=stamp
+            with self.lock:self.preview=encoded.tobytes();self.preview_at=stamp;self.preview_sequence+=1
     def run(self):
         revision=-1;processed=-1;last_preview=0;last_load=0;last_end=None
         while not rospy.is_shutdown() and not self.stopping:
