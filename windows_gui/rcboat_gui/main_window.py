@@ -49,7 +49,7 @@ from .widgets import MetricCard, RoutePlot, StatusCard, TelemetryGraph
 from rcboat_ros.control_config import CRUISE_MIN,CRUISE_MAX,CRUISE_DEFAULT,CRUISE_STEP,validate_cruise,validate_rc,THROTTLE_FORWARD_MAX
 
 
-APP_VERSION = "2.4.1"
+APP_VERSION = "2.4.2"
 
 
 from .ui_shell import STYLE

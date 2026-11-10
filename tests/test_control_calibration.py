@@ -199,6 +199,7 @@ class CruiseServiceTests(unittest.TestCase):
         actuator_module=importlib.util.module_from_spec(spec)
         with patch.dict(sys.modules,modules):spec.loader.exec_module(actuator_module)
         actuator=actuator_module.Actuator.__new__(actuator_module.Actuator)
+        actuator.lock=threading.RLock()
         actuator.last_at=100;actuator.output_calibration=dict(OUTPUT_DEFAULTS)
         for mode,source in [('MANUAL','MANUAL'),('AUTO','AUTO'),('NAVIGATION','NAVIGATION'),
                             ('GROUND_TEST','GROUND_TEST_NAVIGATION'),('BALLOON','BALLOON')]:

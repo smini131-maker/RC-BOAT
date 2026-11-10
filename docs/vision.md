@@ -1,6 +1,8 @@
-# v2.4.1 카메라 · 핑크 풍선 원거리 추적
+# v2.4.2 카메라 · 핑크 풍선 원거리 추적
 
-풍선 추적은 `main`의 통합 ROS 정식 v2.4.1에 포함됩니다. 항로 주행·도보 테스트와 같은 앱을 사용합니다. ROS 이전 v1.6.0은 별도 레거시 폴더와 브랜치에 보존합니다. 새 프로젝트 폴더는 `RCBoatControl_v2.4.1`이며 Jetson에는 한 버전의 ROS backend만 실행합니다.
+풍선 추적은 `main`의 통합 ROS 정식 v2.4.2에 포함됩니다. 항로 주행·도보 테스트와 같은 앱을 사용합니다. ROS 이전 v1.6.0은 별도 레거시 폴더와 브랜치에 보존합니다. 새 프로젝트 폴더는 `RCBoatControl_v2.4.2`이며 Jetson에는 한 버전의 ROS backend만 실행합니다.
+
+v2.4.2는 안전 판단과 입력 교체를 같은 잠금으로 보호하고, actuator의 명령·수신 시각·판정 시각을 한 번에 읽습니다. 판정 도중 새 콜백의 시각이 앞서 보이면서 발생하던 잘못된 timeout을 제거합니다. `FAILSAFE_MANUAL` 이벤트에 actuator 원본과 각 입력의 판정 당시 age를 기록하고 출력 상태에 명령 수신 시각·age·source를 추가합니다. 실제 timeout 기준과 수동 재허용 절차는 유지합니다. SSH를 끊은 뒤 MANUAL에서는 유효한 조종기 입력이 출력을 결정합니다. 앱 종료가 서보 전원 차단을 의미하지 않습니다. 소리가 계속 나면 선체 전원을 끄고 무부하 상태의 전원·링크 간섭을 확인한 후 사용합니다. 이번 수정에서 물리적 서보 출력 시험은 하지 않습니다.
 
 v2.4.1의 가중치와 감지 알고리즘은 v2.4.0과 같습니다. 모바일 연결/영상 전송을 수정한 버전입니다. 2026-11-10 사용자가 약 8m에 둔 23cm 풍선 장면의 원본 사진에서 약 42px, 신뢰도 0.89, 핑크 비율 0.90으로 확인했습니다. 같은 사진을 여러 번 추론한 결과를 독립 영상/감지율 시험으로 세지 않습니다. 조명을 켠 뒤 인식됐다는 사용자 확인이 있었으며 이 장면으로 다른 거리나 어두운 환경의 성능을 보장하지 않습니다.
 
@@ -30,11 +32,11 @@ v2.4.1의 가중치와 감지 알고리즘은 v2.4.0과 같습니다. 모바일 
 
 ## 아직 Jetson에 적용하지 않았다면
 
-1. v2.4.1 전체 ZIP을 풀고 PC·모바일 관제 앱을 종료합니다. Jetson을 같은 네트워크/휴대폰 핫스팟에 연결합니다. Jetson의 `hostname -I` 또는 핫스팟 연결 기기 목록에서 현재 IP를 확인합니다.
+1. v2.4.2 전체 ZIP을 풀고 PC·모바일 관제 앱을 종료합니다. Jetson을 같은 네트워크/휴대폰 핫스팟에 연결합니다. Jetson의 `hostname -I` 또는 핫스팟 연결 기기 목록에서 현재 IP를 확인합니다.
 2. **Windows PowerShell**에서 다음 순서로 전송합니다. IP는 접속할 때 입력합니다.
 
 ```powershell
-Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_v2.4.1"
+Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_v2.4.2"
 $jetsonIp = Read-Host "Jetson 현재 IP"
 if (-not (Test-NetConnection $jetsonIp -Port 22 -InformationLevel Quiet)) { throw "SSH 연결 불가" }
 $env:RCBOAT_NO_PAUSE = "1"
@@ -56,7 +58,7 @@ bash deployment/jetson/install_vision_dependencies.sh
 bash deployment/jetson/install_jetson_ros.sh
 ```
 
-완료 기준은 `RUNNING GATEWAY VERIFIED: v2.4.1`입니다. 설치 스크립트가 ROS를 시작하므로 추가로 `roslaunch`를 중복 실행하지 않습니다. 기존 항로·로그·NTRIP 자격정보는 유지합니다. 옛 카메라 설정에는 1080p/원거리 모드를 한 번 적용하고 원본 `~/.rcboat/vision.json.before_v2.4.0_*`을 보존합니다. 이후 사용자가 설정한 해상도나 원거리 끄기는 덮어쓰지 않습니다.
+완료 기준은 `RUNNING GATEWAY VERIFIED: v2.4.2`입니다. 설치 스크립트가 ROS를 시작하므로 추가로 `roslaunch`를 중복 실행하지 않습니다. 기존 항로·로그·NTRIP 자격정보는 유지합니다. 옛 카메라 설정에는 1080p/원거리 모드를 한 번 적용하고 원본 `~/.rcboat/vision.json.before_v2.4.0_*`을 보존합니다. 이후 사용자가 설정한 해상도나 원거리 끄기는 덮어쓰지 않습니다.
 
 4. GUI를 열기 전, 실제 카메라/처리 시간을 검사합니다. 아래는 기존 IMX219 CSI/sensor 0 예시이며 실제 연결 방식이 다르면 `--camera-type usb`를 사용합니다. GUI의 카메라는 꺼둡니다.
 
@@ -72,7 +74,7 @@ bash deployment/jetson/install_jetson_ros.sh
 ~/.rcboat/vision-venv/bin/python3 deployment/jetson/build_vision_engine.py models/balloon_yolov8n.onnx
 ```
 
-6. PC EXE 또는 모바일 APK v2.4.1 한 개를 제어 연결합니다. 풍선 화면 → 카메라 설정 → CSI/센서 0(장치에 맞게 변경) → 1920×1080 → 작은 풍선 원거리 감지 체크 → 저장 → 카메라 켜기입니다. 실제 감지 상자와 작은 대상 확대 창이 표시됩니다. 전체 영상 통신량은 기존 640×360 이하 JPEG를 유지합니다.
+6. PC EXE 또는 모바일 APK v2.4.2 한 개를 제어 연결합니다. 풍선 화면 → 카메라 설정 → CSI/센서 0(장치에 맞게 변경) → 1920×1080 → 작은 풍선 원거리 감지 체크 → 저장 → 카메라 켜기입니다. 실제 감지 상자와 작은 대상 확대 창이 표시됩니다. 전체 영상 통신량은 기존 640×360 이하 JPEG를 유지합니다.
 
 ## 거리별 감지 확인 후 추적 시작
 
@@ -135,7 +137,7 @@ USB V4L2와 Jetson Argus CSI를 지원하며 자동은 USB → CSI 순서입니�
 
 ```powershell
 # 새 폴더의 빌드된 앱
-.\dist\RCBoatControl_ROS_v2.4.1.exe
+.\dist\RCBoatControl_ROS_v2.4.2.exe
 # 다시 빌드할 때
 .\BUILD_ROS_GUI.cmd
 ```

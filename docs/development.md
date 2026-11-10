@@ -55,12 +55,12 @@ Remove-Item Env:QT_QPA_PLATFORM
 .\BUILD_ROS_GUI.cmd
 ```
 
-빌드 도구는 `%LOCALAPPDATA%\RCBoatBuild` 아래 전용 가상환경과 작업 경로를 사용합니다. 결과는 저장소의 `dist\RCBoatControl_ROS_v2.4.1.exe`입니다. `dist`와 빌드 캐시는 Git에 올리지 않습니다.
+빌드 도구는 `%LOCALAPPDATA%\RCBoatBuild` 아래 전용 가상환경과 작업 경로를 사용합니다. 결과는 저장소의 `dist\RCBoatControl_ROS_v2.4.2.exe`입니다. `dist`와 빌드 캐시는 Git에 올리지 않습니다.
 
 빌드 후에는 `--smoke-test`로 시작·종료를 확인할 수 있습니다.
 
 ```powershell
-.\dist\RCBoatControl_ROS_v2.4.1.exe --smoke-test
+.\dist\RCBoatControl_ROS_v2.4.2.exe --smoke-test
 ```
 
 ## 버전·배포 기준
@@ -123,3 +123,7 @@ v2.4.0은 네이티브 1080p 후보 영역의 단일 추론과 작은 대상 연
 v2.4.1은 모바일 연결 건강 상태와 영상 전송 수정입니다. ConnectionHealthTest는 일시 timeout/지속 실패/닫힌 세션/지연 회복을 가상 단조시각으로 검증하고 PreviewStoreTest는 최신 한 장·중복 프레임의 수신 시각 보존·잘못된 JPEG 제한을 검사합니다. 실제 HTTP preview 회귀는 인증·ETag 304·새 프레임·오래된 프레임 거부를 확인합니다. 모바일 화면 검사는 SSH/ROS 지연과 신선한 영상의 독립성, 숨긴 GPS DOM 유지, 영상 stale의 LIVE 해제까지 포함합니다. 실제 8m 풍선 사진은 별도 거리 확인 자료가 있어야 평가합니다.
 
 2026-11-10 v2.4.1 로컬 검증: Python 164개, Qt 화면 회귀, Android 단위 15개·lint·release 빌드, 모바일 화면 4종, EXE smoke 종료 0, 배포 staging 61개 hash를 통과했습니다. APK를 실제 연결 휴대폰에 업데이트 설치하고 v2.4.1 화면을 확인했습니다. 기존 YOLO 모델 hash와 PWM/항법/안전 정책은 그대로입니다.
+
+v2.4.2: `tests/test_control_snapshot.py`는 실제 ROS node 메서드와 가상 단조시각을 사용해 콜백 도착 순서를 강제로 겹칩니다. 이전 actuator에서는 새 명령이 판정 시각보다 앞서 보이며 `6000/6450/TIMEOUT`이 재현됐습니다. 수정본은 supervisor의 판단·입력 교체, actuator의 명령·수신 시각·시각 조회를 같은 잠금으로 처리합니다. 풍선과 MANUAL 출력 유지, RC/link/GPS/vision 갱신 경합, 실제 stale/future 거부·잠금·범위 초과 중립, 실제 actuator 유실 시 수동 전환과 진단 로그를 검사합니다. 하드웨어 I/O를 열지 않으며 물리적 서보 소음·전원·링크 검증을 대신하지 않습니다.
+
+2026-11-10 v2.4.2 검증: Python 172개(신규 경합 재현 8개 포함), Python 3.8 소스 컴파일, Qt workspace, 모바일 화면 4종, Android 단위 15개·lint·서명 release 빌드, EXE smoke 종료 0, staging 61개 hash를 확인했습니다. SM-S938N에 APK를 업데이트 설치하고 패키지 versionName 2.4.2/versionCode 20402를 확인했습니다. Jetson에 백업 후 설치하여 소스 61개 hash·실행 gateway 2.4.2·service active/NRestarts=0을 확인했습니다. E-STOP/6000·6450 잠금 상태 50회 조회에서 command age 0.000440~0.069476 s, actuator age 0.019755~0.059332 s였으며 모두 LOCKED였습니다. 기존 ntrip.env와 routes.json hash는 그대로입니다. 실제 비중립 출력·수상 추적·서보 소음 재현 시험은 하지 않았습니다.

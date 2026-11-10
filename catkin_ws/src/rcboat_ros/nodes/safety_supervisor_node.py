@@ -22,7 +22,7 @@ class Supervisor:
         self.output_calibration=load_output(rospy.get_param)
         self.mode='AUTO_SAFE';self.armed=False;self.estop=False
         self.vision={};self.vision_desired={};self.balloon_gps_gap_since=None
-        self.lock=threading.RLock();self.reason='';self.link={};self.actuator={};self.propulsion={}
+        self.lock=threading.RLock();self.reason='';self.link={};self.actuator={};self.propulsion={};self.decision_snapshot={}
         self.progress=ProgressMonitor();self.mode_since=time.monotonic()
         self.ground_test_actuation_enabled=False
         grace=float(rospy.get_param('/rcboat/ground_test_gps_grace_s',5.0))
@@ -41,15 +41,29 @@ class Supervisor:
         self.cmd=rospy.Publisher('/rcboat/safety/final_command',ControlCommand,queue_size=4)
         self.state=rospy.Publisher('/rcboat/safety/state',String,queue_size=4,latch=True)
         self.events=rospy.Publisher('/rcboat/events',String,queue_size=8)
-        rospy.Subscriber('/rcboat/gps/status',String,lambda m:setattr(self,'gps',unpack(m)))
-        rospy.Subscriber('/rcboat/rc/input',String,lambda m:setattr(self,'rc',unpack(m)))
-        rospy.Subscriber('/rcboat/navigation/desired',String,lambda m:setattr(self,'nav',unpack(m)))
-        rospy.Subscriber('/rcboat/gui/link',String,lambda m:setattr(self,'link',unpack(m)))
-        rospy.Subscriber('/rcboat/actuator/status',String,lambda m:setattr(self,'actuator',unpack(m)))
-        rospy.Subscriber('/rcboat/propulsion/status',String,lambda m:setattr(self,'propulsion',unpack(m)))
-        rospy.Subscriber('/rcboat/vision/status',String,lambda m:setattr(self,'vision',unpack(m)))
-        rospy.Subscriber('/rcboat/vision/desired',String,lambda m:setattr(self,'vision_desired',unpack(m)))
+        # The clock and all inputs used by one decision must describe the same
+        # snapshot. A callback arriving after that clock sample must wait until
+        # the decision finishes, rather than becoming a false "future" timeout.
+        for topic,name in [('/rcboat/gps/status','gps'),('/rcboat/rc/input','rc'),
+                ('/rcboat/navigation/desired','nav'),('/rcboat/gui/link','link'),
+                ('/rcboat/actuator/status','actuator'),('/rcboat/propulsion/status','propulsion'),
+                ('/rcboat/vision/status','vision'),('/rcboat/vision/desired','vision_desired')]:
+            rospy.Subscriber(topic,String,lambda m,name=name:self._receive(name,m),queue_size=1)
         rospy.Service('/rcboat/safety/execute',Execute,self.execute)
+    def _receive(self,name,message):
+        value=unpack(message)
+        with self.lock:setattr(self,name,value)
+
+    def _input_ages(self,now):
+        def age(value):
+            try:
+                stamp=float(value)
+                return round(now-stamp,6) if stamp>0 and math.isfinite(stamp) else None
+            except (ValueError,TypeError):return None
+        return dict(decision_monotonic=now,actuator_age_s=age(self.actuator.get('monotonic')),
+                    rc_age_s=age(self.rc.get('monotonic')),link_age_s=age(self.link.get('monotonic')),
+                    gps_age_s=age(self.gps.get('last_valid_monotonic')),
+                    vision_command_age_s=age(self.vision_desired.get('monotonic')))
     def execute(self,req):
         with self.lock:return self._execute(req)
 
@@ -145,7 +159,9 @@ class Supervisor:
         self.events.publish(pack(type='FAILSAFE_MANUAL',reason=reason,previous_mode=previous,
                                  mode='MANUAL',at=time.time(),monotonic=time.monotonic(),
                                  gps_snapshot=dict(self.gps),navigation_snapshot=dict(self.nav),
-                                 link_snapshot=dict(self.link)))
+                                 link_snapshot=dict(self.link),actuator_snapshot=dict(self.actuator),
+                                 decision_snapshot=dict(self.decision_snapshot),
+                                 vision_command_snapshot=dict(self.vision_desired)))
 
     def _link_fault(self,now,mode=None):
         if not fresh(float(self.link.get('monotonic') or 0),5.0,now):return 'GUI_LINK_TIMEOUT'
@@ -274,6 +290,7 @@ class Supervisor:
 
     def _command_locked(self):
         now=time.monotonic();source='AUTO_SAFE';s=SAFE_STEERING;t=SAFE_THROTTLE;lock=True
+        self.decision_snapshot=self._input_ages(now)
         if self.mode in ('AUTO','NAVIGATION','REMOTE','GROUND_TEST','BALLOON'):
             reason=self._fault(now)
             if reason:
@@ -328,7 +345,7 @@ class Supervisor:
                 msg.header.stamp=rospy.Time.now();msg.mode=self.mode;msg.source=source
                 msg.steering_pwm=int(s);msg.throttle_pwm=int(t);msg.actuator_locked=lock
                 self.cmd.publish(msg)
-                self.state.publish(pack(software_version="2.4.1",mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
+                self.state.publish(pack(software_version="2.4.2",mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
                                         mode_since_monotonic=self.mode_since,
                                         ground_test_actuation_enabled=self.ground_test_actuation_enabled,
                                         gps_grace_active=self.ground_gps_gap_since is not None or self.balloon_gps_gap_since is not None,
@@ -337,6 +354,7 @@ class Supervisor:
                                         gps_grace_s=self.navigation_gps_grace_s if self.mode=='NAVIGATION' else self.ground_gps_grace_s,
                                         gps_grace_mode='BALLOON' if self.balloon_gps_gap_since is not None else self.gps_grace_mode,
                                         reason=self.reason,manual_rearm_pending=self.manual_rearm_pending,
+                                        decision_snapshot=dict(self.decision_snapshot),
                                         rc_fresh=rc_valid(self.rc,self.rc_calibration,time.monotonic()),
                                         rc_input_calibration=self.rc_calibration,pca_output_calibration=self.output_calibration,
                                         propulsion_feedback_status='fault' if self.propulsion.get('fault') or self.propulsion.get('blocked') else 'available' if self.propulsion else 'unsupported',

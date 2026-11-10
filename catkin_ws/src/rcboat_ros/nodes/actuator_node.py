@@ -3,6 +3,7 @@
 import fcntl
 import os
 import time
+import threading
 import datetime as dt
 import rospy
 from std_msgs.msg import String
@@ -13,6 +14,7 @@ from rcboat_ros.control_config import load_output,validate_cruise,output_in_rang
 
 class Actuator:
     def __init__(self):
+        self.lock=threading.RLock()
         self.output_calibration=load_output(rospy.get_param)
         self.lockfd=open(PCA_OWNER_LOCK,'w')
         fcntl.flock(self.lockfd,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -33,11 +35,18 @@ class Actuator:
         self.last_good=(s,t)
     def safe_write(self):self.write(SAFE_STEERING,SAFE_THROTTLE)
     def command(self,msg):
-        self.last_message=msg;self.last_at=time.monotonic()
-    def resolve(self,now):
+        with self.lock:
+            self.last_message=msg;self.last_at=time.monotonic()
+    def resolve(self,now=None):
         """Resolve a received safety command without performing hardware I/O."""
+        with self.lock:
+            return self._resolve_locked(time.monotonic() if now is None else now)
+    def _resolve_locked(self,now):
         state='TIMEOUT';s=SAFE_STEERING;t=SAFE_THROTTLE
         msg=self.last_message
+        self.resolved_command_at=self.last_at if msg else None
+        self.resolved_command_age_s=round(now-self.last_at,6) if msg else None
+        self.resolved_command_source=msg.source if msg else None
         timeout=float(rospy.get_param('/rcboat/command_timeout_s',.75))
         if msg and 0<=now-self.last_at<=timeout:
             if msg.mode=='GROUND_TEST':
@@ -68,11 +77,16 @@ class Actuator:
     def run(self):
         rate=rospy.Rate(15)
         while not rospy.is_shutdown():
-            s,t,state=self.resolve(time.monotonic())
+            # Sample time after acquiring the command lock. A newer callback
+            # must never insert one neutral pulse by appearing ahead of now.
+            s,t,state=self.resolve()
             try:
                 self.write(s,t)
                 self.status.publish(pack(actual_steering_pwm=s,actual_throttle_pwm=t,
                                          command_applied=True,readback_available=False,status=state,
+                                         command_received_monotonic=self.resolved_command_at,
+                                         command_age_s=self.resolved_command_age_s,
+                                         command_source=self.resolved_command_source,
                                          output_time_utc=dt.datetime.now(dt.timezone.utc).isoformat(timespec='milliseconds').replace('+00:00','Z'),
                                          monotonic=time.monotonic()))
             except (OSError,RuntimeError) as exc:
