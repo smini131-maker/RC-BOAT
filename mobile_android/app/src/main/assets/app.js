@@ -3,7 +3,7 @@ const $=id=>document.getElementById(id), VERSION='2.4.4';
 const state={last:0,online:false,control:false,ssh:'disconnected',version:'',tele:{},ntripProfile:{},targetType:'multipath',routes:[],groups:[],targetDirty:false,pwmDirty:false,pwmPending:null,trackingUntil:0,page:'sail',editor:null};
 let sequence=0,toastTimer,routeSignature='',testSignature='',configSynced=false,frameAt=0,map,routeLayer,traceLine,boatMarker,fitBounds,lastCoords='',mapFitted=false,mapFocusSignature='';
 const pending=new Map(),trace=[];
-let healthState={},connectionSignature='',telemetryStale=false,videoState='waiting',frameTimes=[];
+let healthState={},connectionSignature='',telemetryStale=false,videoState='waiting',frameTimes=[],mapOverlayTimer;
 const fmt=(v,d=1,s='')=>typeof v==='number'&&Number.isFinite(v)?v.toFixed(d)+s:'no_data';
 const set=(id,text,level)=>{const e=$(id);if(!e)return;if(e.textContent!==String(text))e.textContent=text;for(const c of ['good','bad','warn'])e.classList.toggle(c,c===level);};
 const safetyReason=value=>({BALLOON_POP_ESTIMATED:'근접 풍선 소실 · 파열 추정 · 수동 전환',TARGET_ARRIVED:'목표 도착 · 수동 전환',SSH_DISCONNECTED:'SSH 단절 · 수동 전환',GUI_LINK_TIMEOUT:'관제 연결 만료 · 수동 전환',EMERGENCY_STOP:'비상정지 요청',ESTOP_CLEARED_NEUTRAL_REQUIRED:'비상정지 해제 · 스로틀 중립 확인 대기'})[value]||value;
@@ -70,20 +70,25 @@ function stickMove(e){if(e.pointerId!==stickPointer)return;const r=$('joystick')
 $('joystick').addEventListener('pointerdown',e=>{if(stickPointer!==null)return;if(state.tele.safety?.mode!=='REMOTE'||!readyToMove()){message('먼저 원격 제어 모드에 연결하세요');return;}e.preventDefault();stickPointer=e.pointerId;$('joystick').setPointerCapture(e.pointerId);$('joystick').classList.add('held');stickMove(e);holdTimer=setInterval(stickOutput,150);});$('joystick').addEventListener('pointermove',stickMove);['pointerup','pointercancel','lostpointercapture'].forEach(e=>$('joystick').addEventListener(e,remoteRelease));
 bind('openMode',()=>{$('modeSelect').value=['MANUAL','AUTO_SAFE','AUTO','REMOTE','NAVIGATION','BALLOON','GROUND_TEST'].includes(state.tele.safety?.mode)?state.tele.safety.mode:'MANUAL';$('modeDialog').showModal();});bind('closeMode',()=>$('modeDialog').close());
 bind('applyMode',async()=>{const mode=$('modeSelect').value;$('modeDialog').close();if(mode==='MANUAL'){await manual();return;}if(mode==='NAVIGATION'){page('sail');if(!target()){message('주행할 항로를 선택하세요');return;}$('startNav').click();return;}if(mode==='BALLOON'){page('camera');$('trackStart').click();return;}if(mode==='GROUND_TEST'){page('more');$('groundStart').click();return;}if(mode==='AUTO'&&!confirm('설정한 순항 PWM으로 자동 직진합니다. 실제 모터가 작동합니다. 시작할까요?'))return;await run('set_mode',{mode},mode==='AUTO_SAFE'?'안전 대기 전환':mode==='REMOTE'?'조이스틱 원격 모드 전환':'자동 직진 시작');if(mode==='REMOTE'){page('more');$('remoteDetails').open=true;$('remotePanel').scrollIntoView({block:'start'});}});
-function initMap(){if(!window.L)return;$('map').replaceChildren();map=L.map('map',{zoomControl:false,attributionControl:true}).setView([35.0752,129.0869],18);L.control.zoom({position:'topright'}).addTo(map);L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap',keepBuffer:1}).addTo(map);routeLayer=L.layerGroup().addTo(map);traceLine=L.polyline([],{color:'#f4cf69',weight:3,opacity:.95}).addTo(map);bind('fitMap',()=>{if(fitBounds?.isValid())map.fitBounds(fitBounds,{padding:[30,30],maxZoom:19});else if(trace.length)map.setView(trace[trace.length-1],18);});}
+function initMap(){if(!window.L)return;$('map').replaceChildren();map=L.map('map',{zoomControl:false,attributionControl:true}).setView([35.0752,129.0869],18);L.control.zoom({position:'topright'}).addTo(map);L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap',keepBuffer:1}).addTo(map);routeLayer=L.layerGroup().addTo(map);map.on('moveend',()=>{clearTimeout(mapOverlayTimer);mapOverlayTimer=setTimeout(()=>{routeSignature='';updateMap();},0);});traceLine=L.polyline([],{color:'#f4cf69',weight:3,opacity:.95}).addTo(map);bind('fitMap',()=>{if(fitBounds?.isValid())map.fitBounds(fitBounds,{padding:[30,30],maxZoom:19});else if(trace.length)map.setView(trace[trace.length-1],18);});}
 function updateMap(){
 if(!map)return;
 const r=state.tele.route||{},choice=target();
 const chosenIds=choice?(state.targetType==='multipath'?(choice.route_ids||[]):[choice.id]):(r.multipath?.enabled?(r.group_routes||[]):[r.selected_route_id]);
 const selected=new Set(chosenIds),signature=JSON.stringify([state.routes,[...selected],r.active_route_id]);
 if(signature!==routeSignature){
- routeSignature=signature;routeLayer.clearLayers();const all=[],focused=[];
+ routeSignature=signature;routeLayer.clearLayers();const all=[],focused=[],labelPositions=[],size=map.getSize();
  for(const item of state.routes){
   const valid=(item.waypoints||[]).filter(p=>Number.isFinite(p.lat)&&Math.abs(p.lat)<=90&&Number.isFinite(p.lon)&&Math.abs(p.lon)<=180);
   const points=valid.map(p=>[p.lat,p.lon]);all.push(...points);if(selected.has(item.id))focused.push(...points);
   const active=item.id===r.active_route_id,color=active?'#53dfbd':selected.has(item.id)?'#57b8eb':'#6c8293';
   L.polyline(points,{color,weight:active?5:3,opacity:(selected.has(item.id)||active)?0.95:0.5}).addTo(routeLayer);
-  if(selected.has(item.id)||active)points.slice(0,300).forEach((p,i)=>L.marker(p,{icon:L.divIcon({className:'wp-label',html:String(Number(valid[i].waypoint_number)||i+1),iconSize:[20,20],iconAnchor:[10,10]})}).addTo(routeLayer));
+  if(selected.has(item.id)||active)points.slice(0,300).forEach((p,i)=>{
+   const pixel=map.latLngToContainerPoint(p);
+   if(pixel.x<12||pixel.y<12||pixel.x>size.x-12||pixel.y>size.y-12||labelPositions.some(previous=>previous.distanceTo(pixel)<32))return;
+   labelPositions.push(pixel);
+   L.marker(p,{icon:L.divIcon({className:'wp-label',html:String(Number(valid[i].waypoint_number)||i+1),iconSize:[20,20],iconAnchor:[10,10]})}).addTo(routeLayer);
+  });
  }
  fitBounds=all.length?L.latLngBounds(all):null;
  const focus=focused.length?focused:all,focusSignature=JSON.stringify([chosenIds,focus]);

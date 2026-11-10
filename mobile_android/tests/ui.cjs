@@ -12,6 +12,16 @@ for(const [name,width,height]of[['phone-small',360,800],['phone',412,915],['tabl
  await page.addInitScript(()=>{window.calls=[];window.Boat={ready(){},connect(c){window.calls.push(['connect',JSON.parse(c)]);},disconnect(){window.onNative('disconnected',{});},preview(){},remote(...a){window.remoteCalls??=[];window.remoteCalls.push(a);},download(a,id){window.calls.push([a,{test_id:id}]);},export(n,m,t){window.calls.push(['export',{name:n,text:t}]);},command(id,action,args){window.calls.push([action,JSON.parse(args)]);setTimeout(()=>window.onNative('ack',{id,success:true,response:{cruise_applied_monotonic:120}}),1);}};});
  await page.goto(`http://127.0.0.1:${server.address().port}/index.html`);await page.evaluate(()=>window.onNative('ntrip_profile',{host:'saved.example.invalid',port:2101,mountpoint:'SAVED',username:'saved-user',tls:false}));assert.equal(await page.locator('#nUser').inputValue(),'saved-user');assert.equal(await page.locator('#nHost').inputValue(),'saved.example.invalid');await page.evaluate(s=>window.onNative('status',s),fixture);assert.equal(await page.locator('#nUser').inputValue(),'fixture-user');
  for(const tab of ['sail','routes','camera','gps','more']){await page.locator(`[data-page="${tab}"]`).click();await page.waitForTimeout(30);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false,`${name}/${tab}: horizontal clipping`);assert.equal(await page.locator('#estop').isVisible(),true);assert.equal(await page.locator('#manualAlways').isVisible(),true);assert.equal(await page.locator('#openMode').isVisible(),true);if(tab==='sail'){assert.equal(await page.locator('#startNav').isEnabled(),true);const box=await page.locator('#startNav').boundingBox();assert.ok(box.y+box.height<height-140,`${name}: start button must remain above safety controls`);await page.screenshot({path:path.join(out,`${name}-sail.png`),fullPage:true});}}
+ // Dense recorded points keep their full geometry while number badges avoid overlap.
+ await page.locator('[data-page="sail"]').click();
+ const denseMap=structuredClone(fixture);
+ denseMap.telemetry.route.routes[0].waypoints=Array.from({length:65},(_,i)=>({lat:35.0752+i*.000002,lon:129.0869+i*.000002,waypoint_number:i+1}));
+ await page.evaluate(s=>window.onNative('status',s),denseMap);await page.waitForTimeout(350);
+ assert.equal(await page.evaluate(()=>routeLayer.getLayers().find(l=>l instanceof L.Polyline).getLatLngs().length),65,'recorded coordinates must not be decimated');
+ assert.equal(await page.evaluate(()=>{const pixels=routeLayer.getLayers().filter(l=>l instanceof L.Marker).map(l=>map.latLngToContainerPoint(l.getLatLng()));return pixels.length>0&&pixels.length<30&&pixels.every((p,i)=>pixels.slice(i+1).every(q=>p.distanceTo(q)>=31.9));}),true,'waypoint badges must leave the path readable');
+ await page.evaluate(()=>map.setZoom(16,{animate:false}));await page.waitForTimeout(100);
+ assert.equal(await page.evaluate(()=>routeLayer.getLayers().find(l=>l instanceof L.Polyline).getLatLngs().length),65);
+ await page.evaluate(s=>window.onNative('status',s),fixture);
  // GPS may arrive before stored routes; later route data must still refit the map.
  await page.locator('[data-page="sail"]').click();
  const mapFixture=structuredClone(fixture),emptyMap=structuredClone(fixture);
