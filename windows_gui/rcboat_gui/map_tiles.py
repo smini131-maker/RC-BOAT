@@ -22,7 +22,7 @@ class TileLayer:
     def request(self,key):
         if key in self.pending or key in self.failed or len(self.pending)>=4:return
         z,x,y=key;req=QNetworkRequest(QUrl(f'https://tile.openstreetmap.org/{z}/{x}/{y}.png'))
-        req.setRawHeader(b'User-Agent',b'RCBoatControl/2.4.3 (desktop mission map; no prefetch)')
+        req.setRawHeader(b'User-Agent',b'RCBoatControl/2.4.4 (desktop mission map; no prefetch)')
         req.setTransferTimeout(4000);req.setAttribute(QNetworkRequest.CacheLoadControlAttribute,QNetworkRequest.PreferCache)
         reply=self.network.get(req);self.pending[key]=reply
         reply.finished.connect(lambda:self.finished(key,reply))

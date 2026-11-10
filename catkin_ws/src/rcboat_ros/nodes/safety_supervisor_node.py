@@ -352,7 +352,7 @@ class Supervisor:
                 msg.header.stamp=rospy.Time.now();msg.mode=self.mode;msg.source=source
                 msg.steering_pwm=int(s);msg.throttle_pwm=int(t);msg.actuator_locked=lock
                 self.cmd.publish(msg)
-                self.state.publish(pack(software_version="2.4.3",mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
+                self.state.publish(pack(software_version="2.4.4",mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
                                         estop_reason=self.estop_reason,estop_time_utc=self.estop_time_utc,estop_origin=self.estop_origin,
                                         mode_since_monotonic=self.mode_since,
                                         ground_test_actuation_enabled=self.ground_test_actuation_enabled,

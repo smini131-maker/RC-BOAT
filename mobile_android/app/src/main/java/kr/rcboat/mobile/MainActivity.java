@@ -20,6 +20,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class MainActivity extends Activity {
     private WebView web;
+    private AlertDialog jsConfirmDialog;
+    private JsResult pendingJsConfirm;
+    private int confirmGeneration;
     private final Handler main=new Handler(Looper.getMainLooper());
     private final ScheduledExecutorService poll=Executors.newSingleThreadScheduledExecutor();
     private final ScheduledExecutorService lease=Executors.newSingleThreadScheduledExecutor();
@@ -54,6 +57,17 @@ public class MainActivity extends Activity {
         else getWindow().getDecorView().setSystemUiVisibility(0);
         WebSettings s=web.getSettings();s.setJavaScriptEnabled(true);s.setDomStorageEnabled(true);s.setAllowFileAccess(false);s.setAllowContentAccess(false);s.setSupportMultipleWindows(false);
         s.setUserAgentString(s.getUserAgentString()+" RCBoatMobile/"+BuildConfig.VERSION_NAME);
+        web.setWebChromeClient(new WebChromeClient(){
+            @Override public boolean onJsConfirm(WebView view,String url,String message,JsResult result){
+                Uri origin=Uri.parse(url);
+                if(!foreground||isFinishing()||!"https".equals(origin.getScheme())||!"appassets.androidplatform.net".equals(origin.getHost())){result.cancel();return true;}
+                closeJsConfirm(false);pendingJsConfirm=result;confirmGeneration=generation;
+                jsConfirmDialog=new AlertDialog.Builder(MainActivity.this).setTitle("명령 확인").setMessage(message)
+                    .setPositiveButton("확인",(d,w)->closeJsConfirm(true)).setNegativeButton("취소",(d,w)->closeJsConfirm(false))
+                    .setOnCancelListener(d->closeJsConfirm(false)).create();
+                jsConfirmDialog.show();return true;
+            }
+        });
         WebViewAssetLoader assets=new WebViewAssetLoader.Builder().addPathHandler("/assets/",new WebViewAssetLoader.AssetsPathHandler(this)).build();
         web.setWebViewClient(new WebViewClient(){
             @Override public WebResourceResponse shouldInterceptRequest(WebView view,WebResourceRequest req){
@@ -170,10 +184,12 @@ public class MainActivity extends Activity {
             if(!allowed.contains(action))throw new IOException("지원하지 않는 명령");
             if(action.equals("ground_start")||action.equals("ground_resume")||action.equals("set_mode")&&Arrays.asList("NAVIGATION","BALLOON","REMOTE","AUTO").contains(args.optString("mode")))canMove();
             JSONObject result=g.request(action,args,10000,6*1024*1024);if(action.equals("configure"))cacheProfile(args);result.put("id",id).put("action",action);emit("ack",result);
+            if(action.equals("reset_estop"))poll.execute(this::pollStatus);
         }catch(Exception e){JSONObject failure=data("id",id);try{failure.put("success",false).put("error",e.getMessage());}catch(JSONException ignored){}emit("ack",failure);}
     }
     private void disconnect(boolean notify){
         GatewayClient g=gateway;boolean wasOwned=owned;connected=false;owned=false;remoteHeld=false;preview=false;generation++;sshState="disconnected";previewStore.clear();HttpURLConnection active=activeFrame;if(active!=null)active.disconnect();
+        main.post(()->closeJsConfirm(false));
         Session old=ssh;ssh=null;if(old!=null)old.disconnect();
         if(g!=null && wasOwned)urgent.execute(()->{try{g.request("set_mode",data("mode","MANUAL"),1200,8192);}catch(Exception ignored){}try{g.request("operator_link",data("ssh_connected",false),700,4096);}catch(Exception ignored){}});
         if(notify)emit("disconnected",new JSONObject());
@@ -231,6 +247,11 @@ public class MainActivity extends Activity {
         @JavascriptInterface public void download(String action,String testId){if(!Arrays.asList("download_ground_test","download_vision_log").contains(action))return;commands.execute(()->{try{if(gateway==null)throw new IOException("연결 필요");JSONObject r=gateway.request(action,data("test_id",testId),30000,48*1024*1024).getJSONObject("response");byte[] raw=android.util.Base64.decode(r.getString("zip_base64"),android.util.Base64.DEFAULT);byte[] digest=MessageDigest.getInstance("SHA-256").digest(raw);StringBuilder hex=new StringBuilder();for(byte b:digest)hex.append(String.format(Locale.ROOT,"%02x",b&255));if(!hex.toString().equals(r.getString("sha256")))throw new IOException("ZIP 무결성 검증 실패");saveFile(r.getString("filename"),"application/zip",raw);}catch(Exception e){notice(e.getMessage());}});}
     }
     @Override protected void onResume(){super.onResume();foreground=true;}
-    @Override protected void onPause(){foreground=false;disconnect(true);super.onPause();}
-    @Override protected void onDestroy(){disconnect(false);poll.shutdownNow();lease.shutdownNow();health.shutdownNow();commands.shutdownNow();frames.shutdownNow();urgent.shutdown();if(web!=null){web.removeJavascriptInterface("Boat");web.destroy();web=null;}super.onDestroy();}
+    private void closeJsConfirm(boolean accept){
+        JsResult result=pendingJsConfirm;pendingJsConfirm=null;
+        AlertDialog dialog=jsConfirmDialog;jsConfirmDialog=null;if(dialog!=null)dialog.dismiss();
+        if(result!=null){if(accept&&foreground&&confirmGeneration==generation&&!isFinishing())result.confirm();else result.cancel();}
+    }
+    @Override protected void onPause(){foreground=false;closeJsConfirm(false);disconnect(true);super.onPause();}
+    @Override protected void onDestroy(){closeJsConfirm(false);disconnect(false);poll.shutdownNow();lease.shutdownNow();health.shutdownNow();commands.shutdownNow();frames.shutdownNow();urgent.shutdown();if(web!=null){web.removeJavascriptInterface("Boat");web.destroy();web=null;}super.onDestroy();}
 }
