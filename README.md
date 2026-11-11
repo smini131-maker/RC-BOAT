@@ -2,9 +2,9 @@
 
 ROS Noetic 기반 RC 보트 자율운항 및 Windows 관제 시스템입니다. Jetson에서 GNSS/RTK 수신, 항로 선택, 조향·스로틀 제어와 시험 기록을 처리하고, Windows GUI에서 항로 편집과 운항 상태 확인, 시험 로그 다운로드를 수행합니다.
 
-Jetson ROS와 Android의 정식 버전은 **v2.4.6**입니다. **Windows v2.4.7**은 Jetson v2.4.6에 연결하며, 영상 연결이 끊기면 PC에서 미리보기 연결을 새로 엽니다. [Windows v2.4.7 다운로드](https://github.com/smini131-maker/RC-BOAT/releases/tag/v2.4.7)
+Jetson ROS, Windows, Android의 정식 버전은 **v2.4.8**입니다. 항법을 시작하면 ESC의 첫 전진 출력은 6650 PWM 이하이며, 이후 상승률을 초당 120 PWM으로 제한합니다. [v2.4.8 다운로드](https://github.com/smini131-maker/RC-BOAT/releases/tag/v2.4.8)
 
-ROS 이전 **v1.6.0은 별도 레거시로 유지**합니다. 원본은 [release/1.6.0 브랜치](https://github.com/smini131-maker/RC-BOAT/tree/release/1.6.0), 로컬 보존 폴더는 `RCBoatControl_v1.6.0`입니다. ROS 최신 폴더는 `RCBoatControl_v2.4.6`이며 아래 배포 명령은 ROS 버전에만 적용합니다.
+ROS 이전 **v1.6.0은 별도 레거시로 유지**합니다. 원본은 [release/1.6.0 브랜치](https://github.com/smini131-maker/RC-BOAT/tree/release/1.6.0), 로컬 보존 폴더는 `RCBoatControl_v1.6.0`입니다. ROS 최신 폴더는 `RCBoatControl_v2.4.8`이며 아래 배포 명령은 ROS 버전에만 적용합니다.
 
 v2.4.6은 Windows에서 수신한 카메라 JPEG가 표시되지 않던 오류를 수정합니다. Android는 카메라 탭에서 미리보기를 기본으로 켜고, 같은 탭에서 Jetson에 재연결하면 영상 수신을 재개합니다.
 
@@ -18,7 +18,7 @@ v2.4.1은 작은 핑크 풍선의 원거리 감지를 개선합니다. 1080p 원
 
 기존 120 PWM/s 상승률, 시작 6650·상한 7397, Windows 지도 일반 휠 확대·축소, 모바일 조이스틱·수동 전환을 유지합니다. 아직 Jetson에 적용하지 않았다면 [카메라·원거리 추적 안내](docs/vision.md)의 처음 설치 순서부터 진행합니다.
 
-Android 휴대폰·태블릿용 `dist/RCBoatMobile_v2.4.6.apk`를 추가했습니다. 모바일에서 기존 ROS gateway로 운항·항로·풍선 추적·GPS/RTK·도보 테스트·로그 다운로드를 이용합니다. 모든 탭의 수동 전환과 모드 변경, 2축 원격 조이스틱, RTK 로컬 프로필 보존을 지원합니다. 기존 항법·RC·안전 제어 기능을 유지합니다. [모바일 설치·사용·빌드](docs/mobile.md)를 참고하세요.
+Android 휴대폰·태블릿용 `dist/RCBoatMobile_v2.4.8.apk`를 추가했습니다. 모바일에서 기존 ROS gateway로 운항·항로·풍선 추적·GPS/RTK·도보 테스트·로그 다운로드를 이용합니다. 모든 탭의 수동 전환과 모드 변경, 2축 원격 조이스틱, RTK 로컬 프로필 보존을 지원합니다. 기존 항법·RC·안전 제어 기능을 유지합니다. [모바일 설치·사용·빌드](docs/mobile.md)를 참고하세요.
 
 v2.3.1은 카메라 버전의 설치 오류를 수정합니다. 기존 TensorFlow/사용자 NumPy를 상속하던 환경을 백업하고 전용 환경으로 분리하며, 실제 ONNX 추론과 ROS 의존성 확인 후에만 설치 성공을 표시합니다. v2.3.0의 지도 중심 GUI·풍선 연속 추적·RC 보정·7397 출력 상한·안전 제어·도보 테스트는 유지합니다. [카메라 버전 사용·배포](docs/vision.md)에 실행 명령과 실제 검증 범위를 정리했습니다.
 
@@ -54,7 +54,7 @@ Windows GUI ── TCP 8765 ── Jetson / ROS Noetic
 ## 시작하기
 
 ```powershell
-Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_v2.4.6"
+Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_v2.4.8"
 ```
 
 Windows GUI를 소스에서 실행하려면:
@@ -80,7 +80,7 @@ bash deployment/jetson/install_vision_dependencies.sh
 bash deployment/jetson/install_jetson_ros.sh
 ```
 
-각 명령이 오류 없이 끝나야 다음 명령을 실행합니다. 완료 조건은 `VISION INSTALL VERIFIED`와 `RUNNING GATEWAY VERIFIED: v2.4.6`입니다. `DEPLOY_ROS.cmd`는 소스 전송만 수행합니다. 자세한 환경 준비와 설정은 [설치·실행 안내](docs/setup.md)를 따릅니다.
+각 명령이 오류 없이 끝나야 다음 명령을 실행합니다. 완료 조건은 `VISION INSTALL VERIFIED`와 `RUNNING GATEWAY VERIFIED: v2.4.8`입니다. `DEPLOY_ROS.cmd`는 소스 전송만 수행합니다. 자세한 환경 준비와 설정은 [설치·실행 안내](docs/setup.md)를 따릅니다.
 
 ## 문서
 
@@ -112,6 +112,6 @@ docs/                    설치·운용·개발 문서
 
 ## 버전 및 시험 범위
 
-Jetson 소스 버전은 [VERSION](VERSION)에 기록합니다. 전체 ZIP과 Android APK는 [v2.4.6 릴리스](https://github.com/smini131-maker/RC-BOAT/releases/tag/v2.4.6)에 있습니다. Windows 미리보기 수정은 [v2.4.7 릴리스](https://github.com/smini131-maker/RC-BOAT/releases/tag/v2.4.7)의 EXE를 사용합니다.
+Jetson 소스 버전은 [VERSION](VERSION)에 기록합니다. 전체 ZIP, Android APK, Windows EXE는 [v2.4.8 릴리스](https://github.com/smini131-maker/RC-BOAT/releases/tag/v2.4.8)에 있습니다.
 
 기본 제어는 `HEADING` 모드와 고정 순항 PWM을 사용하며, 속도 피드백 제어는 기본적으로 꺼져 있습니다. 로그의 GPS 진행 방향은 선체 자세 센서 값과 다르고, `actual_*_pwm`은 장치에 보낸 명령 확인값입니다. 실물 출력 시험은 프로펠러를 제거한 상태에서 중립·RC 수동 전환·E-STOP을 먼저 확인합니다. 세부 조건과 한계는 [운항·시험](docs/operation.md)과 [로그 해석](docs/data-analysis.md)에 정리했습니다.

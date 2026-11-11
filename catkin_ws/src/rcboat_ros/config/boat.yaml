@@ -1,4 +1,4 @@
-version: '2.4.6'
+version: '2.4.8'
 gui_gateway_bind: '0.0.0.0'
 gui_gateway_port: 8765
 ground_test_log_root: '~/rcboat_ros_data/logs/ground_tests'

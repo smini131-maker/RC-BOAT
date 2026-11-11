@@ -10,7 +10,7 @@ from std_msgs.msg import String
 from rcboat_ros.msg import ControlCommand
 from rcboat_ros.common import SAFE_STEERING,SAFE_THROTTLE,pack,PCA_OWNER_LOCK
 from rcboat_ros.direct_pca import DirectLinuxPCA9685
-from rcboat_ros.control_config import load_output,validate_cruise,output_in_range
+from rcboat_ros.control_config import NavigationThrottleRamp,load_output,validate_cruise,output_in_range
 
 class Actuator:
     def __init__(self):
@@ -22,6 +22,8 @@ class Actuator:
         self.steer_ch=int(rospy.get_param('/rcboat/steering_channel',0))
         self.throttle_ch=int(rospy.get_param('/rcboat/throttle_channel',6))
         self.last_message=None;self.last_at=0;self.last_good=(SAFE_STEERING,SAFE_THROTTLE)
+        self.navigation_ramp=NavigationThrottleRamp()
+        self.navigation_session=None
         self.status=rospy.Publisher('/rcboat/actuator/status',String,queue_size=5)
         self.events=rospy.Publisher('/rcboat/events',String,queue_size=8)
         self.shutdown_done=False
@@ -47,6 +49,7 @@ class Actuator:
         self.resolved_command_at=self.last_at if msg else None
         self.resolved_command_age_s=round(now-self.last_at,6) if msg else None
         self.resolved_command_source=msg.source if msg else None
+        self.resolved_navigation_session=getattr(msg,'navigation_session_monotonic',0.0)
         timeout=float(rospy.get_param('/rcboat/command_timeout_s',.75))
         if msg and 0<=now-self.last_at<=timeout:
             if msg.mode=='GROUND_TEST':
@@ -64,7 +67,8 @@ class Actuator:
                         s=SAFE_STEERING;t=grace_pwm;state=msg.source
                 except ValueError:state='CRUISE_REJECTED'
             elif msg.source in ('AUTO','MANUAL','REMOTE','NAVIGATION','BALLOON'):
-                if output_in_range(msg.steering_pwm,msg.throttle_pwm,self.output_calibration):
+                if (output_in_range(msg.steering_pwm,msg.throttle_pwm,self.output_calibration) and
+                        (msg.source!='NAVIGATION' or msg.throttle_pwm>=SAFE_THROTTLE)):
                     s=msg.steering_pwm;t=msg.throttle_pwm;state=msg.source
         if msg and msg.mode in ('AUTO','NAVIGATION','GROUND_TEST','BALLOON') and state in ('AUTO','NAVIGATION','NAVIGATION_GPS_GRACE','GROUND_TEST_NAVIGATION','BALLOON'):
             try:
@@ -74,6 +78,19 @@ class Actuator:
                 s=SAFE_STEERING;t=SAFE_THROTTLE;state='CRUISE_REJECTED'
         return s,t,state
 
+    def navigation_output(self,throttle,state,now):
+        if state!='NAVIGATION':
+            self.navigation_ramp.reset()
+            self.navigation_session=None
+            return throttle
+        session=self.resolved_navigation_session
+        if session!=self.navigation_session:
+            self.navigation_ramp.reset()
+            self.navigation_session=session
+        # Start from the first PWM written for this session, even when earlier
+        # navigation commands were skipped before reaching the actuator.
+        return self.navigation_ramp.update(throttle,now)
+
     def run(self):
         rate=rospy.Rate(15)
         while not rospy.is_shutdown():
@@ -81,6 +98,7 @@ class Actuator:
             # must never insert one neutral pulse by appearing ahead of now.
             s,t,state=self.resolve()
             try:
+                t=self.navigation_output(t,state,time.monotonic())
                 self.write(s,t)
                 self.status.publish(pack(actual_steering_pwm=s,actual_throttle_pwm=t,
                                          command_applied=True,readback_available=False,status=state,

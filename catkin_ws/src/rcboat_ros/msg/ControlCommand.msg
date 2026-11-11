@@ -4,3 +4,4 @@ string source
 int32 steering_pwm
 int32 throttle_pwm
 bool actuator_locked
+float64 navigation_session_monotonic

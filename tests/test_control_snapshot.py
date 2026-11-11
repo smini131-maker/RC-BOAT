@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import patch
 
 import test_failsafe_v218 as base
-from rcboat_ros.control_config import OUTPUT_DEFAULTS
+from rcboat_ros.control_config import NavigationThrottleRamp, OUTPUT_DEFAULTS
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -142,5 +142,42 @@ class ActuatorSnapshotTests(unittest.TestCase):
         self.a.last_at=99.9
         self.a.last_message.actuator_locked=False;self.a.last_message.throttle_pwm=7398
         self.assertEqual(self.a.resolve(100.)[:2],(6000,6450))
+
+    def test_first_applied_navigation_pwm_and_subsequent_writes_use_the_ramp(self):
+        actuator=self.a
+        actuator.navigation_ramp=NavigationThrottleRamp()
+        actuator.navigation_session=None
+        writes=[];statuses=[]
+        actuator.write=lambda steering,throttle:writes.append((steering,throttle))
+        actuator.status=types.SimpleNamespace(publish=lambda data:statuses.append(json.loads(data)))
+        timeline=iter((
+            (100.0,'NAVIGATION',7397,90,False),
+            (100.25,'NAVIGATION',7397,90,False),
+            (101.0,'NAVIGATION',7397,90,False),
+            (106.225,'NAVIGATION',7397,90,False),
+            (106.5,'NAVIGATION',7397,90,True),
+            (106.75,'NAVIGATION',7397,90,False),
+            (107.0,'NAVIGATION',7397,106.9,False),
+            (107.25,'MANUAL',5800,0,False),
+        ))
+        now=100.0
+        def next_command():
+            nonlocal now
+            now,mode,throttle,session,locked=next(timeline)
+            actuator.command(types.SimpleNamespace(
+                mode=mode,source=mode,steering_pwm=6000,throttle_pwm=throttle,
+                actuator_locked=locked,navigation_session_monotonic=session))
+        resolve=actuator.resolve
+        def resolve_next():
+            next_command()
+            return resolve()
+        with patch.object(self.module.time,'monotonic',side_effect=lambda:now), \
+             patch.object(self.module.rospy,'Rate',return_value=types.SimpleNamespace(sleep=lambda:None),create=True), \
+             patch.object(self.module.rospy,'is_shutdown',side_effect=[False]*8+[True],create=True), \
+             patch.object(actuator,'resolve',side_effect=resolve_next):
+            actuator.run()
+        expected=[6650,6680,6770,7397,6450,6650,6650,5800]
+        self.assertEqual([pwm for _,pwm in writes],expected)
+        self.assertEqual([state['actual_throttle_pwm'] for state in statuses],expected)
 
 if __name__=='__main__':unittest.main()
