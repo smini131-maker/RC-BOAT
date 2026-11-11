@@ -130,7 +130,24 @@ class RampSafetyTests(unittest.TestCase):
     def setUpClass(cls):cls.module=base.load_supervisor()
     setUp=base.SupervisorTests.setUp
     refresh=base.SupervisorTests.refresh
+    request=base.SupervisorTests.request
     assert_manual_stop=base.SupervisorTests.assert_manual_stop
+
+    def test_reapplying_navigation_while_armed_keeps_applied_pwm(self):
+        session=self.s.mode_since
+        self.now+=3
+        self.refresh()
+        self.s.nav.update(route_id='new_route',desired_throttle_pwm=7000)
+        self.assertTrue(self.request('set_mode',mode='NAVIGATION',armed=True).success)
+        self.assertEqual(self.s.mode_since,session)
+        self.assertEqual(self.s._command(),('NAVIGATION',6100,7000,False))
+        self.assertTrue(self.request('set_mode',mode='AUTO_SAFE').success)
+        self.assertEqual(self.s._command()[1:],(6000,6450,True))
+        self.now+=.1
+        self.refresh()
+        self.assertTrue(self.request('set_mode',mode='NAVIGATION',armed=True).success)
+        self.assertNotEqual(self.s.mode_since,session)
+        self.assertEqual(self.s._command()[1:],(6000,6450,True))
 
     def test_pre_start_or_previous_session_high_command_is_locked(self):
         self.s.nav.update(desired_throttle_pwm=7000,ramp_active=False)

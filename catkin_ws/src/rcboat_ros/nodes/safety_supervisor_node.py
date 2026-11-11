@@ -98,6 +98,10 @@ class Supervisor:
                 if mode in ('NAVIGATION','GROUND_TEST'):
                     reason=self._navigation_fault(time.monotonic())
                     if reason:raise ValueError(reason)
+                if mode==self.mode=='NAVIGATION' and self.armed and bool(args.get('armed',False)):
+                    # Route selection is independent of arming. Keep the running
+                    # session and its PWM ramp when applying another route.
+                    return ExecuteResponse(True,pack(mode=self.mode,estop=self.estop,armed=self.armed))
                 if mode=='BALLOON':
                     if args.get('expected_mode_since_monotonic', self.mode_since) != self.mode_since:
                         raise ValueError('BALLOON_NOT_READY: operation mode changed')
@@ -379,7 +383,7 @@ class Supervisor:
                 if self.mode=='NAVIGATION':
                     msg.navigation_session_monotonic=self.mode_since
                 self.cmd.publish(msg)
-                self.state.publish(pack(software_version="2.4.8",mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
+                self.state.publish(pack(software_version="2.4.9",mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
                                         estop_reason=self.estop_reason,estop_time_utc=self.estop_time_utc,estop_origin=self.estop_origin,
                                         mode_since_monotonic=self.mode_since,
                                         ground_test_actuation_enabled=self.ground_test_actuation_enabled,

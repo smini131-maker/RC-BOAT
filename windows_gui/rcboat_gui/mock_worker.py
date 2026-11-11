@@ -102,27 +102,28 @@ class MockWorker(QThread):
                 if mode == "MANUAL" and not self.arduino_connected:
                     raise RuntimeError("Arduino/RC data is unavailable; MANUAL rejected")
                 if mode=="BALLOON" and not self.vision_enabled:raise ValueError("모의 카메라를 먼저 켜세요")
-                self.tracking_session=time.monotonic()
-                self.mode = mode
-                self.throttle_ramp.reset()
-                requested_state = {
-                    "AUTO": "AUTO",
-                    "MANUAL": "MANUAL_ACTIVE",
-                    "NAVIGATION": "NAVIGATION_ACTIVE",
-                    "REMOTE": "REMOTE_ACTIVE", "BALLOON":"BALLOON",
-                }[mode]
-                if mode == "NAVIGATION" and (not self.gps_connected or not self.gps_fix):
-                    requested_state = "NAVIGATION_WAITING_GPS"
-                    self.failsafe_reason = "GPS_NO_FIX"
-                else:
-                    self.failsafe_reason = ""
-                self.operation_state = requested_state
-                self.steering, self.throttle = 6000, (
-                    self.throttle_ramp.update(self.auto_cruise_pwm,time.monotonic()) if requested_state == "NAVIGATION_ACTIVE"
-                    else 6450
-                )
-                if mode == "AUTO":
-                    self.operation_state = "AUTO_SAFE"
+                continuing = (mode == self.mode == "NAVIGATION" and self.operation_state == "NAVIGATION_ACTIVE"
+                              and self.gps_connected and self.gps_fix)
+                if not continuing:
+                    self.tracking_session=time.monotonic()
+                    self.mode = mode
+                    self.throttle_ramp.reset()
+                    requested_state = {
+                        "AUTO": "AUTO_SAFE",
+                        "MANUAL": "MANUAL_ACTIVE",
+                        "NAVIGATION": "NAVIGATION_ACTIVE",
+                        "REMOTE": "REMOTE_ACTIVE", "BALLOON":"BALLOON",
+                    }[mode]
+                    if mode == "NAVIGATION" and (not self.gps_connected or not self.gps_fix):
+                        requested_state = "NAVIGATION_WAITING_GPS"
+                        self.failsafe_reason = "GPS_NO_FIX"
+                    else:
+                        self.failsafe_reason = ""
+                    self.operation_state = requested_state
+                    self.steering, self.throttle = 6000, (
+                        self.throttle_ramp.update(self.auto_cruise_pwm,time.monotonic())
+                        if requested_state == "NAVIGATION_ACTIVE" else 6450
+                    )
             elif command=='VISION_ENABLE':
                 self.vision_enabled=bool(kwargs.get('enabled'));self.vision_tracker.reset();self.vision_controller=TrackingController();self.vision_desired={}
             elif command=='VISION_CONFIGURE':
@@ -425,7 +426,7 @@ class MockWorker(QThread):
             self.telemetry.emit(
                 {
                     "type": "telemetry",
-                    "backend": {"name": "SIM", "version":"2.4.8", "ready": True, "node_count": 10,
+                    "backend": {"name": "SIM", "version":"2.4.9", "ready": True, "node_count": 10,
                                 "master_online": True, "gateway_online": True,
                                 "ssh_connected": False,
                                 "logger_state": "recording" if self.ground_test_active else "idle"},
