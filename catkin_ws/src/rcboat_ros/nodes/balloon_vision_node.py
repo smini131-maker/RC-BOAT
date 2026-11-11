@@ -13,7 +13,7 @@ from rcboat_ros.common import pack,unpack,fresh
 from rcboat_ros.control_config import validate_cruise
 from rcboat_ros.balloon_tracking import validate_config,TargetTracker,TrackingController
 
-VERSION='2.4.4'
+VERSION='2.4.5'
 def public_config(c):
     c=dict(c)
     if c['camera_type']=='rtsp':
@@ -31,16 +31,49 @@ class Vision:
         self.preview=b'';self.preview_at=0.;self.preview_requested_at=0.;self.preview_bytes=0;self.preview_count=0;self.preview_sequence=0
         self.error='';self.preview_error='';self.model_ready=False;self.detector=None;self.desired={};self.detail={};self.processed_frames=0
         self.tracker=TargetTracker();self.controller=TrackingController();self.safety={};self.gps={};self.actuator={};self.log_file=None
+        self.tracking_session=None;self.tracking_reset_at=0.
         self.status_pub=rospy.Publisher('/rcboat/vision/status',String,queue_size=1)
         self.desired_pub=rospy.Publisher('/rcboat/vision/desired',String,queue_size=1)
         self.events=rospy.Publisher('/rcboat/events',String,queue_size=8)
-        rospy.Subscriber('/rcboat/safety/state',String,lambda m:setattr(self,'safety',unpack(m)))
+        rospy.Subscriber('/rcboat/safety/state',String,self.on_safety)
         rospy.Subscriber('/rcboat/gps/status',String,lambda m:setattr(self,'gps',unpack(m)))
         rospy.Subscriber('/rcboat/actuator/status',String,lambda m:setattr(self,'actuator',unpack(m)))
         rospy.Service('/rcboat/vision/execute',Execute,self.execute);rospy.on_shutdown(self.close)
         self.start_preview();self.capture_thread=threading.Thread(target=self.capture,daemon=True);self.capture_thread.start()
         self.preview_thread=threading.Thread(target=self.preview_loop,daemon=True);self.preview_thread.start()
         self.timer=rospy.Timer(rospy.Duration(.2),self.publish)
+
+    def on_safety(self, message):
+        state = unpack(message)
+        session = None
+        if state.get('mode') == 'BALLOON' and state.get('armed') and not state.get('estop'):
+            session = state.get('mode_since_monotonic')
+        with self.lock:
+            self.safety = state
+            if session != self.tracking_session:
+                self.tracking_session = session
+                self.reset_tracking()
+
+    def reset_tracking(self):
+        # Called under the vision lock. Results from frames captured before this
+        # transition must not repopulate the tracker or the JPEG overlay.
+        self.tracking_reset_at = time.monotonic()
+        self.tracker.reset()
+        self.controller = TrackingController()
+        self.detail = {}
+        self.desired = {}
+        self.preview = b''
+        self.preview_at = 0.
+        self.desired_pub.publish(pack())
+
+    def track_frame(self, detections, shape, stamp, now, config):
+        if self.tracking_session is None or stamp < self.tracking_reset_at:
+            return {}, {}
+        target = self.tracker.update(detections, shape[1], shape[0], now, config, self.gps)
+        cruise = validate_cruise(rospy.get_param('/rcboat/cruise_pwm', 6650))
+        desired = self.controller.command(target, stamp, now, config, cruise, self.tracking_session)
+        return target, desired
+
     def execute(self,request):
         try:
             args=json.loads(request.arguments_json or '{}')
@@ -48,8 +81,9 @@ class Vision:
             with self.lock:
                 if request.action=='vision_enable':
                     if type(args.get('enabled')) is not bool:raise ValueError('enabled must be boolean')
-                    self.enabled=args['enabled'];self.revision+=1;self.model_ready=False;self.desired={};self.frame=None;self.frame_at=0
-                    self.preview=b'';self.tracker.reset();self.controller=TrackingController();self.error=''
+                    self.enabled=args['enabled'];self.revision+=1;self.model_ready=False;self.frame=None;self.frame_at=0
+                    self.live_source=False;self.source_type='none';self.error=''
+                    self.reset_tracking()
                     if self.log_file:self.log_file.close();self.log_file=None
                     if self.enabled:
                         folder=Path(os.path.expanduser('~/rcboat_ros_data/logs/vision'));folder.mkdir(parents=True,exist_ok=True)
@@ -62,7 +96,7 @@ class Vision:
                     c=validate_config(values);self.config_path.parent.mkdir(parents=True,exist_ok=True)
                     tmp=self.config_path.with_suffix('.tmp');tmp.write_text(json.dumps(c,indent=2));os.chmod(str(tmp),0o600);tmp.replace(self.config_path)
                     self.config=c;self.revision+=1;self.applied_at=time.monotonic()
-                elif request.action=='vision_reset_tracking':self.tracker.reset();self.controller=TrackingController();self.desired={}
+                elif request.action=='vision_reset_tracking':self.reset_tracking()
                 elif request.action!='vision_status':raise ValueError('unknown vision action')
                 result=dict(enabled=self.enabled,configuration=public_config(self.config),applied_monotonic=self.applied_at)
             self.events.publish(pack(type='VISION_CHANGE',action=request.action,at=time.time(),configuration=result['configuration']))
@@ -80,14 +114,20 @@ class Vision:
                     from rcboat_ros.camera_io import open_camera
                     if cap is not None:cap.release()
                     revision=self.revision;cap,kind,live=open_camera(dict(self.config),cv2)
-                    with self.lock:self.source_type=kind;self.live_source=live
+                    with self.lock:
+                        if self.enabled and revision == self.revision:
+                            self.source_type = kind
+                            self.live_source = live
                 ok,frame=cap.read();stamp=time.monotonic()
                 if not ok or frame is None or frame.ndim!=3:raise RuntimeError('CAMERA_READ_FAILED')
                 with self.lock:
                     if self.enabled and revision==self.revision:self.frame=frame;self.frame_at=stamp;self.frame_id+=1
                 time.sleep(.002)
             except Exception as exc:
-                with self.lock:self.frame_at=0;self.desired={};self.error=str(exc)
+                # Keep the last frame timestamp so the supervisor can enforce
+                # its freshness limit while a read or reconnect is delayed.
+                with self.lock:
+                    if self.enabled and revision == self.revision:self.error=str(exc)
                 if cap is not None:cap.release()
                 cap=None;time.sleep(.8)
         if cap is not None:cap.release()
@@ -126,6 +166,7 @@ class Vision:
             now=time.monotonic();online=self.enabled and fresh(self.frame_at,c['max_frame_age_s'],now);desired=dict(self.desired)
             if not online or not self.model_ready or not fresh(float(desired.get('monotonic') or 0),c['max_frame_age_s'],now):desired.update(valid=False,desired_steering_pwm=6000,desired_throttle_pwm=6450)
             status=dict(self.detail,software_version=VERSION,enabled=self.enabled,model_ready=self.model_ready,camera_online=online,live_source=self.live_source,
+                tracking_session=self.tracking_session,
                 source_type=self.source_type,frame_age_s=round(now-self.frame_at,3) if self.frame_at else None,max_frame_age_s=c['max_frame_age_s'],
                 preview_port=c['preview_port'],preview_error=self.preview_error,preview_frames_sent=self.preview_count,preview_bytes_sent=self.preview_bytes,
                 preview_generated=self.preview_sequence,processed_frames=self.processed_frames,
@@ -140,7 +181,7 @@ class Vision:
             start=time.monotonic()
             with self.lock:
                 c=dict(self.config);frame=self.frame;stamp=self.frame_at;sequence=self.frame_id;revision=self.revision
-                active=self.enabled and fresh(stamp,c['max_frame_age_s'],start) and start-self.preview_requested_at<3
+                active=self.enabled and stamp>=self.tracking_reset_at and fresh(stamp,c['max_frame_age_s'],start) and start-self.preview_requested_at<3
                 detail=dict(self.detail)
             if not active or frame is None or sequence==processed:time.sleep(.015);continue
             processed=sequence
@@ -162,7 +203,9 @@ class Vision:
         if target.get('predicted') and target.get('acquired'):
             iw,ih=image.shape[1],image.shape[0];x=int(max(0,min(iw-1,(target['center_x_normalized']+1)/2*iw)));cv2.arrowedLine(image,(iw//2,ih//2),(x,ih//2),(0,210,255),2)
         iw,ih=image.shape[1],image.shape[0]
-        cv2.line(image,(iw//2,0),(iw//2,ih),(220,220,220),1);cv2.putText(image,target.get('phase','NO_TARGET'),(10,24),cv2.FONT_HERSHEY_SIMPLEX,.55,(0,210,255),1)
+        cv2.line(image,(iw//2,0),(iw//2,ih),(220,220,220),1)
+        if target.get('phase'):
+            cv2.putText(image,target['phase'],(10,24),cv2.FONT_HERSHEY_SIMPLEX,.55,(0,210,255),1)
         # Native pixels are magnified for the operator only, never fed back as
         # extra detections. Full-resolution camera data stays on the Jetson.
         if target.get('acquired') and not target.get('predicted') and target.get('source_span_px',100)<40:
@@ -180,7 +223,7 @@ class Vision:
         ok,encoded=cv2.imencode('.jpg',image,[cv2.IMWRITE_JPEG_QUALITY,c['preview_jpeg_quality']])
         if ok and len(encoded)<=150000:
             with self.lock:
-                if self.enabled and (revision is None or revision==self.revision):
+                if self.enabled and stamp>=self.tracking_reset_at and (revision is None or revision==self.revision):
                     self.preview=encoded.tobytes();self.preview_at=stamp;self.preview_sequence+=1;self.preview_error=''
     def run(self):
         revision=-1;processed=-1;last_load=0;ends=deque(maxlen=60)
@@ -207,22 +250,21 @@ class Vision:
                 processed=frame_id;detections=self.detector.detect(frame) if self.detector else [];end=time.monotonic()
                 if self.detector is not None:ends.append(end)
                 with self.lock:
-                    if not self.enabled or revision!=self.revision:continue
-                    target=self.tracker.update(detections,frame.shape[1],frame.shape[0],end,c,self.gps)
-                    session=self.safety.get('mode_since_monotonic') if self.safety.get('mode')=='BALLOON' else None
-                    desired=self.controller.command(target,stamp,end,c,validate_cruise(rospy.get_param('/rcboat/cruise_pwm',6650)),session)
+                    if not self.enabled or revision!=self.revision or stamp<self.tracking_reset_at:continue
+                    target,desired=self.track_frame(detections,frame.shape,stamp,end,c)
                     if self.detector is None:desired['valid']=False
                     self.desired=desired
                     if self.detector is not None:self.processed_frames+=1
                     self.desired_pub.publish(pack(**desired))
-                    self.detail=dict(reason=target['phase'],target=target,detections=detections,inference_ms=round((end-start)*1000,1),processed_frame_monotonic=stamp,
+                    self.detail=dict(reason=target.get('phase','IDLE'),target=target,detections=detections,inference_ms=round((end-start)*1000,1),processed_frame_monotonic=stamp,
                         processed_fps=round((len(ends)-1)/(ends[-1]-ends[0]),2) if self.detector is not None and len(ends)>1 and ends[-1]>ends[0] else None,backend=self.detector.backend_name if self.detector else 'unavailable',
                         prediction_source='bearing_triangulation' if target.get('world_estimate') else 'image_motion',
                         detector_view=dict(getattr(self.detector,'last_view',{})),
                         range_validation='not_field_validated',design_goal_distance_m=100)
                     if self.detector is not None:self.error=''
             except Exception as exc:
-                with self.lock:self.desired={};self.error='VISION_ERROR: '+str(exc)
+                with self.lock:
+                    if self.enabled and revision == self.revision:self.error='VISION_ERROR: '+str(exc)
                 rospy.logwarn_throttle(5,'Vision: %s',exc)
             time.sleep(max(.002,1/self.config['inference_hz']-(time.monotonic()-start)))
         # Let Argus/GStreamer release its buffers before process teardown.

@@ -88,13 +88,51 @@ class BalloonSafetyTests(unittest.TestCase):
         self.s.mode='BALLOON';self.s.armed=True
         self.s.vision=dict(enabled=True,model_ready=True,camera_online=True,live_source=True,max_frame_age_s=1.5,monotonic=self.now)
         self.s.vision_desired=dict(valid=True,monotonic=self.now,tracking_session=self.s.mode_since,desired_steering_pwm=5900,desired_throttle_pwm=6650)
-    def test_arm_requires_real_camera_and_target_and_session(self):
+    def test_arm_requires_real_camera_but_acquires_target_in_new_session(self):
         self.assertFalse(self.request('set_mode',mode='BALLOON',armed=True).success)
-        self.ready();self.s.vision_desired['tracking_session']=99
+        self.ready()
+        self.s.vision_desired['tracking_session']=99
+        self.assertTrue(self.request('set_mode',mode='BALLOON',armed=True).success)
         self.assertEqual(self.s._command()[1:],(6000,6450,True))
+        self.assertEqual(self.s.mode, 'BALLOON')
         self.s.vision_desired['tracking_session']=self.s.mode_since
         self.assertEqual(self.s._command(),('BALLOON',5900,6650,False))
         self.s.vision['live_source']=False
+        self.assert_manual_stop('BALLOON_TARGET_OR_CAMERA_LOST')
+    def test_pending_start_cannot_rearm_after_manual_switch(self):
+        self.ready()
+        earlier_mode = self.s.mode_since
+        self.now += .1
+        self.refresh()
+        self.assertTrue(self.request('set_mode',mode='MANUAL').success)
+        response = self.request('set_mode',mode='BALLOON',armed=True,
+                                expected_mode_since_monotonic=earlier_mode)
+        self.assertFalse(response.success)
+        self.assertEqual(self.s.mode, 'MANUAL')
+    def test_frame_delay_holds_session_then_recovers_or_expires(self):
+        self.ready()
+        session = self.s.mode_since
+        desired = dict(self.s.vision_desired)
+        for delay, expected in ((1.0, (5900,6650,False)), (2.0, (6000,6450,True))):
+            self.now = 100 + delay
+            self.refresh()
+            self.ready()
+            self.s.vision.update(camera_online=delay < 1.5, monotonic=100)
+            self.s.vision_desired = desired
+            self.assertEqual(self.s._command()[1:], expected)
+            self.assertEqual((self.s.mode, self.s.mode_since), ('BALLOON', session))
+        self.assertEqual(self.s.reason, 'BALLOON_CAMERA_DELAY')
+        self.now = 102.1
+        self.refresh()
+        self.ready()
+        self.assertEqual(self.s._command(), ('BALLOON',5900,6650,False))
+        self.assertEqual(self.s.mode_since, session)
+        self.assertEqual(self.s.reason, '')
+        self.now = 105.1
+        self.refresh()
+        self.ready()
+        self.s.vision.update(camera_online=False, monotonic=100)
+        self.s.vision_desired = desired
         self.assert_manual_stop('BALLOON_TARGET_OR_CAMERA_LOST')
     def test_gps_ssh_delay_keep_mode_and_recover_without_rearming(self):
         self.ready();session=self.s.mode_since
@@ -105,7 +143,7 @@ class BalloonSafetyTests(unittest.TestCase):
         self.now=104.95;self.refresh();self.ready();self.assertEqual(self.s._command()[0],'BALLOON')
         self.assertEqual(self.s.mode_since,session);self.assertIsNone(self.s.balloon_gps_gap_since)
     def test_camera_fault_estop_rc_loss_confirmed_disconnect_and_gps_expiry(self):
-        for source,key,value,reason in [('vision','camera_online',False,'BALLOON_TARGET_OR_CAMERA_LOST'),
+        for source,key,value,reason in [('vision','enabled',False,'BALLOON_TARGET_OR_CAMERA_LOST'),
             ('link','ssh_connected',False,'SSH_DISCONNECTED'),('rc','monotonic',99,'RC_INPUT_LOST'),
             ('gps','transport_connected',False,'GPS_DISCONNECTED')]:
             self.refresh();self.ready();self.s.estop=False;getattr(self.s,source)[key]=value;self.assert_manual_stop(reason)

@@ -5,6 +5,7 @@ from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'catkin_ws/src/rcboat_ros/src'))
 from rcboat_ros.balloon_tracking import validate_config
 import test_ground_continuity_v2111 as harness
+from test_balloon_tracking import detection
 
 class VisionNodeTests(unittest.TestCase):
     def setUp(self):
@@ -17,6 +18,39 @@ class VisionNodeTests(unittest.TestCase):
             self.v=self.m.Vision()
         self.v.server=None;self.addCleanup(self.v.close);self.now=self.m.time.monotonic()
     def execute(self,action,**kwargs):return self.v.execute(types.SimpleNamespace(action=action,arguments_json=json.dumps(kwargs)))
+    def test_mode_and_camera_reset_discard_prediction_and_in_flight_frames(self):
+        vision = self.v
+        self.assertTrue(self.execute('vision_enable', enabled=True).success)
+
+        def mode(name, session):
+            vision.on_safety(types.SimpleNamespace(data=json.dumps(
+                dict(mode=name, armed=name == 'BALLOON', mode_since_monotonic=session))))
+
+        def frame(stamp, detections):
+            return vision.track_frame(detections, (480, 640), stamp, stamp, vision.config)
+
+        mode('BALLOON', 100)
+        started = vision.tracking_reset_at
+        for index in range(1, 4):
+            target, _ = frame(started + index * .33, [detection(.2)])
+        self.assertEqual(target['phase'], 'TRACKING')
+        vision.detail, vision.desired = frame(started + 1.2, [])
+        self.assertEqual(vision.detail['phase'], 'PREDICTING')
+        vision.preview = b'previous-overlay'
+
+        mode('MANUAL', 102)
+        self.assertEqual((vision.detail, vision.desired, vision.preview), ({}, {}, b''))
+        self.assertEqual(frame(started + 2, [detection()]), ({}, {}))
+        mode('BALLOON', 103)
+        self.assertEqual(frame(started - .1, [detection()]), ({}, {}))
+        self.assertEqual(frame(vision.tracking_reset_at + .1, [detection(-.2)])[0]['phase'], 'ACQUIRING')
+
+        self.assertTrue(self.execute('vision_enable', enabled=False).success)
+        mode('MANUAL', 104)
+        self.assertTrue(self.execute('vision_enable', enabled=True).success)
+        self.assertEqual(frame(vision.tracking_reset_at + .1, [detection()]), ({}, {}))
+        mode('BALLOON', 105)
+        self.assertEqual(frame(vision.tracking_reset_at + .1, [detection()])[0]['phase'], 'ACQUIRING')
     def test_disabled_model_missing_and_camera_stale_cannot_drive(self):
         self.v.desired=dict(valid=True,monotonic=self.now,desired_steering_pwm=4900,desired_throttle_pwm=7397)
         self.v.publish(None)

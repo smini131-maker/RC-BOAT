@@ -14,6 +14,7 @@ class BalloonPanel(QWidget):
         super().__init__();self.network=QNetworkAccessManager(self);self.reply=None;self.host='';self.port=8766
         self.remote_enabled=False;self.camera_enabled=False;self.mock=False;self.last_image=0;self.samples=deque(maxlen=60);self.etag=''
         self.dirty=False;self.synced=False;self.syncing=False;self.generation=0;self.pending=None;self.stamp=0;self.waiting_start=False
+        self.tracking_session=None;self.mode_since=None
         layout=QVBoxLayout(self);layout.setContentsMargins(0,4,0,0)
         bar=QHBoxLayout();self.summary=QLabel('카메라 연결 대기');self.summary.setObjectName('healthHeadline');bar.addWidget(self.summary,1)
         self.enable_button=QPushButton('카메라 켜기');self.disable_button=QPushButton('카메라 끄기')
@@ -66,7 +67,8 @@ class BalloonPanel(QWidget):
             self.waiting_start=False;self.synced=False;self.pending=None;self.image.clear();self.image.setText('ROS 연결 대기');self.summary.setText('카메라 연결 대기');self.last_image=0
             if self.reply:self.reply.abort()
     def begin_tracking(self):
-        self.waiting_start=True;self.start_button.setEnabled(False);self.summary.setText('풍선 감지 대기 · 감지하면 추적 시작')
+        if not self.remote_enabled or self.waiting_start or self.tracking_session is not None:return
+        self.waiting_start=True;self.start_button.setEnabled(False);self.summary.setText('카메라 준비 대기')
         if not self.camera_enabled:self.request.emit('VISION_ENABLE',{'enabled':True})
     def stop(self):
         self.waiting_start=False;self.stop_tracking.emit()
@@ -105,16 +107,40 @@ class BalloonPanel(QWidget):
             self.resolution.setCurrentIndex(self.resolution.findData(resolution));self.long_range.setChecked(c.get('long_range_enabled',True))
         finally:self.syncing=False
     def update_state(self,state,host):
-        v=state.get('vision') or {};d=state.get('vision_desired') or {};t=v.get('target') or {};self.host=host;self.port=int(v.get('preview_port') or 8766)
+        v=state.get('vision') or {};self.host=host;self.port=int(v.get('preview_port') or 8766)
+        camera_was_enabled=self.camera_enabled
         self.mock=bool(state.get('mock'));self.remote_enabled=bool((state.get('backend') or {}).get('gateway_online'));self.camera_enabled=bool(v.get('enabled'))
-        if not self.remote_enabled or state.get('estop'):self.waiting_start=False
-        active=state.get('mode')=='BALLOON';visible=bool(t.get('acquired')) and not t.get('predicted')
-        if self.waiting_start and self.remote_enabled and bool(d.get('valid')) and bool(v.get('live_source')) and visible and not state.get('estop'):
+        mode_since=state.get('mode_since_monotonic')
+        if not self.remote_enabled or state.get('estop') or (self.mode_since is not None and mode_since!=self.mode_since):
+            self.waiting_start=False
+        self.mode_since=mode_since
+        active=state.get('mode')=='BALLOON' and state.get('balloon_armed') and not state.get('estop')
+        session=mode_since if active else None
+        if session!=self.tracking_session or camera_was_enabled!=self.camera_enabled:
+            self.tracking_session=session
+            if self.reply:self.reply.abort()
+            self.last_image=0
+            self.image.clear()
+            self.image.setText('새 영상 수신 대기')
+        t=(v.get('target') or {}) if session is not None and v.get('tracking_session')==session else {}
+        visible=bool(t.get('acquired')) and not t.get('predicted')
+        if self.waiting_start and all(v.get(key) for key in ('enabled','camera_online','model_ready','live_source')):
             self.waiting_start=False;self.start_tracking.emit()
-        text='추적 중' if active else '감지 중' if visible else '풍선 감지 대기' if self.camera_enabled else '카메라 꺼짐'
-        if self.waiting_start:text='풍선 감지 대기 · 자동 시작 대기'
-        if state.get('failsafe_reason')=='BALLOON_POP_ESTIMATED':text='풍선 파열 추정 · 수동 전환'
-        if v.get('error'):text='카메라 / 모델 확인 필요';self.summary.setToolTip(str(v['error']))
+        phase_labels = {
+            'TRACKING':'풍선 추적 중', 'ACQUIRING':'풍선 감지 확인 중',
+            'TURN_BACK':'되돌아가기', 'POSITION_REACQUIRE':'추정 위치 접근',
+            'PREDICTING':'위치 예측', 'SEARCHING':'예측 추적',
+            'POP_PENDING':'근접 풍선 소실 확인 중 · 정지', 'POP_ESTIMATED':'파열 추정',
+        }
+        text=phase_labels.get(t.get('phase'),'풍선 감지 대기') if self.camera_enabled else '카메라 꺼짐'
+        if self.waiting_start:text='카메라 준비 대기'
+        if active and state.get('failsafe_reason')=='BALLOON_CAMERA_DELAY':
+            text='카메라 응답 대기 · 출력 정지'
+        elif active and v.get('error'):
+            text='카메라 응답 지연 · 추적 유지'
+        elif v.get('error'):
+            text='카메라 / 모델 확인 필요'
+        self.summary.setToolTip(str(v.get('error') or ''))
         if state.get('estop'):text='■ 비상정지 · 풍선 추적 출력 잠금'
         self.summary.setText(text);self.summary.setStyleSheet('color:' + ('#ff788a' if state.get('estop') else '#61dfad' if visible else '#edbd66' if self.camera_enabled else '#9bacc0'))
         self.enable_button.setVisible(not self.camera_enabled);self.disable_button.setVisible(self.camera_enabled)
@@ -151,7 +177,7 @@ class BalloonPanel(QWidget):
     def frame_finished(self):
         reply,self.reply=self.reply,None
         if reply is None:return
-        if reply.error()==QNetworkReply.NoError:
+        if reply.error()==QNetworkReply.NoError and self.camera_enabled:
             if reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)==304:reply.deleteLater();return
             raw=bytes(reply.readAll());pix=QPixmap()
             if len(raw)<=150000 and pix.loadFromData(raw,'JPG'):

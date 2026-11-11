@@ -130,12 +130,25 @@ p.sync_config(DEFAULTS,5);assert p.resolution.currentData()=='1280x720'
 p.request_sent('VISION_CONFIGURE','range',configs[-1][1])
 p.on_ack(dict(request_id='range',ok=True,configuration=dict(DEFAULTS,width=1280,height=720,long_range_enabled=False),applied_monotonic=6))
 assert not p.dirty and p.resolution.currentData()=='1280x720' and not p.long_range.isChecked()
-# Explicit start turns on the camera, waits for fresh actual detection, and arms once.
+# Explicit start waits for the live camera. A stale target is hidden in MANUAL.
 p.set_connected(True);p.camera_enabled=False;requests=[];starts=[]
 p.request.connect(lambda command,args:requests.append(command));p.start_tracking.connect(lambda:starts.append(True))
 p.begin_tracking();assert requests==['VISION_ENABLE'] and not starts
-ready=dict(backend={'gateway_online':True},mode='AUTO',vision={'enabled':True,'live_source':True,'target':{'acquired':True,'predicted':False}},vision_desired={'valid':True})
+ready=dict(backend={'gateway_online':True},mode='MANUAL',mode_since_monotonic=100,
+           vision={'enabled':True,'live_source':True,'camera_online':True,'model_ready':True,
+                   'tracking_session':90,'target':{'phase':'TURN_BACK','acquired':True,'predicted':True}})
 p.update_state(ready,'127.0.0.1');p.update_state(ready,'127.0.0.1');assert len(starts)==1
+assert '풍선 감지 대기' in p.summary.text()
+active=dict(ready,mode='BALLOON',mode_since_monotonic=101,balloon_armed=True)
+p.update_state(active,'127.0.0.1');assert '풍선 감지 대기' in p.summary.text()
+active['vision']=dict(ready['vision'],tracking_session=101)
+p.update_state(active,'127.0.0.1');assert '되돌아가기' in p.summary.text()
+p.update_state(dict(active,failsafe_reason='BALLOON_CAMERA_DELAY'),'127.0.0.1')
+assert '카메라 응답 대기' in p.summary.text()
+p.update_state(dict(ready,mode_since_monotonic=102),'127.0.0.1')
+assert '풍선 감지 대기' in p.summary.text()
+p.update_state(dict(ready,vision={'enabled':False}),'127.0.0.1')
+assert '카메라 꺼짐' in p.summary.text()
 p.begin_tracking();p.stop();p.update_state(ready,'127.0.0.1');assert len(starts)==1
 p.set_connected(False);assert not p.start_button.isEnabled()
 # Camera settings consume their own right-hand width; the image is never overlaid.
@@ -148,7 +161,7 @@ assert p.camera_drawer.horizontalScrollBar().maximum()==0
 p.settings_toggle.setChecked(False);QTest.qWait(220);app.processEvents()
 assert not p.camera_drawer.isVisible()
 w.rc_graph.append(None,None);assert w.rc_graph.series[0][-1] is None
-locked=SSHWorker._normalize(dict(success=True,version='2.4.4',gateway_online=True,master_online=True,telemetry={
+locked=SSHWorker._normalize(dict(success=True,version='2.4.5',gateway_online=True,master_online=True,telemetry={
     'safety':dict(mode='MANUAL',estop=True,actuator_locked=True,estop_reason='MAINTENANCE_CHECK',estop_time_utc='2026-11-10T10:00:00Z'),
     'vision':dict(enabled=True,model_ready=True,camera_online=True,target={'acquired':True,'predicted':False})}))
 w.update_telemetry(locked);app.processEvents()

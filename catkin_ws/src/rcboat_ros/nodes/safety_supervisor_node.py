@@ -15,7 +15,9 @@ from rcboat_ros.control_config import load_rc,load_output,rc_valid,neutral,norma
 
 MODES={'AUTO_SAFE','AUTO','MANUAL','REMOTE','NAVIGATION','GROUND_TEST','BALLOON'}
 
-from rcboat_ros.balloon_tracking import safe_balloon_output
+from rcboat_ros.balloon_tracking import balloon_camera_ready,safe_balloon_output
+
+BALLOON_CAMERA_RECOVERY_S = 5.0
 
 class Supervisor:
     def __init__(self):
@@ -96,8 +98,11 @@ class Supervisor:
                 if mode in ('NAVIGATION','GROUND_TEST'):
                     reason=self._navigation_fault(time.monotonic())
                     if reason:raise ValueError(reason)
-                if mode=='BALLOON' and safe_balloon_output(self.vision,self.vision_desired,time.monotonic()) is None:
-                    raise ValueError('BALLOON_NOT_READY: live camera and acquired pink target required')
+                if mode=='BALLOON':
+                    if args.get('expected_mode_since_monotonic', self.mode_since) != self.mode_since:
+                        raise ValueError('BALLOON_NOT_READY: operation mode changed')
+                    if not balloon_camera_ready(self.vision,time.monotonic()):
+                        raise ValueError('BALLOON_NOT_READY: live camera required')
                 self.balloon_gps_gap_since=None
                 self._clear_gps_grace('ABORTED','MODE_CHANGED')
                 self.mode=mode;self.mode_since=time.monotonic();self.reason='';self.progress.reset()
@@ -286,11 +291,31 @@ class Supervisor:
             if self.balloon_gps_gap_since is not None:self.events.publish(pack(type='BALLOON_GPS_GRACE_RECOVERED',at=time.time(),monotonic=now))
             self.balloon_gps_gap_since=None
             if self.reason=='BALLOON_GPS_GRACE':self.reason=''
-        if safe_balloon_output(self.vision,self.vision_desired,now,self.mode_since) is None:
-            # Wait briefly for the first inference tagged with this new arming session.
-            if now-self.mode_since<2 and safe_balloon_output(self.vision,self.vision_desired,now) is not None:return ''
-            return 'BALLOON_TARGET_OR_CAMERA_LOST'
-        return ''
+        vision, desired = self.vision, self.vision_desired
+        lost = 'BALLOON_TARGET_OR_CAMERA_LOST'
+        if not (vision.get('enabled') and vision.get('model_ready') and vision.get('live_source')):
+            return lost
+        if safe_balloon_output(vision, desired, now, self.mode_since) is not None:
+            if self.reason in ('BALLOON_CAMERA_DELAY', 'BALLOON_WAITING_TARGET'):
+                self.reason = 'BALLOON_GPS_GRACE' if self.balloon_gps_gap_since is not None else ''
+            return ''
+
+        current_session = desired.get('tracking_session') == self.mode_since
+        last_frame = desired.get('monotonic', 0) if current_session else self.mode_since
+        if not isinstance(last_frame, (int, float)) or not fresh(last_frame, BALLOON_CAMERA_RECOVERY_S, now):
+            return lost
+        camera_ready = balloon_camera_ready(vision, now)
+        recent_frame = camera_ready and fresh(last_frame, float(vision.get('max_frame_age_s', 1.5)), now)
+        if camera_ready and (not current_session or
+                             (desired.get('phase') in ('NO_TARGET', 'ACQUIRING') and recent_frame)):
+            self.reason = 'BALLOON_WAITING_TARGET'
+            return ''
+        if not recent_frame:
+            # Keep the session and target history. _command_locked holds neutral
+            # until the same session has a fresh, usable command again.
+            self.reason = 'BALLOON_CAMERA_DELAY'
+            return ''
+        return lost
 
     def _command(self):
         with self.lock:return self._command_locked()
@@ -352,7 +377,7 @@ class Supervisor:
                 msg.header.stamp=rospy.Time.now();msg.mode=self.mode;msg.source=source
                 msg.steering_pwm=int(s);msg.throttle_pwm=int(t);msg.actuator_locked=lock
                 self.cmd.publish(msg)
-                self.state.publish(pack(software_version="2.4.4",mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
+                self.state.publish(pack(software_version="2.4.5",mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
                                         estop_reason=self.estop_reason,estop_time_utc=self.estop_time_utc,estop_origin=self.estop_origin,
                                         mode_since_monotonic=self.mode_since,
                                         ground_test_actuation_enabled=self.ground_test_actuation_enabled,

@@ -58,7 +58,8 @@ class CompletionSafetyTests(unittest.TestCase):
     def test_completion_from_old_session_or_non_neutral_output_is_rejected(self):
         self.ready();self.s.mode_since=self.now-3
         self.s.vision_desired.update(completion_reason='BALLOON_POP_ESTIMATED',tracking_session=self.now-4,desired_steering_pwm=6000,desired_throttle_pwm=6450)
-        self.assert_manual_stop('BALLOON_TARGET_OR_CAMERA_LOST');self.assertFalse(self.s.estop)
+        self.assertEqual(self.s._command()[1:], (6000,6450,True))
+        self.assertEqual(self.s.mode, 'BALLOON');self.assertFalse(self.s.estop)
         self.refresh();self.ready();self.s.vision_desired.update(completion_reason='BALLOON_POP_ESTIMATED',desired_throttle_pwm=6650)
         self.assertEqual(self.s._command()[0],'BALLOON')
 

@@ -192,13 +192,21 @@ class TrackingController:
                    horizontal_error=error,area_ratio=target.get('area_ratio'),world_estimate=target.get('world_estimate'))
         return out
 
+def balloon_camera_ready(vision, now):
+    try:
+        limit = number(vision.get('max_frame_age_s', 1.5))
+        return (.3 <= limit <= 2 and vision.get('enabled') and vision.get('model_ready')
+                and vision.get('camera_online') and vision.get('live_source')
+                and fresh(number(vision.get('monotonic')), limit, now))
+    except (TypeError, ValueError):
+        return False
+
+
 def safe_balloon_output(vision,desired,now,session=None):
     try:
-        limit=number(vision.get('max_frame_age_s',1.5))
-        if not .3<=limit<=2:return None
-        if (not vision.get('enabled') or not vision.get('model_ready') or not vision.get('camera_online') or
-                not vision.get('live_source') or not fresh(number(vision.get('monotonic')),min(2,limit),now) or
-                not desired.get('valid') or not fresh(number(desired.get('monotonic')),min(2,limit),now)):return None
+        if not balloon_camera_ready(vision, now):return None
+        limit = number(vision.get('max_frame_age_s', 1.5))
+        if not desired.get('valid') or not fresh(number(desired.get('monotonic')), limit, now):return None
         if session is not None and desired.get('tracking_session')!=session:return None
         s,t=desired.get('desired_steering_pwm'),desired.get('desired_throttle_pwm')
         if not output_in_range(s,t) or t<SAFE_THROTTLE:return None

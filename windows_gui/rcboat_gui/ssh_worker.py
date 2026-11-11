@@ -17,7 +17,7 @@ from PySide6.QtCore import QThread, Signal
 from rcboat_ros.control_config import validate_cruise,output_in_range
 
 
-GUI_VERSION = "2.4.4"
+GUI_VERSION = "2.4.5"
 
 REMOTE_BRIDGE = r'''p=/home/jetson/rcboat_ros_ws/deployment/jetson/bridge_client.py
 [ -f "$p" ] && exec python3 "$p"
@@ -214,10 +214,13 @@ class SSHWorker(QThread):
         }
         if command == "SET_MODE":
             mode = str(kwargs.get("mode", "AUTO")).upper()
-            return {"action": "set_mode", "arguments": {
+            arguments = {
                 "mode": "AUTO_SAFE" if mode == "AUTO" else mode,
                 "armed": mode in {"NAVIGATION","BALLOON"},
-            }}
+            }
+            if mode == "BALLOON" and "expected_mode_since_monotonic" in kwargs:
+                arguments["expected_mode_since_monotonic"] = kwargs["expected_mode_since_monotonic"]
+            return {"action": "set_mode", "arguments": arguments}
         if command == "START_GPS_RECORDING":
             return {"action": "record_start", "arguments": kwargs}
         if command == "SET_MULTIPATH":
@@ -323,7 +326,7 @@ class SSHWorker(QThread):
         }
         logger_state = str(ground.get("state") or ("recording" if ground.get("active") else "idle"))
         return {
-            "type": "telemetry", "software_version": response.get("version", "2.4.4"),
+            "type": "telemetry", "software_version": response.get("version", "2.4.5"),
             "backend": {"name": str(response.get("backend") or "ROS Noetic"),
                         "ready": bool(response.get("gateway_online", True)), "node_count": len(nodes),
                         "master_online": bool(response.get("master_online")),
@@ -348,6 +351,7 @@ class SSHWorker(QThread):
             "final_throttle_pwm": safety.get('throttle_pwm'),
             "vision":cache.get("vision") or {}, "vision_desired":cache.get("vision_desired") or {},
             "balloon_armed":ros_mode=="BALLOON" and bool(safety.get("armed")),
+            "mode_since_monotonic":safety.get("mode_since_monotonic"),
             "cruise_applied_monotonic": nav.get('cruise_applied_monotonic'), "mock": False,
             "rc_input_calibration": safety.get('rc_input_calibration'),
             "pca_output_calibration": safety.get('pca_output_calibration'),
@@ -674,7 +678,7 @@ class SSHWorker(QThread):
                         self._backend_error = ""
                     except Exception as exc:
                         message = str(exc)
-                        offline = {"success": True, "version": "2.4.4", "backend": "ROS Noetic",
+                        offline = {"success": True, "version": "2.4.5", "backend": "ROS Noetic",
                                    "master_online": False, "gateway_online": False, "telemetry": {}, "nodes": []}
                         self.telemetry.emit(self._normalize(offline, self._ssh_confirmed))
                         if message != self._backend_error or now - self._backend_error_at >= 15.0:

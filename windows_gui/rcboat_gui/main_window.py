@@ -49,7 +49,7 @@ from .widgets import MetricCard, RoutePlot, StatusCard, TelemetryGraph
 from rcboat_ros.control_config import CRUISE_MIN,CRUISE_MAX,CRUISE_DEFAULT,CRUISE_STEP,validate_cruise,validate_rc,THROTTLE_FORWARD_MAX
 
 
-APP_VERSION = "2.4.4"
+APP_VERSION = "2.4.5"
 
 
 from .ui_shell import STYLE
@@ -1036,7 +1036,10 @@ class MainWindow(QMainWindow):
         if mode!="BALLOON":self.balloon_panel.waiting_start=False
         if mode != "REMOTE":
             self._release_remote_controls(send=False)
-        request_id = self.command("SET_MODE", mode=mode)
+        arguments = {"mode": mode}
+        if mode == "BALLOON" and self.balloon_panel.mode_since is not None:
+            arguments["expected_mode_since_monotonic"] = self.balloon_panel.mode_since
+        request_id = self.command("SET_MODE", **arguments)
         if request_id is not None:
             self._pending_mode_request = request_id
             self._pending_mode_target = mode
@@ -1047,7 +1050,11 @@ class MainWindow(QMainWindow):
         return request_id
 
     def set_mode(self) -> None:
-        self._request_mode(str(self.mode_combo.currentData()))
+        mode = str(self.mode_combo.currentData())
+        if mode == "BALLOON":
+            self.balloon_panel.begin_tracking()
+        else:
+            self._request_mode(mode)
 
     def _set_auto_speed_editor(self, value: int, *, dirty: bool) -> None:
         value = max(CRUISE_MIN,min(CRUISE_MAX,CRUISE_MIN + ((value-CRUISE_MIN+5)//CRUISE_STEP)*CRUISE_STEP))

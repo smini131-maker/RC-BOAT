@@ -3,7 +3,7 @@ const {chromium}=require('playwright');
 const http=require('http'),fs=require('fs'),path=require('path'),assert=require('node:assert/strict');
 const assets=path.resolve(__dirname,'../app/src/main/assets'),out=path.resolve(__dirname,'../../output/mobile-qa');fs.mkdirSync(out,{recursive:true});
 const server=http.createServer((req,res)=>{const file=path.join(assets,decodeURIComponent(req.url.split('?')[0]));if(!file.startsWith(assets+path.sep)){res.writeHead(403).end();return;}fs.readFile(file,(err,data)=>{if(err){res.writeHead(404).end();return;}res.setHeader('Content-Type',file.endsWith('.css')?'text/css':file.endsWith('.js')?'text/javascript':'text/html');res.end(data);});});
-const fixture={success:true,version:'2.4.4',master_online:true,gateway_online:true,mobile:{ssh:'connected',control:true},gps_settings:{navigation_max_hdop:3},ground_tests:[{id:'ground_test_20261104_120000',complete:true}],telemetry:{gps:{fix:true,healthy:true,data_validity:'valid',latitude:35.0752,longitude:129.0869,utm_easting_m:507920,utm_northing_m:3881385,utm_zone:'52N',satellites:17,hdop:.7,hacc_m:.05,cno_dbhz:37,speed_mps:.83,rtk_state:'RTK_FIXED',gps_data_age_s:.25,receiver_correction_age_status:'unsupported'},ntrip:{enabled:true,connected:true,host:'caster.example.invalid',port:2101,mountpoint:'TEST',credentials_saved:true,username:'fixture-user',correction_age_source:'JETSON_RTCM3_CRC_RECEPTION',last_correction_age_s:.4},navigation:{fresh:true,auto_cruise_pwm:6650,cruise_applied_monotonic:100,ramp_throttle_pwm:6650},safety:{mode:'AUTO_SAFE',armed:false,estop:false,actuator_locked:true},actuator:{actual_steering_pwm:6000,actual_throttle_pwm:6450},route:{selected_route_id:'c',selected_multipath_id:'a',active_route_id:'c',multipath:{enabled:true,endpoint_tolerance_m:.75},group_routes:['c','r'],recording:{active:false,point_count:0},routes:[{id:'c',name:'해수천 C',waypoints:[{lat:35.0752,lon:129.0869,waypoint_number:1},{lat:35.0753,lon:129.087,waypoint_number:2}]},{id:'r',name:'해수천 R',waypoints:[{lat:35.07519,lon:129.08691,waypoint_number:1},{lat:35.07529,lon:129.08701,waypoint_number:2}]}],multipaths:[{id:'a',name:'해수천 대루트 A',route_ids:['c','r']}]},vision:{enabled:false,configuration:{camera_type:'csi',camera_source:'/dev/video0',csi_sensor_id:0}},ground_test:{state:'idle',active:false,samples:0}}};
+const fixture={success:true,version:'2.4.5',master_online:true,gateway_online:true,mobile:{ssh:'connected',control:true},gps_settings:{navigation_max_hdop:3},ground_tests:[{id:'ground_test_20261104_120000',complete:true}],telemetry:{gps:{fix:true,healthy:true,data_validity:'valid',latitude:35.0752,longitude:129.0869,utm_easting_m:507920,utm_northing_m:3881385,utm_zone:'52N',satellites:17,hdop:.7,hacc_m:.05,cno_dbhz:37,speed_mps:.83,rtk_state:'RTK_FIXED',gps_data_age_s:.25,receiver_correction_age_status:'unsupported'},ntrip:{enabled:true,connected:true,host:'caster.example.invalid',port:2101,mountpoint:'TEST',credentials_saved:true,username:'fixture-user',correction_age_source:'JETSON_RTCM3_CRC_RECEPTION',last_correction_age_s:.4},navigation:{fresh:true,auto_cruise_pwm:6650,cruise_applied_monotonic:100,ramp_throttle_pwm:6650},safety:{mode:'AUTO_SAFE',armed:false,estop:false,actuator_locked:true},actuator:{actual_steering_pwm:6000,actual_throttle_pwm:6450},route:{selected_route_id:'c',selected_multipath_id:'a',active_route_id:'c',multipath:{enabled:true,endpoint_tolerance_m:.75},group_routes:['c','r'],recording:{active:false,point_count:0},routes:[{id:'c',name:'해수천 C',waypoints:[{lat:35.0752,lon:129.0869,waypoint_number:1},{lat:35.0753,lon:129.087,waypoint_number:2}]},{id:'r',name:'해수천 R',waypoints:[{lat:35.07519,lon:129.08691,waypoint_number:1},{lat:35.07529,lon:129.08701,waypoint_number:2}]}],multipaths:[{id:'a',name:'해수천 대루트 A',route_ids:['c','r']}]},vision:{enabled:false,configuration:{camera_type:'csi',camera_source:'/dev/video0',csi_sensor_id:0}},ground_test:{state:'idle',active:false,samples:0}}};
 (async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));let browser;try{
 try{browser=await chromium.launch({channel:'chrome',headless:true});}catch{browser=await chromium.launch({headless:true});}const errors=[];
 for(const [name,width,height]of[['phone-small',360,800],['phone',412,915],['tablet-portrait',800,1280],['tablet-s9plus',1400,876]]){
@@ -54,6 +54,35 @@ for(const [name,width,height]of[['phone-small',360,800],['phone',412,915],['tabl
  for(let i=0;i<3;i++)await page.evaluate(s=>window.onNative('status',s),cameraState);
  assert.equal(await page.evaluate(()=>window.savedGpsNode===document.getElementById('gpsMetrics').firstChild),true,'hidden GPS cards must not rebuild on camera updates');
  await page.evaluate(()=>window.onNative('frame',{url:'https://appassets.androidplatform.net/preview.jpg?v=1_3',source_age_ms:4500}));assert.equal(await page.locator('#liveBadge').isVisible(),false,'old frame must not claim LIVE');
+ const cameraSession=structuredClone(fixture);
+ Object.assign(cameraSession.telemetry.safety,{mode:'MANUAL',mode_since_monotonic:100});
+ Object.assign(cameraSession.telemetry.vision,{enabled:true,live_source:true,camera_online:false,model_ready:true,
+  tracking_session:99,target:{phase:'TURN_BACK',acquired:true,predicted:true}});
+ const showCameraSession=()=>page.evaluate(s=>window.onNative('status',s),cameraSession);
+ await showCameraSession();
+ assert.equal(await page.locator('#targetPhase').innerText(),'감지 대기');
+ page.once('dialog',dialog=>dialog.accept());
+ await page.locator('#trackStart').click();
+ assert.equal(await page.evaluate(()=>window.calls.some(c=>c[0]==='set_mode'&&c[1].mode==='BALLOON')),false);
+ cameraSession.telemetry.vision.camera_online=true;
+ await showCameraSession();
+ assert.deepEqual(await page.evaluate(()=>window.calls.at(-1)),
+  ['set_mode',{mode:'BALLOON',armed:true,expected_mode_since_monotonic:100}]);
+ Object.assign(cameraSession.telemetry.safety,{mode:'BALLOON',armed:true,mode_since_monotonic:101});
+ await showCameraSession();
+ assert.equal(await page.locator('#targetPhase').innerText(),'감지 대기');
+ cameraSession.telemetry.vision.tracking_session=101;
+ await showCameraSession();
+ assert.match(await page.locator('#targetPhase').innerText(),/되돌아가기/);
+ cameraSession.telemetry.safety.reason='BALLOON_CAMERA_DELAY';
+ await showCameraSession();
+ assert.match(await page.locator('#trackingStatus').innerText(),/카메라 응답 대기/);
+ Object.assign(cameraSession.telemetry.safety,{mode:'MANUAL',armed:false,mode_since_monotonic:102,reason:''});
+ await showCameraSession();
+ assert.equal(await page.locator('#targetPhase').innerText(),'감지 대기');
+ cameraSession.telemetry.vision.enabled=false;
+ await showCameraSession();
+ assert.equal(await page.locator('#trackingStatus').innerText(),'카메라 꺼짐');
  await page.evaluate(s=>window.onNative('status',s),fixture);
  await page.locator('[data-page="sail"]').click();await page.locator('#pwmNumber').fill('6900');await page.locator('#applyPwm').click();await page.waitForTimeout(30);assert.equal((await page.evaluate(()=>window.calls.find(c=>c[0]==='set_auto_cruise_pwm')))[1].value,6900);
  let update=structuredClone(fixture);update.telemetry.navigation.auto_cruise_pwm=6900;update.telemetry.navigation.cruise_applied_monotonic=120;await page.evaluate(s=>window.onNative('status',s),update);assert.match(await page.locator('#pwmStatus').innerText(),/적용 확인/);

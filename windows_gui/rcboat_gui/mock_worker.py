@@ -101,7 +101,7 @@ class MockWorker(QThread):
                     raise RuntimeError("Emergency Stop is latched")
                 if mode == "MANUAL" and not self.arduino_connected:
                     raise RuntimeError("Arduino/RC data is unavailable; MANUAL rejected")
-                if mode=="BALLOON" and (not self.vision_enabled or not self.vision_desired.get("valid")):raise ValueError("모의 카메라를 켜고 풍선 검출을 기다리세요")
+                if mode=="BALLOON" and not self.vision_enabled:raise ValueError("모의 카메라를 먼저 켜세요")
                 self.tracking_session=time.monotonic()
                 self.mode = mode
                 self.throttle_ramp.reset()
@@ -396,12 +396,23 @@ class MockWorker(QThread):
             if self.vision_enabled:
                 now=time.monotonic();cx=320+180*math.sin(t/3);bh=180+70*math.sin(t/6)
                 detections=[] if 14<t%24<20 else [dict(class_id=0,label='pink_balloon',confidence=.91,pink_fraction=.7,pink_confirmed=True,bbox=[cx-85,240-bh/2,cx+85,240+bh/2])]
-                target=self.vision_tracker.update(detections,640,480,now,self.vision_config,dict(fix=self.gps_fix,latitude=lat,longitude=lon,heading_deg=t*5%360,speed_mps=.7,last_valid_monotonic=now))
-                self.vision_desired=self.vision_controller.command(target,now,now,self.vision_config,self.auto_cruise_pwm,self.tracking_session if self.mode=='BALLOON' else None)
-                self.vision_state=dict(enabled=True,camera_online=True,model_ready=True,live_source=True,reason=target['phase'],target=target,configuration=dict(self.vision_config),applied_monotonic=self.vision_applied_at,backend='SIMULATION',inference_ms=None,processed_fps=None,frame_age_s=0.,monotonic=now,shared_cruise_pwm=self.auto_cruise_pwm)
-                if self.mode=='BALLOON' and not self.estop:
-                    if self.vision_desired['valid']:self.steering=self.vision_desired['desired_steering_pwm'];self.throttle=self.vision_desired['desired_throttle_pwm']
+                session = self.tracking_session if self.mode=='BALLOON' and not self.estop else None
+                target = {}
+                self.vision_desired = {}
+                if session is None:
+                    if self.vision_tracker.target is not None:self.vision_tracker.reset()
+                else:
+                    if self.vision_state.get('tracking_session')!=session:self.vision_tracker.reset()
+                    target=self.vision_tracker.update(detections,640,480,now,self.vision_config,dict(fix=self.gps_fix,latitude=lat,longitude=lon,heading_deg=t*5%360,speed_mps=.7,last_valid_monotonic=now))
+                    self.vision_desired=self.vision_controller.command(target,now,now,self.vision_config,self.auto_cruise_pwm,session)
+                    if self.vision_desired.get('completion_reason'):
+                        self._manual_fault(self.vision_desired['completion_reason'])
+                    elif self.vision_desired['valid']:
+                        self.steering=self.vision_desired['desired_steering_pwm'];self.throttle=self.vision_desired['desired_throttle_pwm']
+                    elif target['phase'] in ('NO_TARGET','ACQUIRING'):
+                        self.steering,self.throttle=6000,6450
                     else:self._manual_fault('BALLOON_TARGET_OR_CAMERA_LOST')
+                self.vision_state=dict(enabled=True,camera_online=True,model_ready=True,live_source=True,reason=target.get('phase','IDLE'),target=target,tracking_session=session,configuration=dict(self.vision_config),applied_monotonic=self.vision_applied_at,backend='SIMULATION',inference_ms=None,processed_fps=None,frame_age_s=0.,monotonic=now,shared_cruise_pwm=self.auto_cruise_pwm)
             else:
                 self.vision_state=dict(enabled=False,camera_online=False,model_ready=False,configuration=dict(self.vision_config),applied_monotonic=self.vision_applied_at)
                 if self.mode=='BALLOON':self._manual_fault('BALLOON_TARGET_OR_CAMERA_LOST')
@@ -414,7 +425,7 @@ class MockWorker(QThread):
             self.telemetry.emit(
                 {
                     "type": "telemetry",
-                    "backend": {"name": "SIM", "version":"2.4.4", "ready": True, "node_count": 10,
+                    "backend": {"name": "SIM", "version":"2.4.5", "ready": True, "node_count": 10,
                                 "master_online": True, "gateway_online": True,
                                 "ssh_connected": False,
                                 "logger_state": "recording" if self.ground_test_active else "idle"},
@@ -427,6 +438,7 @@ class MockWorker(QThread):
                     "failsafe_reason": self.failsafe_reason,
                     "manual_waiting_for_neutral": self.operation_state == "MANUAL_WAITING_NEUTRAL",
                     "vision":dict(self.vision_state),"vision_desired":dict(self.vision_desired),"balloon_armed":self.mode=="BALLOON",
+                    "mode_since_monotonic":self.tracking_session,
                     "auto_cruise_pwm": self.auto_cruise_pwm,
                     "ramp_throttle_pwm": self.throttle if nav_active and not self.estop else None,
                     "final_throttle_pwm": self.throttle,
