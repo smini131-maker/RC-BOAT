@@ -65,6 +65,7 @@ class BalloonPanel(QWidget):
         self.save_button.setEnabled(connected)
         if not connected:
             self.waiting_start=False;self.synced=False;self.pending=None;self.image.clear();self.image.setText('ROS 연결 대기');self.summary.setText('카메라 연결 대기');self.last_image=0
+            self.etag='';self.samples.clear()
             if self.reply:self.reply.abort()
     def begin_tracking(self):
         if not self.remote_enabled or self.waiting_start or self.tracking_session is not None:return
@@ -120,6 +121,7 @@ class BalloonPanel(QWidget):
             self.tracking_session=session
             if self.reply:self.reply.abort()
             self.last_image=0
+            self.etag='';self.samples.clear()
             self.image.clear()
             self.image.setText('새 영상 수신 대기')
         t=(v.get('target') or {}) if session is not None and v.get('tracking_session')==session else {}
@@ -167,7 +169,9 @@ class BalloonPanel(QWidget):
             if self.reply:self.reply.abort()
             return
         if self.reply or not self.remote_enabled or not self.camera_enabled or not self.host or self.mock:return
-        if self.last_image and time.monotonic()-self.last_image>2:self.image.clear();self.image.setText('새 영상 수신 대기 · 이전 영상 만료')
+        if self.last_image and time.monotonic()-self.last_image>2:
+            self.last_image=0;self.etag='';self.samples.clear()
+            self.image.clear();self.image.setText('새 영상 수신 대기 · 이전 영상 만료')
         host='['+self.host+']' if ':' in self.host else self.host;req=QNetworkRequest(QUrl(f'http://{host}:{self.port}/frame.jpg'));req.setTransferTimeout(1500)
         token=os.getenv('RCBOAT_GATEWAY_TOKEN','')
         if token:req.setRawHeader(b'X-RCBoat-Token',token.encode())
@@ -177,17 +181,33 @@ class BalloonPanel(QWidget):
     def frame_finished(self):
         reply,self.reply=self.reply,None
         if reply is None:return
-        if reply.error()==QNetworkReply.NoError and self.camera_enabled:
-            if reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)==304:reply.deleteLater();return
+        try:
+            if not self.camera_enabled or not self.show_preview.isChecked():
+                return
+            status=reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
+            if status==304 or reply.error()==QNetworkReply.OperationCanceledError:
+                return
+            if reply.error()!=QNetworkReply.NoError:
+                if not self.last_image or time.monotonic()-self.last_image>2:
+                    self.image.clear()
+                    self.image.setText({
+                        401:'영상 인증 필요', 503:'Jetson 영상 준비 중 · 다시 수신 중',
+                    }.get(status, '영상 연결 지연 · 다시 수신 중'))
+                return
             raw=bytes(reply.readAll());pix=QPixmap()
-            if len(raw)<=150000 and pix.loadFromData(raw,'JPG'):
-                self.etag=bytes(reply.rawHeader(b'ETag')).decode('ascii',errors='ignore')
-                self.image.setPixmap(pix.scaled(self.image.size(),Qt.KeepAspectRatio,Qt.SmoothTransformation));self.last_image=time.monotonic();self.samples.append((self.last_image,len(raw)))
-                if len(self.samples)>1:
-                    elapsed=max(.1,self.samples[-1][0]-self.samples[0][0])
-                    self.bandwidth.setText(f'미리보기 {(len(self.samples)-1)/elapsed:.1f} fps · {sum(n for _,n in list(self.samples)[1:])/elapsed/1024:.1f} KiB/s')
-        elif not self.last_image or time.monotonic()-self.last_image>2:self.image.clear();self.image.setText('새 카메라 영상 없음')
-        reply.deleteLater()
+            if len(raw)>150000 or not pix.loadFromData(raw,'JPG'):
+                if not self.last_image:self.image.setText('영상 형식 오류 · 다시 수신 중')
+                return
+            # Header pairs work with both Qt 6.6 and the Qt 6.12 str-only reader.
+            self.etag=next((bytes(value).decode('ascii',errors='ignore')
+                            for key,value in reply.rawHeaderPairs() if bytes(key).lower()==b'etag'),'')
+            self.image.setPixmap(pix.scaled(self.image.size(),Qt.KeepAspectRatio,Qt.SmoothTransformation))
+            self.last_image=time.monotonic();self.samples.append((self.last_image,len(raw)))
+            if len(self.samples)>1:
+                elapsed=max(.1,self.samples[-1][0]-self.samples[0][0])
+                self.bandwidth.setText(f'미리보기 {(len(self.samples)-1)/elapsed:.1f} fps · {sum(n for _,n in list(self.samples)[1:])/elapsed/1024:.1f} KiB/s')
+        finally:
+            reply.deleteLater()
     def shutdown(self):
         self.timer.stop();self.remote_enabled=False
         if self.reply:self.reply.abort()

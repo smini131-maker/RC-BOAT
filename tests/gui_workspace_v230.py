@@ -160,8 +160,54 @@ assert p.image.geometry().right()<p.camera_drawer.geometry().left()
 assert p.camera_drawer.horizontalScrollBar().maximum()==0
 p.settings_toggle.setChecked(False);QTest.qWait(220);app.processEvents()
 assert not p.camera_drawer.isVisible()
+# Exercise real QNetworkReply header parsing and recovery after a warm-up 503.
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
+from PySide6.QtCore import QBuffer, QIODevice
+from PySide6.QtGui import QPixmap
+from rcboat_gui.balloon_panel import BalloonPanel
+
+picture=QPixmap(32,18);picture.fill(Qt.magenta)
+buffer=QBuffer();buffer.open(QIODevice.WriteOnly);assert picture.save(buffer,'JPEG')
+jpeg=bytes(buffer.data())
+requests=[]
+class PreviewHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        previous=self.headers.get('If-None-Match')
+        requests.append(previous)
+        status=503 if len(requests)==1 else 304 if previous=='"frame-1"' else 200
+        body=jpeg if status==200 else b''
+        self.send_response(status)
+        self.send_header('ETag','"frame-1"')
+        self.send_header('Content-Length',str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    def log_message(self,*args):pass
+
+with ThreadingHTTPServer(('127.0.0.1',0),PreviewHandler) as server:
+    thread=Thread(target=server.serve_forever,daemon=True);thread.start()
+    preview=BalloonPanel();preview.timer.stop();preview.show()
+    preview.update_state(dict(ready,vision=dict(ready['vision'],preview_port=server.server_port)),'127.0.0.1')
+    def fetch_preview():
+        preview.fetch_frame()
+        for _ in range(200):
+            if preview.reply is None:return
+            QTest.qWait(10)
+        raise AssertionError('Preview request did not complete')
+    try:
+        fetch_preview()
+        assert '영상 준비 중' in preview.image.text()
+        fetch_preview()
+        assert not preview.image.pixmap().isNull() and preview.etag=='"frame-1"'
+        fetch_preview()
+        assert requests==[None,None,'"frame-1"'] and len(preview.samples)==1
+        assert not preview.image.pixmap().isNull()
+    finally:
+        preview.shutdown();preview.close()
+        server.shutdown();thread.join(timeout=2)
+
 w.rc_graph.append(None,None);assert w.rc_graph.series[0][-1] is None
-locked=SSHWorker._normalize(dict(success=True,version='2.4.5',gateway_online=True,master_online=True,telemetry={
+locked=SSHWorker._normalize(dict(success=True,version='2.4.6',gateway_online=True,master_online=True,telemetry={
     'safety':dict(mode='MANUAL',estop=True,actuator_locked=True,estop_reason='MAINTENANCE_CHECK',estop_time_utc='2026-11-10T10:00:00Z'),
     'vision':dict(enabled=True,model_ready=True,camera_online=True,target={'acquired':True,'predicted':False})}))
 w.update_telemetry(locked);app.processEvents()
