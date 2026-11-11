@@ -9,7 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'windows_gui'))
 from PySide6.QtWidgets import QApplication, QMessageBox
 from rcboat_gui.main_window import MainWindow
-from rcboat_gui.ssh_worker import SSHWorker, GUI_VERSION
+from rcboat_gui import JETSON_VERSION
+from rcboat_gui.ssh_worker import SSHWorker
 
 app = QApplication([])
 worker = SSHWorker('127.0.0.1', 22, 'fixture', '')
@@ -34,7 +35,7 @@ finally:
     health.join(2); heartbeat.join(2)
 assert not health.is_alive() and not heartbeat.is_alive()
 
-response = dict(success=True, version=GUI_VERSION, master_online=True, gateway_online=True,
+response = dict(success=True, version=JETSON_VERSION, master_online=True, gateway_online=True,
     telemetry=dict(safety=dict(mode='MANUAL', reason='GPS_INVALID_OR_STALE',
         actuator_locked=True, manual_rearm_pending=True),
         ground_test=dict(active=True, state='recording', samples=180, actuation_enabled=True,

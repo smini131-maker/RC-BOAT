@@ -36,8 +36,9 @@ class MappingTests(unittest.TestCase):
         import xml.etree.ElementTree as ET
         version=(ROOT/'VERSION').read_text().strip()
         self.assertEqual(ET.parse(ROOT/'catkin_ws/src/rcboat_ros/package.xml').findtext('version'),version)
-        for filename in ['windows_gui/rcboat_gui/main_window.py','windows_gui/rcboat_gui/ssh_worker.py',
-                         'catkin_ws/src/rcboat_ros/nodes/gui_bridge_node.py',
+        gui_versions=(ROOT/'windows_gui/rcboat_gui/__init__.py').read_text(encoding='utf-8')
+        self.assertIn(f'JETSON_VERSION = "{version}"',gui_versions)
+        for filename in ['catkin_ws/src/rcboat_ros/nodes/gui_bridge_node.py',
                          'catkin_ws/src/rcboat_ros/nodes/ground_test_logger_node.py']:
             self.assertIn('"'+version+'"',(ROOT/filename).read_text(encoding='utf-8'))
 

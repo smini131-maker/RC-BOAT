@@ -16,8 +16,7 @@ import paramiko
 from PySide6.QtCore import QThread, Signal
 from rcboat_ros.control_config import validate_cruise,output_in_range
 
-
-GUI_VERSION = "2.4.6"
+from . import JETSON_VERSION, __version__ as GUI_VERSION
 
 REMOTE_BRIDGE = r'''p=/home/jetson/rcboat_ros_ws/deployment/jetson/bridge_client.py
 [ -f "$p" ] && exec python3 "$p"
@@ -452,8 +451,8 @@ class SSHWorker(QThread):
         try:
             starts_motion = command in {"GROUND_TEST_START", "GROUND_TEST_RESUME"} or (
                 command == "SET_MODE" and str(request.get("mode") or "").upper() in {"NAVIGATION", "REMOTE", "BALLOON"})
-            if starts_motion and self._backend_version != GUI_VERSION:
-                raise RuntimeError(f"Jetson v{self._backend_version or 'unknown'} / GUI v{GUI_VERSION}: 백엔드 업데이트 후 운항하세요")
+            if starts_motion and self._backend_version != JETSON_VERSION:
+                raise RuntimeError(f"GUI v{GUI_VERSION}에는 Jetson v{JETSON_VERSION}이 필요합니다. 현재 Jetson v{self._backend_version or 'unknown'}")
             if command=='DOWNLOAD_VISION_LOG':
                 response=self._bridge({'action':'download_vision_log','arguments':{}})
                 if not response.get('success'):raise RuntimeError(response.get('error') or 'vision download failed')

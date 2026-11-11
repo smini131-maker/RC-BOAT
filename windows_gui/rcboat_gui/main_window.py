@@ -42,14 +42,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from . import JETSON_VERSION, __version__ as APP_VERSION
 from .credentials import delete_password, load_password, save_password
 from .mock_worker import MockWorker
 from .ssh_worker import SSHWorker
 from .widgets import MetricCard, RoutePlot, StatusCard, TelemetryGraph
 from rcboat_ros.control_config import CRUISE_MIN,CRUISE_MAX,CRUISE_DEFAULT,CRUISE_STEP,validate_cruise,validate_rc,THROTTLE_FORWARD_MAX
-
-
-APP_VERSION = "2.4.6"
 
 
 from .ui_shell import STYLE
@@ -1946,7 +1944,7 @@ class MainWindow(QMainWindow):
         backend_name = str(backend.get("name") or ("SIM" if state.get("mock") else "ROS"))
         node_count = int(backend.get("node_count") or 0)
         backend_version = str(backend.get("version") or "unknown")
-        version_match = backend_version == APP_VERSION or bool(state.get("mock"))
+        version_match = backend_version == JETSON_VERSION or bool(state.get("mock"))
         backend_text = (f"online · v{backend_version} · {node_count} nodes" if backend_ready else "offline")
         if backend_ready and not version_match:
             backend_text = f"online · v{backend_version} · 버전 불일치"

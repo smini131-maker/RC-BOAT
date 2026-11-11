@@ -1,17 +1,21 @@
 """Live balloon detection and one-click tracking; camera settings stay collapsed."""
+import logging
 import os,time
 from collections import deque
 from PySide6.QtCore import Qt,QTimer,QUrl,Signal,QVariantAnimation,QEasingCurve
 from PySide6.QtGui import QPixmap
-from PySide6.QtNetwork import QNetworkAccessManager,QNetworkRequest,QNetworkReply
+from PySide6.QtNetwork import QNetworkAccessManager,QNetworkProxy,QNetworkRequest,QNetworkReply
 from PySide6.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QFormLayout,QLabel,QLineEdit,
     QComboBox,QPushButton,QSpinBox,QCheckBox,QFileDialog,QSizePolicy,QScrollArea)
 from rcboat_ros.balloon_tracking import DEFAULTS
 
+logger = logging.getLogger('rcboat.preview')
+
 class BalloonPanel(QWidget):
     request=Signal(str,dict);start_tracking=Signal();stop_tracking=Signal()
     def __init__(self):
-        super().__init__();self.network=QNetworkAccessManager(self);self.reply=None;self.host='';self.port=8766
+        super().__init__();self.network=self._preview_network();self.reply=None;self.host='';self.port=8766
+        self.preview_request_at=0.;self.preview_retry_at=0.;self.preview_failure=None
         self.remote_enabled=False;self.camera_enabled=False;self.mock=False;self.last_image=0;self.samples=deque(maxlen=60);self.etag=''
         self.dirty=False;self.synced=False;self.syncing=False;self.generation=0;self.pending=None;self.stamp=0;self.waiting_start=False
         self.tracking_session=None;self.mode_since=None
@@ -60,13 +64,16 @@ class BalloonPanel(QWidget):
     def edited(self,*args):
         if not self.syncing:self.dirty=True;self.generation+=1;self.config_status.setText('수정 중 · 저장 전')
     def set_connected(self,connected):
+        was_connected=self.remote_enabled
         self.remote_enabled=bool(connected)
         for b in (self.enable_button,self.disable_button,self.stop_button,self.download_button,self.start_button):b.setEnabled(connected)
         self.save_button.setEnabled(connected)
         if not connected:
             self.waiting_start=False;self.synced=False;self.pending=None;self.image.clear();self.image.setText('ROS 연결 대기');self.summary.setText('카메라 연결 대기');self.last_image=0
             self.etag='';self.samples.clear()
-            if self.reply:self.reply.abort()
+            self.bandwidth.clear()
+        if self.remote_enabled!=was_connected:
+            self._reset_preview_connection()
     def begin_tracking(self):
         if not self.remote_enabled or self.waiting_start or self.tracking_session is not None:return
         self.waiting_start=True;self.start_button.setEnabled(False);self.summary.setText('카메라 준비 대기')
@@ -108,6 +115,8 @@ class BalloonPanel(QWidget):
             self.resolution.setCurrentIndex(self.resolution.findData(resolution));self.long_range.setChecked(c.get('long_range_enabled',True))
         finally:self.syncing=False
     def update_state(self,state,host):
+        previous_endpoint=(self.host,self.port)
+        was_connected=self.remote_enabled
         v=state.get('vision') or {};self.host=host;self.port=int(v.get('preview_port') or 8766)
         camera_was_enabled=self.camera_enabled
         self.mock=bool(state.get('mock'));self.remote_enabled=bool((state.get('backend') or {}).get('gateway_online'));self.camera_enabled=bool(v.get('enabled'))
@@ -117,11 +126,12 @@ class BalloonPanel(QWidget):
         self.mode_since=mode_since
         active=state.get('mode')=='BALLOON' and state.get('balloon_armed') and not state.get('estop')
         session=mode_since if active else None
-        if session!=self.tracking_session or camera_was_enabled!=self.camera_enabled:
+        if (session!=self.tracking_session or camera_was_enabled!=self.camera_enabled or
+                previous_endpoint!=(self.host,self.port) or was_connected!=self.remote_enabled):
             self.tracking_session=session
-            if self.reply:self.reply.abort()
+            self._reset_preview_connection()
             self.last_image=0
-            self.etag='';self.samples.clear()
+            self.samples.clear();self.bandwidth.clear()
             self.image.clear()
             self.image.setText('새 영상 수신 대기')
         t=(v.get('target') or {}) if session is not None and v.get('tracking_session')==session else {}
@@ -164,30 +174,68 @@ class BalloonPanel(QWidget):
         self.shared_speed.setText('목표 PWM '+str(state.get('auto_cruise_pwm') or v.get('shared_cruise_pwm') or '—')+' · 최종 출력 '+str((state.get('pca') or {}).get('throttle_pwm','—')))
         if self.mock:self.image.setPixmap(QPixmap());self.image.setText('SIMULATION · 모의 감지 상태\n실제 카메라 영상 아님')
         elif not self.camera_enabled:self.image.setPixmap(QPixmap());self.image.setText('카메라 꺼짐')
+
+    def _preview_network(self):
+        network=QNetworkAccessManager(self)
+        network.setProxy(QNetworkProxy(QNetworkProxy.NoProxy))
+        return network
+
+    def _reset_preview_connection(self):
+        reply,self.reply=self.reply,None
+        if reply is not None:
+            reply.abort()
+        previous,self.network=self.network,self._preview_network()
+        previous.deleteLater()
+        self.etag=''
+        self.preview_retry_at=0.
+
+    def _preview_transport_failed(self,error):
+        if self.preview_failure is None:
+            logger.warning('Preview connection interrupted: %s',error)
+        self.preview_failure=error
+        self._reset_preview_connection()
+        self.preview_retry_at=time.monotonic()+.25
+        if not self.last_image:
+            self.image.setText('영상 연결 지연 · 재연결 중')
+
     def fetch_frame(self):
-        if not self.isVisible() or not self.show_preview.isChecked():
-            if self.reply:self.reply.abort()
+        if (not self.isVisible() or not self.show_preview.isChecked() or
+                not self.remote_enabled or not self.camera_enabled or not self.host or self.mock):
+            if self.reply is not None:self._reset_preview_connection()
             return
-        if self.reply or not self.remote_enabled or not self.camera_enabled or not self.host or self.mock:return
-        if self.last_image and time.monotonic()-self.last_image>2:
-            self.last_image=0;self.etag='';self.samples.clear()
+        now=time.monotonic()
+        if self.last_image and now-self.last_image>2:
+            self.last_image=0;self.etag='';self.samples.clear();self.bandwidth.clear()
             self.image.clear();self.image.setText('새 영상 수신 대기 · 이전 영상 만료')
+        if self.reply is not None:
+            if now-self.preview_request_at>1.8:self._preview_transport_failed('request timeout')
+            return
+        if now<self.preview_retry_at:return
         host='['+self.host+']' if ':' in self.host else self.host;req=QNetworkRequest(QUrl(f'http://{host}:{self.port}/frame.jpg'));req.setTransferTimeout(1500)
         token=os.getenv('RCBOAT_GATEWAY_TOKEN','')
         if token:req.setRawHeader(b'X-RCBoat-Token',token.encode())
         if self.etag:req.setRawHeader(b'If-None-Match',self.etag.encode())
-        self.reply=self.network.get(req);self.reply.finished.connect(self.frame_finished)
-        self.reply.downloadProgress.connect(lambda received,total:self.reply.abort() if self.reply and received>200000 else None)
-    def frame_finished(self):
-        reply,self.reply=self.reply,None
-        if reply is None:return
+        reply=self.network.get(req)
+        self.reply=reply
+        self.preview_request_at=now
+        reply.finished.connect(lambda:self.frame_finished(reply))
+        reply.downloadProgress.connect(lambda received,total:reply.abort() if self.reply is reply and received>200000 else None)
+
+    def frame_finished(self,reply):
         try:
-            if not self.camera_enabled or not self.show_preview.isChecked():
+            if reply is not self.reply:
+                return
+            self.reply=None
+            if not self.remote_enabled or not self.camera_enabled or not self.show_preview.isChecked():
                 return
             status=reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
-            if status==304 or reply.error()==QNetworkReply.OperationCanceledError:
+            if status==304:
                 return
             if reply.error()!=QNetworkReply.NoError:
+                if status is None:
+                    self._preview_transport_failed(reply.error().name)
+                    return
+                self.preview_retry_at=time.monotonic()+(.15 if status==503 else .5)
                 if not self.last_image or time.monotonic()-self.last_image>2:
                     self.image.clear()
                     self.image.setText({
@@ -203,6 +251,9 @@ class BalloonPanel(QWidget):
                             for key,value in reply.rawHeaderPairs() if bytes(key).lower()==b'etag'),'')
             self.image.setPixmap(pix.scaled(self.image.size(),Qt.KeepAspectRatio,Qt.SmoothTransformation))
             self.last_image=time.monotonic();self.samples.append((self.last_image,len(raw)))
+            if self.preview_failure is not None:
+                logger.info('Preview connection recovered')
+                self.preview_failure=None
             if len(self.samples)>1:
                 elapsed=max(.1,self.samples[-1][0]-self.samples[0][0])
                 self.bandwidth.setText(f'미리보기 {(len(self.samples)-1)/elapsed:.1f} fps · {sum(n for _,n in list(self.samples)[1:])/elapsed/1024:.1f} KiB/s')
@@ -210,4 +261,5 @@ class BalloonPanel(QWidget):
             reply.deleteLater()
     def shutdown(self):
         self.timer.stop();self.remote_enabled=False
-        if self.reply:self.reply.abort()
+        reply,self.reply=self.reply,None
+        if reply is not None:reply.abort()

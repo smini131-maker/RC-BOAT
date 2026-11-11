@@ -1,6 +1,6 @@
 """Qt layout, route-record placement, wheel routing and edit ACK regression; no boat I/O."""
 from pathlib import Path
-import sys,json
+import sys,json,time
 from unittest.mock import patch
 ROOT=Path(__file__).resolve().parents[1]
 sys.path[:0]=[str(ROOT/'windows_gui'),str(ROOT/'catkin_ws/src/rcboat_ros/src')]
@@ -162,7 +162,7 @@ p.settings_toggle.setChecked(False);QTest.qWait(220);app.processEvents()
 assert not p.camera_drawer.isVisible()
 # Exercise real QNetworkReply header parsing and recovery after a warm-up 503.
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from threading import Thread
+from threading import Event, Thread
 from PySide6.QtCore import QBuffer, QIODevice
 from PySide6.QtGui import QPixmap
 from rcboat_gui.balloon_panel import BalloonPanel
@@ -171,10 +171,14 @@ picture=QPixmap(32,18);picture.fill(Qt.magenta)
 buffer=QBuffer();buffer.open(QIODevice.WriteOnly);assert picture.save(buffer,'JPEG')
 jpeg=bytes(buffer.data())
 requests=[]
+release_stalled_request=Event()
 class PreviewHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         previous=self.headers.get('If-None-Match')
         requests.append(previous)
+        if len(requests)==4:
+            release_stalled_request.wait(4)
+            return
         status=503 if len(requests)==1 else 304 if previous=='"frame-1"' else 200
         body=jpeg if status==200 else b''
         self.send_response(status)
@@ -189,9 +193,13 @@ with ThreadingHTTPServer(('127.0.0.1',0),PreviewHandler) as server:
     preview=BalloonPanel();preview.timer.stop();preview.show()
     preview.update_state(dict(ready,vision=dict(ready['vision'],preview_port=server.server_port)),'127.0.0.1')
     def fetch_preview():
+        for _ in range(60):
+            if time.monotonic()>=preview.preview_retry_at:break
+            QTest.qWait(10)
         preview.fetch_frame()
-        for _ in range(200):
+        for _ in range(260):
             if preview.reply is None:return
+            preview.fetch_frame()
             QTest.qWait(10)
         raise AssertionError('Preview request did not complete')
     try:
@@ -202,7 +210,14 @@ with ThreadingHTTPServer(('127.0.0.1',0),PreviewHandler) as server:
         fetch_preview()
         assert requests==[None,None,'"frame-1"'] and len(preview.samples)==1
         assert not preview.image.pixmap().isNull()
+        first_connection=preview.network
+        fetch_preview()
+        assert preview.network is not first_connection
+        fetch_preview()
+        assert requests[3:]==['"frame-1"',None]
+        assert not preview.image.pixmap().isNull() and preview.preview_failure is None
     finally:
+        release_stalled_request.set()
         preview.shutdown();preview.close()
         server.shutdown();thread.join(timeout=2)
 

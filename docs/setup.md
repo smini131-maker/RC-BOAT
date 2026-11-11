@@ -102,9 +102,9 @@ py -3 -m venv windows_gui\.venv
 .\windows_gui\.venv\Scripts\python.exe windows_gui\app.py
 ```
 
-GUI에서 Jetson 주소와 SSH 접속 정보를 설정하고 연결합니다. SSH, ROS master, ROS gateway, Logger, GPS, RTK 카드는 각각 독립적인 상태입니다. GUI와 backend 버전이 다르면 새 운항 시작이 차단됩니다.
+GUI에서 Jetson 주소와 SSH 접속 정보를 설정하고 연결합니다. SSH, ROS master, ROS gateway, Logger, GPS, RTK 카드는 각각 독립적인 상태입니다. Windows v2.4.7은 Jetson v2.4.6에서 운항 명령을 보냅니다.
 
-EXE가 필요하면 저장소 루트에서 `BUILD_ROS_GUI.cmd`를 실행합니다. 결과는 `dist\RCBoatControl_ROS_v2.4.6.exe`입니다. 자세한 빌드·테스트 절차는 [개발·검증](development.md)을 참고합니다.
+EXE가 필요하면 저장소 루트에서 `BUILD_ROS_GUI.cmd`를 실행합니다. 결과는 `dist\RCBoatControl_ROS_v2.4.7.exe`입니다. 자세한 빌드·테스트 절차는 [개발·검증](development.md)을 참고합니다.
 
 ## 6. 설치 확인 및 수동 ROS 실행
 

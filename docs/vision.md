@@ -157,7 +157,7 @@ USB V4L2와 Jetson Argus CSI를 지원하며 자동은 USB → CSI 순서입니�
 
 ```powershell
 # 새 폴더의 빌드된 앱
-.\dist\RCBoatControl_ROS_v2.4.6.exe
+.\dist\RCBoatControl_ROS_v2.4.7.exe
 # 다시 빌드할 때
 .\BUILD_ROS_GUI.cmd
 ```
