@@ -146,6 +146,21 @@ class NativeCropTests(unittest.TestCase):
         planner.observe([dict(bbox=[1696,196,1704,204],confidence=.9,pink_confirmed=True)],100)
         for i in range(4):self.assertEqual(planner.plan(frame,c,cv2,100.1+i*.1)[1]['kind'],'roi')
 
+    def test_recent_confirmed_detection_reuses_crop_until_a_miss(self):
+        config=validate_config({})
+        planner=RegionPlanner()
+        frame=self.frame()
+        planner.observe([dict(bbox=[1696,196,1704,204],confidence=.9,pink_confirmed=True)],100)
+        with patch.object(cv2,'cvtColor',side_effect=AssertionError('unexpected full-frame scan')):
+            crop,detail=planner.plan(frame,config,cv2,100.1)
+        self.assertEqual(detail['roi_source'],'recent_detection')
+        self.assertEqual(detail['neural_passes'],1)
+        self.assertTrue(crop[0]<=1700<crop[2] and crop[1]<=200<crop[3])
+        self.assertNotIn('roi_source',planner.plan(frame,config,cv2,100.3)[1])
+        planner.observe([],100.12)
+        self.assertNotIn('roi_source',planner.plan(frame,config,cv2,100.15)[1])
+        self.assertEqual(planner.plan(frame,config,cv2,100.16)[1]['colour_candidates'],1)
+
     def fake_detector(self,outputs):
         from rcboat_ros.balloon_detector import BalloonDetector
         class Net:

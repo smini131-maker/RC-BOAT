@@ -1,6 +1,21 @@
-# v2.4.10 카메라 · 붉은 풍선 추적
+# v2.4.11 카메라 · 붉은 풍선 추적
 
-v2.4.10의 풍선 추적 대상은 붉은색 계열입니다. 1080p 촬영과 YOLOv8n 320×320 입력을 사용합니다. Jetson에 새 ONNX와 manifest를 함께 전송하면 기존 설치 스크립트가 장치용 TensorRT 엔진을 준비합니다.
+v2.4.11의 풍선 추적 대상은 붉은색 계열입니다. 1080p 촬영과 YOLOv8n 320×320 입력을 사용합니다. Jetson에 새 ONNX와 manifest를 함께 전송하면 기존 설치 스크립트가 장치용 TensorRT 엔진을 준비합니다.
+
+## v2.4.11 판단 FPS 실측
+
+판단 주기를 15 Hz로 설정했습니다. 직전 프레임에서 풍선을 확인한 경우 그 검출 영역으로 다음 입력을 구성합니다. 검출이 끊기면 다음 프레임에서 기존 전체 화면 후보 탐색을 재개합니다. 촬영은 CSI 1080p, 신경망 입력은 320×320이며 원거리 탐색을 켠 상태로 유지합니다.
+
+Jetson Nano의 TensorRT 8.0.1.6에서 약 1.5m 거리에 지름 20cm 미만 풍선을 두고, 세 구간 모두 JPEG 미리보기를 요청했습니다.
+
+| 시험 | 판단 FPS | 판단 처리 시간 p95 | Jetson 전체 CPU | GPU 평균 |
+|---|---:|---:|---:|---:|
+| v2.4.10, 12 Hz, 원거리 켜짐 | 9.92 | 112.6ms | 61.6% | 27.7% |
+| v2.4.10, 15 Hz, 원거리 켜짐 | 10.13 | 103.0ms | 59.7% | 21.6% |
+| v2.4.10, 15 Hz, 원거리 끈 진단 | 14.83 | 45.2ms | 44.7% | 33.2% |
+| v2.4.11, 15 Hz, 원거리 켜짐 | 14.85 | 42.7ms | 44.6% | 26.6% |
+
+최종 35.08초 구간에서 미리보기 11.97 FPS, 최대 CPU 센서 24°C·GPU 센서 22°C를 기록했습니다. 상태 샘플 158개 모두에서 풍선을 확인했습니다. 이 구간은 근거리 고정 표적을 감지한 상태의 측정입니다. 초기 탐색, 50m 수상 감지, 장시간 발열과 실제 조향·추진은 별도 검증 항목입니다.
 
 ## v2.4.3 처리 구조와 실측
 
@@ -52,11 +67,11 @@ v2.4.1의 가중치와 감지 알고리즘은 v2.4.0과 같습니다. 모바일 
 
 ## 아직 Jetson에 적용하지 않았다면
 
-1. v2.4.10 프로젝트 폴더를 열고 PC·모바일 관제 앱을 종료합니다. Jetson을 같은 네트워크/휴대폰 핫스팟에 연결합니다. Jetson의 `hostname -I` 또는 핫스팟 연결 기기 목록에서 현재 IP를 확인합니다.
+1. v2.4.11 프로젝트 폴더를 열고 PC·모바일 관제 앱을 종료합니다. Jetson을 같은 네트워크/휴대폰 핫스팟에 연결합니다. Jetson의 `hostname -I` 또는 핫스팟 연결 기기 목록에서 현재 IP를 확인합니다.
 2. **Windows PowerShell**에서 다음 순서로 전송합니다. IP는 접속할 때 입력합니다.
 
 ```powershell
-Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_v2.4.10"
+Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_v2.4.11"
 $jetsonIp = Read-Host "Jetson 현재 IP"
 if (-not (Test-NetConnection $jetsonIp -Port 22 -InformationLevel Quiet)) { throw "SSH 연결 불가" }
 $env:RCBOAT_NO_PAUSE = "1"
@@ -78,7 +93,7 @@ bash deployment/jetson/install_vision_dependencies.sh
 bash deployment/jetson/install_jetson_ros.sh
 ```
 
-완료 기준은 `RUNNING GATEWAY VERIFIED: v2.4.10`입니다. 설치 스크립트가 ROS를 시작하므로 추가로 `roslaunch`를 중복 실행하지 않습니다. 기존 항로·로그·NTRIP 자격정보는 유지합니다. 옛 카메라 설정에는 1080p/원거리 모드를 한 번 적용하고 원본 `~/.rcboat/vision.json.before_v2.4.0_*`을 보존합니다. 이후 사용자가 설정한 해상도나 원거리 끄기는 덮어쓰지 않습니다.
+완료 기준은 `RUNNING GATEWAY VERIFIED: v2.4.11`입니다. 설치 스크립트가 ROS를 시작하므로 추가로 `roslaunch`를 중복 실행하지 않습니다. 기존 항로·로그·NTRIP 자격정보는 유지합니다. 옛 카메라 설정에는 1080p/원거리 모드를 한 번 적용하고 원본 `~/.rcboat/vision.json.before_v2.4.0_*`을 보존합니다. 이후 사용자가 설정한 해상도나 원거리 끄기는 덮어쓰지 않습니다.
 
 4. GUI를 열기 전, 실제 카메라/처리 시간을 검사합니다. 아래는 기존 IMX219 CSI/sensor 0 예시이며 실제 연결 방식이 다르면 `--camera-type usb`를 사용합니다. GUI의 카메라는 꺼둡니다.
 
@@ -94,7 +109,7 @@ bash deployment/jetson/install_jetson_ros.sh
 ~/.rcboat/vision-venv/bin/python3 deployment/jetson/build_vision_engine.py models/balloon_yolov8n.onnx
 ```
 
-6. PC EXE 또는 모바일 APK v2.4.10 한 개를 제어 연결합니다. 풍선 화면 → 카메라 설정 → CSI/센서 0(장치에 맞게 변경) → 1920×1080 → 작은 풍선 원거리 감지 체크 → 저장 → 카메라 켜기입니다. 실제 감지 상자와 작은 대상 확대 창이 표시됩니다. 전체 영상 통신량은 기존 640×360 이하 JPEG를 유지합니다.
+6. PC EXE 또는 모바일 APK v2.4.11 한 개를 제어 연결합니다. 풍선 화면 → 카메라 설정 → CSI/센서 0(장치에 맞게 변경) → 1920×1080 → 작은 풍선 원거리 감지 체크 → 저장 → 카메라 켜기입니다. 실제 감지 상자와 작은 대상 확대 창이 표시됩니다. 전체 영상 통신량은 기존 640×360 이하 JPEG를 유지합니다.
 
 ## 거리별 감지 확인 후 추적 시작
 
@@ -145,7 +160,7 @@ SSH 단순 응답 지연은 기존 확인 유예를 사용합니다. GPS 데이�
 
 ## Jetson Nano 부담과 호환 범위
 
-학습은 PC에서 수행합니다. Jetson에는 PyTorch/Ultralytics 학습 환경을 설치하지 않습니다. 정적 320×320 ONNX, 배치 1, 기본 추론 목표 12 Hz, 최신 프레임 한 장만 처리합니다. 장치에서 생성한 TensorRT 8 엔진이 있으면 우선 사용하고 ONNX Runtime CPU, OpenCV DNN CPU 순서로 대체합니다. 과거 v2.3.1의 2026-11-04 Nano ORT CPU 검사에서 빈 영상 20회 평균 324.64 ms, CSI 실영상 평균 347.88 ms/p95 540.02 ms였습니다. 이는 v2.4.1의 1080p 원거리 경로 성능 시험이 아닙니다. 새 경로의 속도는 장치에서 별도로 검사합니다.
+학습은 PC에서 수행합니다. Jetson에는 PyTorch/Ultralytics 학습 환경을 설치하지 않습니다. 정적 320×320 ONNX, 배치 1, 기본 추론 목표 15 Hz, 최신 프레임 한 장만 처리합니다. 장치에서 생성한 TensorRT 8 엔진이 있으면 우선 사용하고 ONNX Runtime CPU, OpenCV DNN CPU 순서로 대체합니다. 과거 v2.3.1의 2026-11-04 Nano ORT CPU 검사에서 빈 영상 20회 평균 324.64 ms, CSI 실영상 평균 347.88 ms/p95 540.02 ms였습니다. 이는 v2.4.1의 1080p 원거리 경로 성능 시험이 아닙니다. 새 경로의 속도는 장치에서 별도로 검사합니다.
 
 USB V4L2와 Jetson Argus CSI를 지원하며 자동은 USB → CSI 순서입니다. Pi 카메라는 센서·CSI 케이블·Jetson 드라이버가 일치해야 합니다. 기종 미정 상태에서 모든 Pi 카메라의 동작을 보장하지 않습니다. RTSP/파일은 미리보기만 가능하고 실물 주행 시작에는 사용할 수 없습니다.
 
@@ -157,7 +172,7 @@ USB V4L2와 Jetson Argus CSI를 지원하며 자동은 USB → CSI 순서입니�
 
 ```powershell
 # 새 폴더의 빌드된 앱
-.\dist\RCBoatControl_ROS_v2.4.10.exe
+.\dist\RCBoatControl_ROS_v2.4.11.exe
 # 다시 빌드할 때
 .\BUILD_ROS_GUI.cmd
 ```

@@ -43,6 +43,7 @@ class RegionPlanner:
         self.cursor = 0
         self.last_box = None
         self.observed_at = 0.0
+        self.can_reuse_crop = False
 
     def plan(self, frame, config, cv2, now=None):
         now = time.monotonic() if now is None else now
@@ -56,6 +57,12 @@ class RegionPlanner:
         recent = self.last_box is not None and 0 <= now-self.observed_at <= 1.5
         if recent and max(self.last_box[2]-self.last_box[0], self.last_box[3]-self.last_box[1]) >= min(w,h)/3:
             return full, detail  # Keep the whole balloon visible during the final approach.
+        if self.can_reuse_crop and recent and now-self.observed_at <= .25:
+            # Full-frame colour proposals are expensive on Nano. A confirmed box
+            # already supplies a crop; a miss restores the original search next frame.
+            crop = square_crop(self.last_box, frame.shape, config['roi_min_size'], config['roi_context_scale'])
+            detail.update(kind='roi', crop=list(crop), roi_source='recent_detection')
+            return crop, detail
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         mask = target_colour_mask(hsv, config, cv2)
         _, _, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
@@ -90,6 +97,7 @@ class RegionPlanner:
     def observe(self, detections, now=None):
         now = time.monotonic() if now is None else now
         confirmed = [d for d in detections if d.get('pink_confirmed')]
+        self.can_reuse_crop = bool(confirmed)
         if not confirmed:
             return
         if self.last_box is not None and now-self.observed_at <= 1.5:

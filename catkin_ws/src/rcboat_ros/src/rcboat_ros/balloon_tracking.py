@@ -10,7 +10,7 @@ DEFAULTS={
     'model_path':'~/rcboat_ros_ws/models/balloon_yolov8n.onnx',
     'model_manifest':'~/rcboat_ros_ws/models/model_manifest.json','backend':'auto',
     'confidence':.35,'nms_iou':.45,'pink_min_fraction':.12,'pink_hue_low':140,'pink_hue_high':179,
-    'pink_min_saturation':45,'pink_min_value':55,'inference_hz':12.,'max_frame_age_s':1.5,
+    'pink_min_saturation':45,'pink_min_value':55,'inference_hz':15.,'max_frame_age_s':1.5,
     'acquire_frames':3,'steering_gain':.85,'steering_deadband':.04,'steering_right_sign':-1,
     'predict_s':2.0,'search_timeout_s':15.0,'search_period_s':5.0,'search_turn_strength':.8,
     'camera_hfov_deg':62.0,'camera_yaw_deg':0.0,'preview_port':8766,'preview_hz':12.,

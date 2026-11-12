@@ -1,4 +1,4 @@
-version: '2.4.10'
+version: '2.4.11'
 gui_gateway_bind: '0.0.0.0'
 gui_gateway_port: 8765
 ground_test_log_root: '~/rcboat_ros_data/logs/ground_tests'
@@ -80,7 +80,7 @@ vision:
   width: 1920
   height: 1080
   long_range_enabled: true
-  inference_hz: 12.0
+  inference_hz: 15.0
   input_size: 320
   preview_hz: 12.0
   preview_width: 480
