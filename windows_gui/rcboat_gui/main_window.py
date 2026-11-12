@@ -1949,7 +1949,11 @@ class MainWindow(QMainWindow):
         if backend_ready and not version_match:
             backend_text = f"online · v{backend_version} · 버전 불일치"
         self.cards["backend"].set_value(backend_text, backend_ready and version_match)
-        self.cards["backend"].setToolTip(f"GUI v{APP_VERSION} / Jetson v{backend_version}")
+        status_rtt = backend.get("status_rtt_ms")
+        backend_hint = f"GUI v{APP_VERSION} / Jetson v{backend_version}"
+        if status_rtt is not None:
+            backend_hint += f" · ROS 상태 조회 왕복 {status_rtt} ms"
+        self.cards["backend"].setToolTip(backend_hint)
         self.cards["ssh"].set_value("delayed · 연결 유지" if backend.get('ssh_state')=='delayed' and backend.get('ssh_connected') else "connected" if backend.get("ssh_connected") else "disconnected",
                                     bool(backend.get("ssh_connected")))
         self.cards["ros_master"].set_value("online" if backend.get("master_online") else "offline",

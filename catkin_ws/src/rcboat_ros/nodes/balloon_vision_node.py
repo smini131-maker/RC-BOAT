@@ -13,7 +13,7 @@ from rcboat_ros.common import pack,unpack,fresh
 from rcboat_ros.control_config import validate_cruise
 from rcboat_ros.balloon_tracking import validate_config,TargetTracker,TrackingController
 
-VERSION='2.4.11'
+VERSION='2.4.12'
 def public_config(c):
     c=dict(c)
     if c['camera_type']=='rtsp':

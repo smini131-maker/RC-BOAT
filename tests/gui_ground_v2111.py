@@ -35,6 +35,27 @@ finally:
     health.join(2); heartbeat.join(2)
 assert not health.is_alive() and not heartbeat.is_alive()
 
+# A stalled SSH reconnect must not block normal ROS command delivery.
+worker = SSHWorker('127.0.0.1', 22, 'fixture', '')
+entered = threading.Event(); release = threading.Event(); command_processed = threading.Event()
+def stalled_reconnect(error):
+    entered.set()
+    release.wait(5)
+    return error
+worker._open_ssh_terminal = stalled_reconnect
+worker._bridge = lambda payload: dict(success=True, version=JETSON_VERSION)
+worker._send_operator_link = lambda connected: None
+worker._handle_request = lambda request: command_processed.set()
+worker.send_command('GROUND_TEST_STOP')
+worker.start()
+try:
+    assert entered.wait(1)
+    assert command_processed.wait(1), 'SSH reconnect blocked command processing'
+finally:
+    worker.stop()
+    release.set()
+    assert worker.wait(2500)
+
 response = dict(success=True, version=JETSON_VERSION, master_online=True, gateway_online=True,
     telemetry=dict(safety=dict(mode='MANUAL', reason='GPS_INVALID_OR_STALE',
         actuator_locked=True, manual_rearm_pending=True),

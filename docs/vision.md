@@ -1,6 +1,6 @@
-# v2.4.11 카메라 · 붉은 풍선 추적
+# v2.4.12 카메라 · 붉은 풍선 추적
 
-v2.4.11의 풍선 추적 대상은 붉은색 계열입니다. 1080p 촬영과 YOLOv8n 320×320 입력을 사용합니다. Jetson에 새 ONNX와 manifest를 함께 전송하면 기존 설치 스크립트가 장치용 TensorRT 엔진을 준비합니다.
+v2.4.12의 풍선 추적 대상은 붉은색 계열입니다. 1080p 촬영과 YOLOv8n 320×320 입력을 사용합니다. Jetson에 새 ONNX와 manifest를 함께 전송하면 기존 설치 스크립트가 장치용 TensorRT 엔진을 준비합니다.
 
 ## v2.4.11 판단 FPS 실측
 
@@ -71,7 +71,7 @@ v2.4.1의 가중치와 감지 알고리즘은 v2.4.0과 같습니다. 모바일 
 2. **Windows PowerShell**에서 다음 순서로 전송합니다. IP는 접속할 때 입력합니다.
 
 ```powershell
-Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_v2.4.11"
+Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_v2.4.12"
 $jetsonIp = Read-Host "Jetson 현재 IP"
 if (-not (Test-NetConnection $jetsonIp -Port 22 -InformationLevel Quiet)) { throw "SSH 연결 불가" }
 $env:RCBOAT_NO_PAUSE = "1"
@@ -93,7 +93,7 @@ bash deployment/jetson/install_vision_dependencies.sh
 bash deployment/jetson/install_jetson_ros.sh
 ```
 
-완료 기준은 `RUNNING GATEWAY VERIFIED: v2.4.11`입니다. 설치 스크립트가 ROS를 시작하므로 추가로 `roslaunch`를 중복 실행하지 않습니다. 기존 항로·로그·NTRIP 자격정보는 유지합니다. 옛 카메라 설정에는 1080p/원거리 모드를 한 번 적용하고 원본 `~/.rcboat/vision.json.before_v2.4.0_*`을 보존합니다. 이후 사용자가 설정한 해상도나 원거리 끄기는 덮어쓰지 않습니다.
+완료 기준은 `RUNNING GATEWAY VERIFIED: v2.4.12`입니다. 설치 스크립트가 ROS를 시작하므로 추가로 `roslaunch`를 중복 실행하지 않습니다. 기존 항로·로그·NTRIP 자격정보는 유지합니다. 옛 카메라 설정에는 1080p/원거리 모드를 한 번 적용하고 원본 `~/.rcboat/vision.json.before_v2.4.0_*`을 보존합니다. 이후 사용자가 설정한 해상도나 원거리 끄기는 덮어쓰지 않습니다.
 
 4. GUI를 열기 전, 실제 카메라/처리 시간을 검사합니다. 아래는 기존 IMX219 CSI/sensor 0 예시이며 실제 연결 방식이 다르면 `--camera-type usb`를 사용합니다. GUI의 카메라는 꺼둡니다.
 
@@ -109,7 +109,7 @@ bash deployment/jetson/install_jetson_ros.sh
 ~/.rcboat/vision-venv/bin/python3 deployment/jetson/build_vision_engine.py models/balloon_yolov8n.onnx
 ```
 
-6. PC EXE 또는 모바일 APK v2.4.11 한 개를 제어 연결합니다. 풍선 화면 → 카메라 설정 → CSI/센서 0(장치에 맞게 변경) → 1920×1080 → 작은 풍선 원거리 감지 체크 → 저장 → 카메라 켜기입니다. 실제 감지 상자와 작은 대상 확대 창이 표시됩니다. 전체 영상 통신량은 기존 640×360 이하 JPEG를 유지합니다.
+6. PC EXE 또는 모바일 APK v2.4.12 한 개를 제어 연결합니다. 풍선 화면 → 카메라 설정 → CSI/센서 0(장치에 맞게 변경) → 1920×1080 → 작은 풍선 원거리 감지 체크 → 저장 → 카메라 켜기입니다. 실제 감지 상자와 작은 대상 확대 창이 표시됩니다. 전체 영상 통신량은 기존 640×360 이하 JPEG를 유지합니다.
 
 ## 거리별 감지 확인 후 추적 시작
 
@@ -172,7 +172,7 @@ USB V4L2와 Jetson Argus CSI를 지원하며 자동은 USB → CSI 순서입니�
 
 ```powershell
 # 새 폴더의 빌드된 앱
-.\dist\RCBoatControl_ROS_v2.4.11.exe
+.\dist\RCBoatControl_ROS_v2.4.12.exe
 # 다시 빌드할 때
 .\BUILD_ROS_GUI.cmd
 ```

@@ -165,7 +165,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Event, Thread
 from PySide6.QtCore import QBuffer, QIODevice
 from PySide6.QtGui import QPixmap
-from rcboat_gui.balloon_panel import BalloonPanel
+from rcboat_gui.balloon_panel import BalloonPanel, is_vpn_endpoint, vpn_preview_interval
+
+assert is_vpn_endpoint('100.74.153.81') and is_vpn_endpoint('rcboat-jetson.example.ts.net')
+assert not is_vpn_endpoint('10.16.147.215') and not is_vpn_endpoint('')
+assert vpn_preview_interval(.04, 1024, 30) == 1/12
+assert vpn_preview_interval(.04, 32*1024, 30) == .2
+assert vpn_preview_interval(.05, 1024, 250) == .4
+assert vpn_preview_interval(.25, 1024, 30) == .5
 
 picture=QPixmap(32,18);picture.fill(Qt.magenta)
 buffer=QBuffer();buffer.open(QIODevice.WriteOnly);assert picture.save(buffer,'JPEG')
@@ -184,6 +191,7 @@ class PreviewHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header('ETag','"frame-1"')
         self.send_header('Content-Length',str(len(body)))
+        self.send_header('X-Frame-Age','1.3' if len(requests)==5 else '.05')
         self.end_headers()
         self.wfile.write(body)
     def log_message(self,*args):pass
@@ -215,6 +223,8 @@ with ThreadingHTTPServer(('127.0.0.1',0),PreviewHandler) as server:
         assert preview.network is not first_connection
         fetch_preview()
         assert requests[3:]==['"frame-1"',None]
+        assert preview.etag=='' and len(preview.samples)==1, 'Old frame displayed'
+        fetch_preview()
         assert not preview.image.pixmap().isNull() and preview.preview_failure is None
     finally:
         release_stalled_request.set()
@@ -222,7 +232,7 @@ with ThreadingHTTPServer(('127.0.0.1',0),PreviewHandler) as server:
         server.shutdown();thread.join(timeout=2)
 
 w.rc_graph.append(None,None);assert w.rc_graph.series[0][-1] is None
-locked=SSHWorker._normalize(dict(success=True,version='2.4.11',gateway_online=True,master_online=True,telemetry={
+locked=SSHWorker._normalize(dict(success=True,version='2.4.12',gateway_online=True,master_online=True,telemetry={
     'safety':dict(mode='MANUAL',estop=True,actuator_locked=True,estop_reason='MAINTENANCE_CHECK',estop_time_utc='2026-11-10T10:00:00Z'),
     'vision':dict(enabled=True,model_ready=True,camera_online=True,target={'acquired':True,'predicted':False})}))
 w.update_telemetry(locked);app.processEvents()
