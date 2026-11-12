@@ -184,12 +184,19 @@ jpeg=bytes(buffer.data())
 from PySide6.QtCore import QPoint
 panel=BalloonPanel()
 panel.timer.stop()
-panel.resize(960,390)
+panel.resize(960,600)
 panel.show()
 assert panel.display_frame(jpeg)
 QTest.qWait(80)
 bar=panel.preview_scroll.verticalScrollBar()
-assert bar.maximum()>60
+assert bar.maximum()==0, 'A normal-height window must show the entire video'
+rect=panel.image.frame_rect(panel.image.pixmap())
+assert rect.width()<panel.image.width(), 'Video should fit the height instead of forcing full width'
+assert abs(rect.center().x()-panel.image.width()/2)<1
+assert rect.height()<=panel.image.height()
+panel.resize(960,325)
+QTest.qWait(80)
+assert bar.maximum()>50
 assert panel.preview_scroll.horizontalScrollBar().maximum()==0
 original_size=panel.image.pixmap().size()
 original_controls=panel.start_button.geometry()
@@ -198,6 +205,7 @@ QTest.mouseMove(panel.image,QPoint(250,65))
 QTest.mouseRelease(panel.image,Qt.LeftButton,pos=QPoint(250,65))
 assert bar.value()>0
 assert panel.image.pixmap().size()==original_size
+assert panel.image.frame_rect(panel.image.pixmap()).height()<=panel.image.height()
 assert panel.start_button.geometry()==original_controls
 assert panel.display_frame(jpeg)
 assert bar.value()>0, 'new camera frame reset the scroll position'

@@ -41,6 +41,15 @@ def vpn_preview_interval(request_seconds, frame_bytes, gateway_ms):
     return interval
 
 class PreviewFrame(QLabel):
+    def frame_rect(self, frame):
+        bounds = self.contentsRect()
+        size = frame.size().scaled(bounds.size(), Qt.KeepAspectRatio)
+        return QRectF(
+            bounds.x() + (bounds.width() - size.width()) / 2,
+            bounds.y() + (bounds.height() - size.height()) / 2,
+            size.width(), size.height(),
+        )
+
     def paintEvent(self, event):
         frame = self.pixmap()
         if frame is None or frame.isNull():
@@ -48,43 +57,27 @@ class PreviewFrame(QLabel):
             return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
-        height = self.width() * frame.height() / frame.width()
-        target = QRectF(0, max(0, (self.height() - height) / 2), self.width(), height)
-        painter.drawPixmap(target, frame, QRectF(frame.rect()))
+        painter.drawPixmap(self.frame_rect(frame), frame, QRectF(frame.rect()))
 
 
 class PreviewScrollArea(QScrollArea):
     def __init__(self, frame):
         super().__init__()
         self.frame = frame
-        self.aspect_height = 0.0
         self.drag_origin = None
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
+        frame.setMinimumHeight(320)
         self.setWidget(frame)
         self.setMinimumSize(280, 180)
-        self.setToolTip("영상에서 위아래로 드래그하거나 휠을 굴려 아래쪽을 봅니다.")
+        self.setToolTip("창이 낮으면 영상 영역을 위아래로 드래그하거나 휠로 스크롤할 수 있습니다.")
         self.frame.installEventFilter(self)
         self.verticalScrollBar().rangeChanged.connect(self.update_cursor)
 
     def update_cursor(self, minimum, maximum):
         if self.drag_origin is None:
             self.frame.setCursor(Qt.OpenHandCursor if maximum > minimum else Qt.ArrowCursor)
-
-    def set_frame_aspect(self, width, height):
-        ratio = height / width if width else 0.0
-        if ratio != self.aspect_height:
-            self.aspect_height = ratio
-            self.update_frame_height()
-
-    def update_frame_height(self):
-        width = self.maximumViewportSize().width()
-        self.frame.setMinimumHeight(max(180, round(width * self.aspect_height)))
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self.update_frame_height()
 
     def eventFilter(self, watched, event):
         if watched is not self.frame:
@@ -291,8 +284,6 @@ class BalloonPanel(QWidget):
             elif t.get('source_span_px') is not None:text+=' · '+fmt(t['source_span_px'],' px')
             self.metrics.setText(self.metrics.text()+text)
         self.shared_speed.setText('목표 PWM '+str(state.get('auto_cruise_pwm') or v.get('shared_cruise_pwm') or '—')+' · 최종 출력 '+str((state.get('pca') or {}).get('throttle_pwm','—')))
-        if self.mock or not self.camera_enabled:
-            self.preview_scroll.set_frame_aspect(0,0)
         if self.mock:self.image.setPixmap(QPixmap());self.image.setText('SIMULATION · 모의 감지 상태\n실제 카메라 영상 아님')
         elif not self.camera_enabled:self.image.setPixmap(QPixmap());self.image.setText('카메라 꺼짐')
 
@@ -430,7 +421,6 @@ class BalloonPanel(QWidget):
         if len(raw)>MAX_JPEG_BYTES or not pix.loadFromData(raw,'JPG'):
             if not self.last_image:self.image.setText('영상 형식 오류 · 다시 수신 중')
             return False
-        self.preview_scroll.set_frame_aspect(pix.width(),pix.height())
         self.image.setPixmap(pix)
         self.last_image=time.monotonic();self.samples.append((self.last_image,len(raw)))
         if self.preview_failure is not None:

@@ -7,5 +7,5 @@ _shared = Path(__file__).resolve().parents[2] / 'catkin_ws/src/rcboat_ros/src'
 if _shared.is_dir():
     sys.path.insert(0,str(_shared))
 
-__version__ = "2.4.14"
+__version__ = "2.4.15"
 JETSON_VERSION = "2.4.14"
