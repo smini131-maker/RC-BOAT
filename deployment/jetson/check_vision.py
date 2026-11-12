@@ -29,7 +29,7 @@ def main():
             count+=sum(d['pink_confirmed'] for d in detections)
         report=dict(python=platform.python_version(),machine=platform.machine(),opencv=cv2.__version__,backend=detector.backend_name,
             numpy=np.__version__,source=source,live_source=live,frames=len(timings),mean_inference_ms=round(statistics.mean(timings),2),
-            p95_inference_ms=round(sorted(timings)[-2],2),pink_detections=count,actuator_access=False,
+            p95_inference_ms=round(sorted(timings)[-2],2),target_colour=detector.target_colour,target_detections=count,actuator_access=False,
             actual_frame_height_width=actual_shape,requested_frame_height_width=[c['height'],c['width']],
             requested_resolution_met=actual_shape==[c['height'],c['width']],detector_view=detector.last_view,
             range_validation='not_field_validated')

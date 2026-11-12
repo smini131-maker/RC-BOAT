@@ -1,5 +1,5 @@
 'use strict';
-const $=id=>document.getElementById(id), VERSION='2.4.9';
+const $=id=>document.getElementById(id), VERSION='2.4.10';
 const state={last:0,online:false,control:false,ssh:'disconnected',version:'',tele:{},ntripProfile:{},targetType:'multipath',routes:[],groups:[],targetDirty:false,pwmDirty:false,pwmPending:null,trackingStart:null,page:'sail',editor:null};
 let sequence=0,toastTimer,routeSignature='',testSignature='',configSynced=false,frameAt=0,map,routeLayer,traceLine,boatMarker,fitBounds,lastCoords='',mapFitted=false,mapFocusSignature='';
 const pending=new Map(),trace=[];
@@ -63,7 +63,7 @@ bind('exportRoutes',()=>{const fields=['route_id','route_name','waypoint_number'
 bind('cameraOn',()=>run('vision_enable',{enabled:true},'카메라 켜기 요청'));bind('cameraOff',async()=>{state.trackingStart=null;if(state.tele.safety?.mode==='BALLOON')await manual();await run('vision_enable',{enabled:false},'카메라 끄기');});
 bind('trackStart',async()=>{
  if(state.trackingStart||state.tele.safety?.mode==='BALLOON')return;
- if(!confirm('핑크 풍선을 향해 자동 접근합니다. 실제 모터가 작동합니다. 시작할까요?'))return;
+ if(!confirm('붉은 풍선을 향해 자동 접근합니다. 실제 모터가 작동합니다. 시작할까요?'))return;
  if(!readyToMove()){message('SSH 제어 연결과 같은 버전의 ROS backend가 필요합니다');return;}
  const request={deadline:Date.now()+30000,modeSince:state.tele.safety?.mode_since_monotonic,ready:false};
  state.trackingStart=request;

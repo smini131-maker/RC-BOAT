@@ -1,0 +1,111 @@
+{
+  "scope": "same red filter for both models, full-frame inference at 320",
+  "matching_iou": 0.5,
+  "score_threshold": 0.35,
+  "ground_truth": "red proxy from HSV screening of original Open Images balloon boxes",
+  "background": "red crops outside known balloon boxes; some objects may be unlabelled",
+  "lighting": "synthetic exposure of held-out real photos",
+  "competition_field_test": false,
+  "model_sha256": {
+    "baseline": "74e73d17c01b32589ff8cff51e87c45415c153ec51502fa7dad9333f56c604dc",
+    "candidate": "23f8cb38c6da944e51a10ea6a0b80f95effa5ddcb1909ebadd25168d4556b48b"
+  },
+  "baseline": {
+    "original": {
+      "frames": 91,
+      "expected_boxes": 292,
+      "matched_boxes": 158,
+      "confirmed_boxes": 244
+    },
+    "bright": {
+      "frames": 91,
+      "expected_boxes": 292,
+      "matched_boxes": 151,
+      "confirmed_boxes": 231
+    },
+    "dim": {
+      "frames": 91,
+      "expected_boxes": 292,
+      "matched_boxes": 147,
+      "confirmed_boxes": 231
+    },
+    "background": {
+      "frames": 100,
+      "expected_boxes": 0,
+      "matched_boxes": 0,
+      "confirmed_boxes": 29
+    },
+    "reference_non_balloon": {
+      "frames": 3,
+      "expected_boxes": 0,
+      "matched_boxes": 0,
+      "confirmed_boxes": 0
+    },
+    "reference_roi_sequence": {
+      "original": {
+        "frames": 12,
+        "confirmed_boxes": 0,
+        "acquired_frames": 0
+      },
+      "bright": {
+        "frames": 12,
+        "confirmed_boxes": 0,
+        "acquired_frames": 0
+      },
+      "dim": {
+        "frames": 12,
+        "confirmed_boxes": 0,
+        "acquired_frames": 0
+      }
+    }
+  },
+  "candidate": {
+    "original": {
+      "frames": 91,
+      "expected_boxes": 292,
+      "matched_boxes": 174,
+      "confirmed_boxes": 274
+    },
+    "bright": {
+      "frames": 91,
+      "expected_boxes": 292,
+      "matched_boxes": 173,
+      "confirmed_boxes": 264
+    },
+    "dim": {
+      "frames": 91,
+      "expected_boxes": 292,
+      "matched_boxes": 163,
+      "confirmed_boxes": 257
+    },
+    "background": {
+      "frames": 100,
+      "expected_boxes": 0,
+      "matched_boxes": 0,
+      "confirmed_boxes": 23
+    },
+    "reference_non_balloon": {
+      "frames": 3,
+      "expected_boxes": 0,
+      "matched_boxes": 0,
+      "confirmed_boxes": 0
+    },
+    "reference_roi_sequence": {
+      "original": {
+        "frames": 12,
+        "confirmed_boxes": 0,
+        "acquired_frames": 0
+      },
+      "bright": {
+        "frames": 12,
+        "confirmed_boxes": 0,
+        "acquired_frames": 0
+      },
+      "dim": {
+        "frames": 12,
+        "confirmed_boxes": 0,
+        "acquired_frames": 0
+      }
+    }
+  }
+}

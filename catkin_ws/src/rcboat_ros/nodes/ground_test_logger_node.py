@@ -19,7 +19,7 @@ from rcboat_ros.geo import enrich_waypoints
 from rcboat_ros.control_config import load_rc,load_output,output_in_range
 
 
-VERSION = "2.4.9"
+VERSION = "2.4.10"
 CSV_FIELDS = [
     "sample_index", "sample_time_epoch_s", "logger_time_utc", "measurement_time_utc", "gps_received_time_utc",
     "output_time_utc", "elapsed_time_s", "latitude", "longitude", "utm_easting_m",

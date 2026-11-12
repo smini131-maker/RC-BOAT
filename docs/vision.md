@@ -1,6 +1,6 @@
-# v2.4.9 카메라 · 핑크 풍선 원거리 추적
+# v2.4.10 카메라 · 붉은 풍선 추적
 
-풍선 추적은 `main`의 통합 ROS 정식 v2.4.9에 포함됩니다. 항로 주행·도보 테스트와 같은 앱을 사용합니다. ROS 이전 v1.6.0은 별도 레거시 폴더와 브랜치에 보존합니다. 새 프로젝트 폴더는 `RCBoatControl_v2.4.9`이며 Jetson에는 한 버전의 ROS backend만 실행합니다.
+v2.4.10의 풍선 추적 대상은 붉은색 계열입니다. 1080p 촬영과 YOLOv8n 320×320 입력을 사용합니다. Jetson에 새 ONNX와 manifest를 함께 전송하면 기존 설치 스크립트가 장치용 TensorRT 엔진을 준비합니다.
 
 ## v2.4.3 처리 구조와 실측
 
@@ -26,7 +26,7 @@ v2.4.2는 안전 판단과 입력 교체를 같은 잠금으로 보호하고, ac
 
 v2.4.1의 가중치와 감지 알고리즘은 v2.4.0과 같습니다. 모바일 연결/영상 전송을 수정한 버전입니다. 2026-11-10 사용자가 약 8m에 둔 23cm 풍선 장면의 원본 사진에서 약 42px, 신뢰도 0.89, 핑크 비율 0.90으로 확인했습니다. 같은 사진을 여러 번 추론한 결과를 독립 영상/감지율 시험으로 세지 않습니다. 조명을 켠 뒤 인식됐다는 사용자 확인이 있었으며 이 장면으로 다른 거리나 어두운 환경의 성능을 보장하지 않습니다.
 
-## 100m 목표와 현재 검증 범위
+## 이전 핑크 풍선 모델의 원거리 검증
 
 기존 640×480 → 320 입력은 작은 물체를 과도하게 줄입니다. v2.4.1은 1920×1080 원본을 사용하고, 작은 핑크 후보 영역을 골라 320 모델에 넣습니다. 색상 후보만으로 추적·출력을 시작하지 않고 신경망 풍선 검출, 원본 픽셀의 핑크 확인, 연속 관측 확인을 통과해야 합니다. 가까워지면 전체 화면을 사용하고, 기존 위치 예측·재접근·수동 전환·E-STOP을 유지합니다.
 
@@ -40,7 +40,7 @@ v2.4.1의 가중치와 감지 알고리즘은 v2.4.0과 같습니다. 모바일 
 
 원거리 영역 선택은 원본의 8~16픽셀을 신경망 입력에서 더 크게 보존합니다. 초점·렌즈·모션 블러로 이미 사라진 형상은 복원하지 않습니다. 지름 0.5m를 100m에서 16픽셀 이상 확보하려면 1920 원본 기준 계산상 수평 화각 약 33° 이하가 필요합니다. 실제 센서 읽기 모드/렌즈의 화각은 직접 보정해야 합니다. IMX219라는 센서명만으로 화각을 확정할 수 없습니다. [공식 카메라 사양](https://www.raspberrypi.com/documentation/accessories/camera.html)을 참고하되 사용 장치가 같은 렌즈인지 확인합니다.
 
-현재 추가 학습은 원본 2,189장의 기존 분할을 보존합니다. 학습용 원본 1,746장에 크기/시야 증강 3,492개와 핑크 비풍선 배경 500개를 추가했습니다. 증강 시야는 새 원본 사진이나 실측 100m 자료로 세지 않습니다. 별도 보류 원본 244장은 학습에 사용하지 않습니다. 모델·전체 영상 방식·원거리 영역 방식의 비교 결과는 `models/long_range_evaluation.json`, 일반 사진 성능은 `models/runtime_evaluation.json`에 저장합니다. 이 비교는 실제 해상·실측 거리 성능과 구분합니다.
+이전 핑크 풍선 모델의 추가 학습은 원본 2,189장의 분할을 보존했습니다. 학습용 원본 1,746장에 크기/시야 증강 3,492개와 핑크 비풍선 배경 500개를 추가했습니다. 증강 시야는 새 원본 사진이나 실측 100m 자료로 세지 않습니다. 별도 보류 원본 244장은 학습에 사용하지 않습니다. 모델·전체 영상 방식·원거리 영역 방식의 비교 결과는 `models/long_range_evaluation.json`, 일반 사진 성능은 `models/runtime_evaluation.json`에 저장합니다. 이 비교는 실제 해상·실측 거리 성능과 구분합니다.
 
 모델은 기존 가중치에서 30 epoch 추가 학습했습니다. 보류 원본 244장, 신뢰도 0.35/IoU 0.5의 신경망 검출 비교는 정밀도 74.1% → 76.9%, 재현율 58.6% → 61.2%입니다. 이는 모든 색 풍선 검출 수치이며 핑크 풍선의 실제 100m 성공률이 아닙니다.
 
@@ -52,11 +52,11 @@ v2.4.1의 가중치와 감지 알고리즘은 v2.4.0과 같습니다. 모바일 
 
 ## 아직 Jetson에 적용하지 않았다면
 
-1. v2.4.9 전체 ZIP을 풀고 PC·모바일 관제 앱을 종료합니다. Jetson을 같은 네트워크/휴대폰 핫스팟에 연결합니다. Jetson의 `hostname -I` 또는 핫스팟 연결 기기 목록에서 현재 IP를 확인합니다.
+1. v2.4.10 프로젝트 폴더를 열고 PC·모바일 관제 앱을 종료합니다. Jetson을 같은 네트워크/휴대폰 핫스팟에 연결합니다. Jetson의 `hostname -I` 또는 핫스팟 연결 기기 목록에서 현재 IP를 확인합니다.
 2. **Windows PowerShell**에서 다음 순서로 전송합니다. IP는 접속할 때 입력합니다.
 
 ```powershell
-Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_v2.4.9"
+Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_v2.4.10"
 $jetsonIp = Read-Host "Jetson 현재 IP"
 if (-not (Test-NetConnection $jetsonIp -Port 22 -InformationLevel Quiet)) { throw "SSH 연결 불가" }
 $env:RCBOAT_NO_PAUSE = "1"
@@ -78,7 +78,7 @@ bash deployment/jetson/install_vision_dependencies.sh
 bash deployment/jetson/install_jetson_ros.sh
 ```
 
-완료 기준은 `RUNNING GATEWAY VERIFIED: v2.4.9`입니다. 설치 스크립트가 ROS를 시작하므로 추가로 `roslaunch`를 중복 실행하지 않습니다. 기존 항로·로그·NTRIP 자격정보는 유지합니다. 옛 카메라 설정에는 1080p/원거리 모드를 한 번 적용하고 원본 `~/.rcboat/vision.json.before_v2.4.0_*`을 보존합니다. 이후 사용자가 설정한 해상도나 원거리 끄기는 덮어쓰지 않습니다.
+완료 기준은 `RUNNING GATEWAY VERIFIED: v2.4.10`입니다. 설치 스크립트가 ROS를 시작하므로 추가로 `roslaunch`를 중복 실행하지 않습니다. 기존 항로·로그·NTRIP 자격정보는 유지합니다. 옛 카메라 설정에는 1080p/원거리 모드를 한 번 적용하고 원본 `~/.rcboat/vision.json.before_v2.4.0_*`을 보존합니다. 이후 사용자가 설정한 해상도나 원거리 끄기는 덮어쓰지 않습니다.
 
 4. GUI를 열기 전, 실제 카메라/처리 시간을 검사합니다. 아래는 기존 IMX219 CSI/sensor 0 예시이며 실제 연결 방식이 다르면 `--camera-type usb`를 사용합니다. GUI의 카메라는 꺼둡니다.
 
@@ -86,7 +86,7 @@ bash deployment/jetson/install_jetson_ros.sh
 ~/.rcboat/vision-venv/bin/python3 deployment/jetson/check_vision.py --live --camera-type csi --sensor-id 0
 ```
 
-`actual_frame_height_width`가 `[1080, 1920]`, `requested_resolution_met`가 `true`인지 확인합니다. 실제 프레임이 640×480이면 100m용 원본 픽셀을 확보한 것이 아닙니다. `mean/p95_inference_ms`도 확인합니다. 위 실측 구성 외의 처리 성능은 장치에서 측정해야 합니다. CPU fallback과 다른 부하에서 같은 fps를 보장하지 않습니다.
+`actual_frame_height_width`가 `[1080, 1920]`, `requested_resolution_met`가 `true`인지 확인합니다. 붉은색 모델을 불러오면 `target_colour`가 `red`로 표시됩니다. `mean/p95_inference_ms`도 확인합니다. 위 실측 구성 외의 처리 성능은 장치에서 측정해야 합니다. CPU fallback과 다른 부하에서 같은 fps를 보장하지 않습니다.
 
 5. 선택적으로 Jetson에서만 FP16 TensorRT 엔진을 만듭니다. 이전 모델용 엔진은 새 모델 SHA와 다르면 거부하고 ONNX로 대체합니다.
 
@@ -94,26 +94,26 @@ bash deployment/jetson/install_jetson_ros.sh
 ~/.rcboat/vision-venv/bin/python3 deployment/jetson/build_vision_engine.py models/balloon_yolov8n.onnx
 ```
 
-6. PC EXE 또는 모바일 APK v2.4.9 한 개를 제어 연결합니다. 풍선 화면 → 카메라 설정 → CSI/센서 0(장치에 맞게 변경) → 1920×1080 → 작은 풍선 원거리 감지 체크 → 저장 → 카메라 켜기입니다. 실제 감지 상자와 작은 대상 확대 창이 표시됩니다. 전체 영상 통신량은 기존 640×360 이하 JPEG를 유지합니다.
+6. PC EXE 또는 모바일 APK v2.4.10 한 개를 제어 연결합니다. 풍선 화면 → 카메라 설정 → CSI/센서 0(장치에 맞게 변경) → 1920×1080 → 작은 풍선 원거리 감지 체크 → 저장 → 카메라 켜기입니다. 실제 감지 상자와 작은 대상 확대 창이 표시됩니다. 전체 영상 통신량은 기존 640×360 이하 JPEG를 유지합니다.
 
 ## 거리별 감지 확인 후 추적 시작
 
-먼저 E-STOP으로 출력을 잠근 채 감지만 검사합니다. 풍선 지름을 측정하고 10/30/50/100m에서 원본 영상, 감지 유지 여부, 오탐과 원본 픽셀 크기를 기록합니다. 미리보기 확대만으로 100m 합격을 판단하지 않습니다. 선체·물결·핑크 물체를 풍선으로 잘못 인식하지 않는지도 포함합니다. 실제 100m에서 신뢰할 수 있는 연속 감지와 조향 방향을 확인한 뒤 추적을 시작합니다.
+먼저 E-STOP으로 출력을 잠근 채 감지만 검사합니다. 풍선 지름을 측정하고 10m, 30m, 대회 목표 거리에서 원본 영상·감지 유지 여부·오탐·원본 픽셀 크기를 기록합니다. 선체·물결·붉은 물체를 풍선으로 잘못 인식하지 않는지도 포함합니다. 필요한 거리에서 신뢰할 수 있는 연속 감지와 조향 방향을 확인한 뒤 추적을 시작합니다.
 
 실측 자료를 남기려면 GUI 카메라를 끄고 E-STOP을 유지한 상태에서 Jetson SSH에서 실행합니다. 입력 거리는 사람이 확인한 값으로 기록하며 도구가 거리를 측정하는 것은 아닙니다. 지름을 모르면 `--diameter-m`은 생략합니다.
 
 ```bash
 cd /home/jetson/rcboat_ros_ws
-~/.rcboat/vision-venv/bin/python3 deployment/jetson/capture_range_test.py --camera-type csi --sensor-id 0 --distance-m 100 --seconds 20
+~/.rcboat/vision-venv/bin/python3 deployment/jetson/capture_range_test.py --camera-type csi --sensor-id 0 --distance-m 30 --seconds 20
 ```
 
-원본 사진과 시각/해상도/버전/거리 입력값이 `~/rcboat_ros_data/vision_validation/range_100m_*.zip`에 저장됩니다. 이 도구는 모터 명령을 발행하지 않습니다. **Windows PowerShell**에서 받을 수 있습니다.
+원본 사진과 시각/해상도/버전/거리 입력값이 `~/rcboat_ros_data/vision_validation/range_*m_*.zip`에 저장됩니다. 이 도구는 모터 명령을 발행하지 않습니다. **Windows PowerShell**에서 받을 수 있습니다.
 
 ```powershell
 scp "jetson@${jetsonIp}:/home/jetson/rcboat_ros_data/vision_validation/*.zip" "$env:USERPROFILE\Downloads\"
 ```
 
-사진에서 실제 풍선 위치를 표시한 뒤 감지율·오탐·유실/복구를 평가해야 100m 수용 여부를 판단할 수 있습니다. 원본 촬영만으로 자동 합격 처리하지 않습니다.
+사진에서 실제 풍선 위치를 표시한 뒤 감지율·오탐·유실/복구를 평가해야 목표 거리의 검출 성능를 판단할 수 있습니다. 원본 촬영만으로 자동 합격 처리하지 않습니다.
 
 ## 기존 설치·운항 설명
 
@@ -125,11 +125,11 @@ v2.3.1은 설치 환경 수정입니다. NumPy 1.23.5·ONNX Runtime 1.16.3과 RO
 - 실시간 관제: 큰 지도, 운항 핵심 수치. GPS·RC 입력은 지도 옆 보조 탭, 출력 차트는 접기 버튼에 있습니다. 정상은 초록, 주의는 노랑, 오류·stale은 빨강, 미수신은 회색으로 표시합니다.
 - 항로·Multi-Path: **대루트/소루트 선택·주행 시작·정지는 지도 위에 고정**합니다. 오른쪽 `항로 기록`에서 기존 GPS 기록·정지 후 저장·취소를 그대로 사용합니다. 편집과 표시 설정만 별도 탭으로 묶습니다. 지도 위에서는 마우스 휠만으로 커서 위치를 기준으로 확대·축소합니다. Ctrl+휠과 +/− 버튼도 유지합니다. 지도 밖의 기존 스크롤은 그대로입니다.
 - GPS·RTK: 핵심 GPS 상태와 RTK 연결 두 탭입니다. 상세 품질·참고 기준·GPS 원시 기록은 GPS 상태 아래의 접기 영역에 모았습니다. RTK 설정은 **Jetson의 기존 `~/rcboat_ros_data/ntrip.env`**에서 읽습니다. `Jetson 설정 불러오기`는 조회만 하며, 빈 비밀번호 입력은 기존 비밀번호를 유지합니다. 연결이 잠시 끊겨도 입력란을 빈값으로 덮어쓰지 않습니다.
-- 풍선 추적: 카메라 켜기 → 연속 핑크 풍선 검출 확인 → 추적 주행 시작. 정지·카메라 끄기·대상 다시 잡기와 로그 가져오기를 제공합니다. 화면에 표시되는 SIMULATION은 실제 카메라나 모터 검증이 아닙니다.
+- 풍선 추적: 카메라 켜기 → 연속 붉은 풍선 검출 확인 → 추적 주행 시작. 정지·카메라 끄기·대상 다시 잡기와 로그 가져오기를 제공합니다. 화면에 표시되는 SIMULATION은 실제 카메라나 모터 검증이 아닙니다.
 
 ## 인식·추적
 
-YOLOv8n 단일 `balloon` 클래스로 풍선 모양을 검출한 뒤 HSV 핑크 비율을 확인합니다. 핑크 물체만 보고 모터를 구동하지 않습니다. 기본 신뢰도 0.35, 핑크 비율 0.12, 연속 3프레임 확인을 사용합니다. 초록 상자는 핑크 풍선 검출, 회색 상자는 풍선 검출 중 핑크 조건 미달입니다.
+YOLOv8n 단일 `balloon` 클래스로 풍선 모양을 검출한 뒤 HSV 붉은색 비율을 확인합니다. 색조 0~12 및 169~179, 채도 60 이상, 명도 40 이상을 사용합니다. 기본 검출 신뢰도 0.35, 색 비율 12%, 연속 3프레임 확인을 적용합니다. 초록 상자는 붉은 풍선 검출이고 회색 상자는 색상·형태 확인 조건에 미달한 검출입니다. 큰 상자 안에 가늘고 긴 붉은 영역만 있거나, 원거리 후보 영역의 내부 경계에 걸려 검출 상자가 잘린 경우도 확인 단계에서 제외합니다.
 
 풍선 추적 화면에서 실시간 영상, 감지 상자, 추적 시작·정지, 로그를 확인합니다. `풍선 추적 시작`을 누르면 카메라가 준비된 뒤 BALLOON 모드로 전환합니다. 새 프레임에서 연속 감지가 확보되면 출력합니다. 다른 모드로 전환하거나 카메라를 끄면 대상 위치와 예측이 초기화됩니다. 카메라를 다시 켜면 미리보기와 감지 상자가 표시되며, 새 추적을 시작하려면 `풍선 추적 시작`을 누릅니다.
 
@@ -157,7 +157,7 @@ USB V4L2와 Jetson Argus CSI를 지원하며 자동은 USB → CSI 순서입니�
 
 ```powershell
 # 새 폴더의 빌드된 앱
-.\dist\RCBoatControl_ROS_v2.4.9.exe
+.\dist\RCBoatControl_ROS_v2.4.10.exe
 # 다시 빌드할 때
 .\BUILD_ROS_GUI.cmd
 ```
@@ -168,16 +168,17 @@ USB V4L2와 Jetson Argus CSI를 지원하며 자동은 USB → CSI 순서입니�
 
 추적 로그는 `~/rcboat_ros_data/logs/vision/vision_*.jsonl`에 UTC, 실제 검출·색상 비율, 예측 상태·위치, 모델·설정, GPS, 안전 판단, 명령·출력 전송 결과를 기록합니다. GUI는 최신 로그를 manifest·SHA-256을 포함한 ZIP으로 내려받습니다. 기록 중 다운로드는 마지막 완성 JSON 행까지의 snapshot입니다. 32 MiB보다 큰 파일은 SCP로 가져옵니다. 기존 도보 CSV/JSONL·기준 항로 export는 그대로 유지합니다.
 
-기존 Open Images 원본 분할(학습 1,746/검증 199/시험 244)은 그대로 보존합니다. 원거리 모델은 `prepare_small_objects.py`의 시야 증강·핑크 배경 음성 패치를 더해 기존 가중치를 추가 학습합니다. `model_manifest.json`에 부모 가중치 hash·원본 ID·분할·증강 기록을 보존합니다. `training_report.json`과 `long_range_evaluation.json`에서 실제 시험과 합성 픽셀 시험을 구분합니다. 실제 100m 자료 수는 현재 0입니다.
+Open Images 원본은 학습 1,746장, 검증 199장, 시험 244장의 기존 분할을 사용합니다. 학습 사진의 붉은 풍선 후보 697장에 밝기·크기 변형 1,394개를 만들고, 풍선 표기 영역과 겹치지 않는 붉은 배경 crop 350개를 포함했습니다. 추가된 이미지는 원본 사진과 구분합니다. 참조 사진은 색상과 오탐 점검에 사용했습니다. 대회 풍선 및 실제 수상 거리의 검출률은 현장 검증이 필요합니다.
 
-학습을 재현할 때는 Python 3.12/PyTorch CUDA 환경과 `training/requirements.txt`, 기존 Open Images 자료가 필요합니다. 원본 자료는 이전 [학습 자료 폴더](https://drive.google.com/drive/folders/1SXWVRvEo1ZDCrLwWCS21Nr0myx4XVzaA)를 사용할 수 있습니다. 부모 checkpoint는 [v2.3.3 전체 ZIP](https://github.com/smini131-maker/RC-BOAT/releases/tag/v2.3.3)의 `models/balloon_yolov8n.pt`입니다. 아래 경로는 사용자 PC에 맞게 바꿉니다.
+기존 [Open Images 학습 자료](https://drive.google.com/drive/folders/1SXWVRvEo1ZDCrLwWCS21Nr0myx4XVzaA)와 [붉은 풍선 학습 폴더](https://drive.google.com/drive/folders/1hZEqtiB--kcr2X1RL2ERjvMklJm7rb_9)에 자료를 보관합니다. Python 3.12, PyTorch CUDA 및 `training/requirements.txt`를 갖춘 PC에서 재현할 수 있습니다. 부모 가중치는 v2.4.9의 `models/balloon_yolov8n.pt`입니다.
 
 ```powershell
-.\training\.venv\Scripts\python.exe training\prepare_small_objects.py --source "C:\RCBoatTraining\openimages_dataset" --output "C:\RCBoatTraining\small_dataset"
-.\training\.venv\Scripts\python.exe training\finetune_small.py --weights "C:\RCBoatTraining\v2.3.3\balloon_yolov8n.pt" --data "C:\RCBoatTraining\small_dataset\data.yaml" --output "C:\RCBoatTraining\small_runs" --epochs 30 --batch 64 --workers 2
+.\training\.venv\Scripts\python.exe training\prepare_red_balloon.py --source "C:\RCBoatTraining\openimages_dataset" --output "C:\RCBoatTraining\red_dataset"
+.\training\.venv\Scripts\python.exe training\finetune_red_balloon.py --weights "C:\RCBoatTraining\v2.4.9\balloon_yolov8n.pt" --dataset "C:\RCBoatTraining\red_dataset" --output "C:\RCBoatTraining\red_runs" --epochs 60
 ```
 
-후보는 별도 `candidate` 폴더로 내보냅니다. 정상 사진·작은 대상·음성 배경을 비교한 뒤에만 모델과 manifest를 함께 적용합니다. 새 ONNX에는 기존 장치용 TensorRT engine을 재사용하지 않습니다. 학습 원본이나 보정 자격정보를 GitHub에 올리지 않습니다.
+60에폭을 실행한 뒤 `training/select_red_balloon.py`로 저장된 가중치를 비교했습니다. 검증 분할의 원본·밝은·어두운 조건에 대한 평균 F1을 기준으로 배포 가중치를 골랐습니다. 시험 분할은 최종 성능 비교에 사용했습니다. 시험 사진 91장의 붉은 풍선 후보 292개에 대해 원본 174개, 밝기 증가 173개, 밝기 감소 163개를 찾아냈습니다. 같은 붉은색 필터에서 v2.4.9 가중치는 각각 158개, 151개, 147개였습니다. 붉은 배경 crop 100개에서 확정 상자는 29개에서 23개로 줄었습니다. 첨부 원단 롤의 원본과 밝기 변형을 반복 재생한 경우 추적이 시작되지 않았습니다. 학습 결과는 `models/training_report.json`, 밝기 조건별 비교는 `models/red_balloon_evaluation.json`에 기록합니다. 엔진은 장치마다 새 ONNX 해시를 기준으로 준비합니다.
+
 
 ## 참고·출처
 

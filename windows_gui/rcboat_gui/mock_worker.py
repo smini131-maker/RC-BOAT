@@ -396,7 +396,7 @@ class MockWorker(QThread):
                     self.steering, self.throttle = 6000 + int(math.sin(t) * 500), self.auto_cruise_pwm
             if self.vision_enabled:
                 now=time.monotonic();cx=320+180*math.sin(t/3);bh=180+70*math.sin(t/6)
-                detections=[] if 14<t%24<20 else [dict(class_id=0,label='pink_balloon',confidence=.91,pink_fraction=.7,pink_confirmed=True,bbox=[cx-85,240-bh/2,cx+85,240+bh/2])]
+                detections=[] if 14<t%24<20 else [dict(class_id=0,label='red_balloon',target_colour='red',confidence=.91,pink_fraction=.7,pink_confirmed=True,bbox=[cx-85,240-bh/2,cx+85,240+bh/2])]
                 session = self.tracking_session if self.mode=='BALLOON' and not self.estop else None
                 target = {}
                 self.vision_desired = {}
@@ -426,7 +426,7 @@ class MockWorker(QThread):
             self.telemetry.emit(
                 {
                     "type": "telemetry",
-                    "backend": {"name": "SIM", "version":"2.4.9", "ready": True, "node_count": 10,
+                    "backend": {"name": "SIM", "version":"2.4.10", "ready": True, "node_count": 10,
                                 "master_online": True, "gateway_online": True,
                                 "ssh_connected": False,
                                 "logger_state": "recording" if self.ground_test_active else "idle"},

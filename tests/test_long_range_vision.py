@@ -182,6 +182,61 @@ class NativeCropTests(unittest.TestCase):
         cv2.circle(frame,(40,60),6,(160,0,255),-1)
         self.assertTrue(small_pink_shape_supported(frame,[34,54,47,67],validate_config({}),cv2))
 
+    def test_red_profile_confirms_both_hue_edges_and_rejects_other_colours(self):
+        for hue, saturation, value, expected in (
+            (2, 215, 245, True), (175, 220, 64, True), (11, 115, 120, True),
+            (151, 220, 200, False), (24, 220, 230, False), (0, 0, 220, False),
+        ):
+            with self.subTest(hue=hue, saturation=saturation, value=value):
+                detector=self.fake_detector([[[[160,160,80,80,.95]]]])
+                detector.config.update(target_colour='red',long_range_enabled=False)
+                frame=np.zeros((320,320,3),np.uint8)
+                hsv=np.array([[[hue,saturation,value]]],np.uint8)
+                bgr=tuple(int(v) for v in cv2.cvtColor(hsv,cv2.COLOR_HSV2BGR)[0,0])
+                cv2.circle(frame,(160,160),39,bgr,-1)
+                detection,=detector.detect(frame)
+                self.assertIs(detection['pink_confirmed'],expected)
+                json.dumps(detection)
+                self.assertEqual(detection['label'],'red_balloon' if expected else 'balloon')
+
+    def test_red_roi_and_shape_share_the_same_colour_profile(self):
+        from rcboat_ros.balloon_detector import small_pink_shape_supported
+        config=dict(validate_config({}),target_colour='red')
+        frame=np.zeros((240,320,3),np.uint8)
+        cv2.circle(frame,(224,160),7,(8,5,90),-1)
+        cv2.circle(frame,(50,45),7,(160,0,255),-1)
+        planner=RegionPlanner()
+        planner.plan(frame,config,cv2)
+        crop,detail=planner.plan(frame,config,cv2)
+        self.assertEqual(detail['colour_candidates'],1)
+        self.assertEqual(detail['kind'],'roi')
+        self.assertTrue(crop[0]<=224<crop[2] and crop[1]<=160<crop[3])
+        self.assertTrue(small_pink_shape_supported(frame,[217,153,232,168],config,cv2))
+        self.assertFalse(small_pink_shape_supported(frame,[43,38,58,53],config,cv2))
+
+    def test_red_crop_does_not_confirm_a_strip_cut_by_internal_crop_edge(self):
+        detector=self.fake_detector([[[[160,260,180,120,.95]]]])
+        detector.config.update(target_colour='red')
+        crop=(60,0,300,240)
+        detector.planner.plan=lambda frame,config,cv2: (crop,dict(kind='roi'))
+        frame=np.zeros((320,320,3),np.uint8)
+        frame[140:300,80:280]=(13,17,170)
+        detection,=detector.detect(frame)
+        self.assertGreater(detection['pink_fraction'],.12)
+        self.assertFalse(detection['pink_confirmed'])
+        from rcboat_ros.balloon_detector import roi_contains_red_box
+        self.assertTrue(roi_contains_red_box([0,20,40,70],(0,0,96,96),frame.shape))
+        self.assertTrue(roi_contains_red_box([230,60,250,80],crop,frame.shape))
+
+    def test_large_red_strip_inside_neural_box_does_not_confirm(self):
+        detector=self.fake_detector([[[[160,160,260,180,.95]]]])
+        detector.config.update(target_colour='red',long_range_enabled=False)
+        frame=np.zeros((320,320,3),np.uint8)
+        frame[87:125,35:285]=(16,21,175)
+        detection,=detector.detect(frame)
+        self.assertGreater(detection['pink_fraction'],.12)
+        self.assertFalse(detection['pink_confirmed'])
+
     def test_wrong_capture_resolution_is_reported_and_close_approach_uses_full_frame(self):
         d=self.fake_detector([np.zeros((1,5,0))]);d.detect(np.zeros((480,640,3),np.uint8))
         self.assertFalse(d.last_view['requested_resolution_met'])

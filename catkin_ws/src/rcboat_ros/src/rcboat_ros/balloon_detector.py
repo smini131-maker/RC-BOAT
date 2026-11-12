@@ -1,8 +1,8 @@
-"""Static YOLOv8n inference without PyTorch on Jetson; neural shape AND pink colour."""
+"""Static YOLOv8n inference without PyTorch on Jetson; neural shape AND target colour."""
 import hashlib,json
 from pathlib import Path
 import numpy as np
-from .long_range import RegionPlanner
+from .long_range import RegionPlanner, target_colour_mask
 
 def verify_model(path,manifest_path,input_size):
     model=Path(path).expanduser();meta=Path(manifest_path).expanduser()
@@ -11,6 +11,7 @@ def verify_model(path,manifest_path,input_size):
     if data.get('classes')!=['balloon'] or data.get('output_format')!='yolov8':raise ValueError('trained YOLOv8 balloon model required')
     if data.get('input_size')!=input_size:raise ValueError('model input size mismatch')
     if hashlib.sha256(model.read_bytes()).hexdigest()!=data.get('sha256'):raise ValueError('model SHA-256 mismatch')
+    if data.get('target_colour', 'pink') not in ('pink', 'red'):raise ValueError('unsupported model target colour')
     return data
 
 def decode_predictions(prediction,shape,size,scale,padding,confidence,nms,cv2):
@@ -35,8 +36,7 @@ def pink_fraction(frame,bbox,config,cv2):
     x1,y1,x2,y2=[int(v) for v in bbox];roi=frame[y1:y2,x1:x2]
     if not roi.size:return 0.
     hsv=cv2.cvtColor(roi,cv2.COLOR_BGR2HSV)
-    mask=cv2.inRange(hsv,np.array([config['pink_hue_low'],config['pink_min_saturation'],config['pink_min_value']],np.uint8),
-        np.array([config['pink_hue_high'],255,255],np.uint8))
+    mask=target_colour_mask(hsv,config,cv2)
     yy,xx=np.ogrid[:roi.shape[0],:roi.shape[1]]
     ellipse=((xx-roi.shape[1]/2)/max(1,roi.shape[1]/2))**2+((yy-roi.shape[0]/2)/max(1,roi.shape[0]/2))**2<=1
     return float(np.count_nonzero(mask[ellipse]))/max(1,int(np.count_nonzero(ellipse)))
@@ -45,19 +45,47 @@ def small_pink_shape_supported(frame,bbox,config,cv2):
     """Reject thin colour strips when a target has few native pixels.
 
     This is only a confirmation veto after neural inference, never a detector.
-    At this scale the largest pink component must occupy both image axes;
+    At this scale the largest target-colour component must occupy both image axes;
     elongated hull edges/paint lines are not enough evidence to acquire a target.
     """
     x1,y1,x2,y2=[int(v) for v in bbox];roi=frame[y1:y2,x1:x2]
     if not roi.size:return False
     hsv=cv2.cvtColor(roi,cv2.COLOR_BGR2HSV)
-    mask=cv2.inRange(hsv,np.array([config['pink_hue_low'],config['pink_min_saturation'],config['pink_min_value']],np.uint8),
-        np.array([config['pink_hue_high'],255,255],np.uint8))
+    mask=target_colour_mask(hsv,config,cv2)
     _,_,stats,_=cv2.connectedComponentsWithStats(mask,connectivity=8)
     if len(stats)<2:return False
     component=max(stats[1:],key=lambda row:row[4])
     w,h,area=int(component[2]),int(component[3]),int(component[4])
     return min(w,h)>=3 and min(w,h)/max(w,h)>=.5 and area/(w*h)>=.3
+
+def roi_contains_red_box(box,crop,frame_shape):
+    """Reject detections cut by an artificial crop edge; full frames remain usable."""
+    x1,y1,x2,y2=box
+    left,top,right,bottom=crop
+    height,width=frame_shape[:2]
+    margin=max(2.,.015*min(right-left,bottom-top))
+    return ((left==0 or x1-left>margin) and (top==0 or y1-top>margin)
+            and (right==width or right-x2>margin) and (bottom==height or bottom-y2>margin))
+
+
+def large_red_shape_supported(frame,bbox,config,cv2):
+    """Reject a narrow patch of red inside a large neural detection."""
+    x1,y1,x2,y2=map(int,bbox)
+    roi=frame[y1:y2,x1:x2]
+    height,width=roi.shape[:2]
+    if not height or not width:
+        return False
+    scale=min(1.,192/max(height,width))
+    view=cv2.resize(roi,(max(1,round(width*scale)),max(1,round(height*scale))),
+                    interpolation=cv2.INTER_AREA) if scale<1. else roi
+    mask=target_colour_mask(cv2.cvtColor(view,cv2.COLOR_BGR2HSV),config,cv2)
+    _,_,stats,_=cv2.connectedComponentsWithStats(mask,connectivity=8)
+    if len(stats)<2:
+        return False
+    _,_,w,h,_=map(int,max(stats[1:],key=lambda row:row[4]))
+    return (min(w,h)>=.27*max(w,h)
+            and w>=.24*view.shape[1] and h>=.24*view.shape[0])
+
 
 class TensorRTBackend:
     """TensorRT 8 binding API (JetPack 4/5), optional and target-device generated."""
@@ -109,9 +137,11 @@ class TensorRTBackend:
 class BalloonDetector:
     def __init__(self,config):
         import cv2
-        self.cv2=cv2;self.config=config;cv2.setNumThreads(2)
+        self.cv2=cv2;cv2.setNumThreads(2)
         self.planner=RegionPlanner();self.last_view={}
         self.manifest=verify_model(config['model_path'],config['model_manifest'],config['input_size'])
+        self.target_colour=self.manifest.get('target_colour','pink')
+        self.config=dict(config,target_colour=self.target_colour)
         path=str(Path(config['model_path']).expanduser());self.backend=None;self.backend_name='';self.fallback=[]
         choices=['tensorrt','onnxruntime','opencv'] if config['backend']=='auto' else [config['backend']]
         for name in choices:
@@ -142,16 +172,24 @@ class BalloonDetector:
         elif self.backend_name=='tensorrt':prediction=self.backend.run(blob)
         else:self.backend.setInput(blob);prediction=self.backend.forward()
         detections=decode_predictions(prediction,view.shape,size,scale,(left,top),self.config['confidence'],self.config['nms_iou'],cv2)
+        target_colour=self.config.get('target_colour','pink')
         for item in detections:
             b=item['bbox'];item['bbox']=[b[0]+x0,b[1]+y0,b[2]+x0,b[3]+y0]
             fraction=pink_fraction(frame,item['bbox'],self.config,cv2)
             span=min(b[2]-b[0],b[3]-b[1])
             supported=span>=self.config.get('min_source_span_px',4.0)
             shape_supported=span>=40 or small_pink_shape_supported(frame,item['bbox'],self.config,cv2)
-            item.update(pink_fraction=round(fraction,4),pink_confirmed=fraction>=self.config['pink_min_fraction'] and supported and shape_supported,
+            colour_confirmed=fraction>=self.config['pink_min_fraction'] and supported and shape_supported
+            if colour_confirmed and target_colour=='red':
+                colour_confirmed=roi_contains_red_box(item['bbox'],crop,frame.shape)
+                if colour_confirmed and span>=40:
+                    colour_confirmed=large_red_shape_supported(frame,item['bbox'],self.config,cv2)
+            item.update(pink_fraction=round(fraction,4),pink_confirmed=colour_confirmed,
                         small_shape_supported=shape_supported,
                         source_span_px=round(span,2),pixel_support='limited' if span<8 else 'adequate',detector_view=detail['kind'])
-            if item['pink_confirmed']:item['label']='pink_balloon'
+            # The pink_* telemetry fields are retained for existing tracker and log readers.
+            item['target_colour']=target_colour
+            if item['pink_confirmed']:item['label']=target_colour+'_balloon'
         self.planner.observe(detections)
         detail['model_input']=size;detail['requested_resolution_met']=frame.shape[1]>=self.config['width'] and frame.shape[0]>=self.config['height']
         self.last_view=detail

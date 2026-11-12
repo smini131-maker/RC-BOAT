@@ -1,10 +1,21 @@
 """Native-resolution colour proposals with a strict one-neural-pass frame budget.
 
 Colour proposes a crop only. A proposal is never a detection or motor command.
-Only the balloon network AND the existing pink check can confirm a target.
+Only the balloon network AND the model profile’s colour check can confirm a target.
 """
 import math
 import time
+
+
+def target_colour_mask(hsv, config, cv2):
+    """Apply the same HSV gate to ROI proposals and neural detections."""
+    if config.get('target_colour', 'pink') == 'red':
+        # OpenCV hue wraps at 179. Include warm reds and cool crimson.
+        warm = cv2.inRange(hsv, (0, 60, 40), (12, 255, 255))
+        cool = cv2.inRange(hsv, (169, 60, 40), (179, 255, 255))
+        return cv2.bitwise_or(warm, cool)
+    lower = (config['pink_hue_low'], config['pink_min_saturation'], config['pink_min_value'])
+    return cv2.inRange(hsv, lower, (config['pink_hue_high'], 255, 255))
 
 
 def expected_diameter_px(diameter_m, distance_m, width, hfov_deg):
@@ -34,7 +45,6 @@ class RegionPlanner:
         self.observed_at = 0.0
 
     def plan(self, frame, config, cv2, now=None):
-        import numpy as np
         now = time.monotonic() if now is None else now
         h, w = frame.shape[:2]
         self.calls += 1
@@ -47,8 +57,7 @@ class RegionPlanner:
         if recent and max(self.last_box[2]-self.last_box[0], self.last_box[3]-self.last_box[1]) >= min(w,h)/3:
             return full, detail  # Keep the whole balloon visible during the final approach.
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        mask = cv2.inRange(hsv, np.array([config['pink_hue_low'], config['pink_min_saturation'], config['pink_min_value']], np.uint8),
-                          np.array([config['pink_hue_high'], 255, 255], np.uint8))
+        mask = target_colour_mask(hsv, config, cv2)
         _, _, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
         rows = []
         for x, y, bw, bh, area in stats[1:]:

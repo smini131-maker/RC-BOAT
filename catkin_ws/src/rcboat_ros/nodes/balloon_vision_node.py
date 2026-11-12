@@ -13,7 +13,7 @@ from rcboat_ros.common import pack,unpack,fresh
 from rcboat_ros.control_config import validate_cruise
 from rcboat_ros.balloon_tracking import validate_config,TargetTracker,TrackingController
 
-VERSION='2.4.9'
+VERSION='2.4.10'
 def public_config(c):
     c=dict(c)
     if c['camera_type']=='rtsp':
@@ -199,7 +199,7 @@ class Vision:
         for item in detections:
             colour=(130,235,80) if item['pink_confirmed'] else (155,155,155);x1,y1,x2,y2=[int(v*scale) for v in item['bbox']]
             cv2.rectangle(image,(x1,y1),(x2,y2),colour,2)
-            cv2.putText(image,'%s %.2f PINK %.0f%%'%(item['label'],item['confidence'],item['pink_fraction']*100),(x1,max(16,y1-5)),cv2.FONT_HERSHEY_SIMPLEX,.43,colour,1)
+            cv2.putText(image,'%s %.2f %s %.0f%%'%(item['label'],item['confidence'],item.get('target_colour','pink').upper(),item['pink_fraction']*100),(x1,max(16,y1-5)),cv2.FONT_HERSHEY_SIMPLEX,.43,colour,1)
         if target.get('predicted') and target.get('acquired'):
             iw,ih=image.shape[1],image.shape[0];x=int(max(0,min(iw-1,(target['center_x_normalized']+1)/2*iw)));cv2.arrowedLine(image,(iw//2,ih//2),(x,ih//2),(0,210,255),2)
         iw,ih=image.shape[1],image.shape[0]

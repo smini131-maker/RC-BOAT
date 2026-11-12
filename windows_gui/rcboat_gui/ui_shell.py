@@ -64,7 +64,7 @@ def build_shell(w):
     header=QHBoxLayout();titles=QVBoxLayout();titles.setSpacing(2)
     title=QLabel('보트 운항 관제');title.setObjectName('appTitle');titles.addWidget(title)
     version=w.windowTitle().split('v')[-1]
-    sub=QLabel('실시간 항로 · GNSS · 핑크 풍선 추적   /   v'+version);sub.setObjectName('appSubtitle');titles.addWidget(sub)
+    sub=QLabel('실시간 항로 · GNSS · 붉은 풍선 추적   /   v'+version);sub.setObjectName('appSubtitle');titles.addWidget(sub)
     header.addLayout(titles);header.addStretch()
     w.simulation_badge=QLabel('SIMULATION');w.simulation_badge.setObjectName('simulationBadge');w.simulation_badge.hide();header.addWidget(w.simulation_badge)
     safety=QLabel('출력 상태 확인 전');safety.setObjectName('safetyBadge');w.safety_badge=safety;header.addWidget(safety);outer.addLayout(header)
