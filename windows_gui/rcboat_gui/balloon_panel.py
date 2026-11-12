@@ -3,8 +3,8 @@ import ipaddress
 import logging
 import os,statistics,struct,time
 from collections import deque
-from PySide6.QtCore import Qt,QTimer,QUrl,Signal,QVariantAnimation,QEasingCurve
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import Qt,QTimer,QUrl,Signal,QVariantAnimation,QEasingCurve,QEvent,QRectF
+from PySide6.QtGui import QPainter,QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager,QNetworkProxy,QNetworkRequest,QNetworkReply
 from PySide6.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QFormLayout,QLabel,QLineEdit,
     QComboBox,QPushButton,QSpinBox,QCheckBox,QFileDialog,QSizePolicy,QScrollArea)
@@ -20,7 +20,7 @@ MAX_JPEG_BYTES = 150000
 
 def stream_frame_rate(samples):
     delay = statistics.median(samples)
-    return 5 if delay >= 850 else 8 if delay >= 420 else 12
+    return 5 if delay >= 850 else 8 if delay >= 420 else 14
 
 
 def is_vpn_endpoint(host):
@@ -40,13 +40,80 @@ def vpn_preview_interval(request_seconds, frame_bytes, gateway_ms):
         interval = max(interval, min(.8, request_seconds * 2))
     return interval
 
+class PreviewFrame(QLabel):
+    def paintEvent(self, event):
+        frame = self.pixmap()
+        if frame is None or frame.isNull():
+            super().paintEvent(event)
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+        height = self.width() * frame.height() / frame.width()
+        target = QRectF(0, max(0, (self.height() - height) / 2), self.width(), height)
+        painter.drawPixmap(target, frame, QRectF(frame.rect()))
+
+
+class PreviewScrollArea(QScrollArea):
+    def __init__(self, frame):
+        super().__init__()
+        self.frame = frame
+        self.aspect_height = 0.0
+        self.drag_origin = None
+        self.setWidgetResizable(True)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
+        self.setWidget(frame)
+        self.setMinimumSize(280, 180)
+        self.setToolTip("영상에서 위아래로 드래그하거나 휠을 굴려 아래쪽을 봅니다.")
+        self.frame.installEventFilter(self)
+        self.verticalScrollBar().rangeChanged.connect(self.update_cursor)
+
+    def update_cursor(self, minimum, maximum):
+        if self.drag_origin is None:
+            self.frame.setCursor(Qt.OpenHandCursor if maximum > minimum else Qt.ArrowCursor)
+
+    def set_frame_aspect(self, width, height):
+        ratio = height / width if width else 0.0
+        if ratio != self.aspect_height:
+            self.aspect_height = ratio
+            self.update_frame_height()
+
+    def update_frame_height(self):
+        width = self.maximumViewportSize().width()
+        self.frame.setMinimumHeight(max(180, round(width * self.aspect_height)))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.update_frame_height()
+
+    def eventFilter(self, watched, event):
+        if watched is not self.frame:
+            return super().eventFilter(watched, event)
+        bar = self.verticalScrollBar()
+        kind = event.type()
+        if kind == QEvent.MouseButtonPress and event.button() == Qt.LeftButton and bar.maximum() > 0:
+            self.drag_origin = (event.globalPosition().y(), bar.value())
+            self.frame.setCursor(Qt.ClosedHandCursor)
+            return True
+        if self.drag_origin is not None:
+            if kind == QEvent.MouseMove:
+                start_y, scroll_value = self.drag_origin
+                bar.setValue(round(scroll_value + start_y - event.globalPosition().y()))
+                return True
+            if kind == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
+                self.drag_origin = None
+                self.update_cursor(bar.minimum(), bar.maximum())
+                return True
+        return super().eventFilter(watched, event)
+
+
 class BalloonPanel(QWidget):
     request=Signal(str,dict);start_tracking=Signal();stop_tracking=Signal()
     def __init__(self):
         super().__init__();self.network=self._preview_network();self.reply=None;self.host='';self.port=8766
         self.preview_request_at=0.;self.preview_retry_at=0.;self.preview_failure=None
         self.vpn_preview=False;self.gateway_ms=None
-        self.stream_supported=False;self.stream_rate=12;self.stream_rates=deque(maxlen=3)
+        self.stream_supported=False;self.stream_rate=14;self.stream_rates=deque(maxlen=3)
         self.stream_buffer=bytearray();self.stream_received_at=0.
         self.remote_enabled=False;self.camera_enabled=False;self.mock=False;self.last_image=0;self.samples=deque(maxlen=60);self.etag=''
         self.dirty=False;self.synced=False;self.syncing=False;self.generation=0;self.pending=None;self.stamp=0;self.waiting_start=False
@@ -75,11 +142,15 @@ class BalloonPanel(QWidget):
         for label,widget in [('연결 방식',self.camera),('장치 주소',self.source),('CSI 번호',self.sensor)]:form.addRow(label,widget)
         form.addRow('촬영 해상도',self.resolution);form.addRow(self.long_range)
         form.addRow(self.save_button);self.config_status=QLabel('');self.config_status.setWordWrap(True);self.config_status.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred);form.addRow(self.config_status)
-        self.image=QLabel('카메라를 켜면 실시간 감지 화면이 표시됩니다');self.image.setAlignment(Qt.AlignCenter);self.image.setMinimumSize(280,180)
-        self.image.setStyleSheet('background:#060e18;border:1px solid #30465f;border-radius:10px;color:#92a9c1;')
+        self.image=PreviewFrame('카메라를 켜면 실시간 감지 화면이 표시됩니다')
+        self.image.setAlignment(Qt.AlignCenter)
+        self.image.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Ignored)
+        self.image.setStyleSheet('background:#060e18;color:#92a9c1;')
+        self.preview_scroll=PreviewScrollArea(self.image)
+        self.preview_scroll.setStyleSheet('QScrollArea{background:#060e18;border:1px solid #30465f;border-radius:10px;}')
         self.camera_drawer=QScrollArea();self.camera_drawer.setWidgetResizable(True);self.camera_drawer.setWidget(settings)
         self.camera_drawer.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff);self.camera_drawer.setFixedWidth(0);self.camera_drawer.hide()
-        preview_row=QHBoxLayout();preview_row.addWidget(self.image,1);preview_row.addWidget(self.camera_drawer);layout.addLayout(preview_row,1)
+        preview_row=QHBoxLayout();preview_row.addWidget(self.preview_scroll,1);preview_row.addWidget(self.camera_drawer);layout.addLayout(preview_row,1)
         self.drawer_animation=QVariantAnimation(self);self.drawer_animation.setDuration(180);self.drawer_animation.setEasingCurve(QEasingCurve.OutCubic)
         self.drawer_animation.valueChanged.connect(lambda value:self.camera_drawer.setFixedWidth(int(value)))
         self.drawer_animation.finished.connect(lambda:self.camera_drawer.hide() if not self.settings_toggle.isChecked() else None)
@@ -163,7 +234,7 @@ class BalloonPanel(QWidget):
                 self.stream_rates.append(self.gateway_ms)
             elif backend.get('gateway_online'):
                 self.stream_rates.append(850)
-        rate=stream_frame_rate(self.stream_rates) if self.stream_rates else 12
+        rate=stream_frame_rate(self.stream_rates) if self.stream_rates else 14
         if rate!=self.stream_rate or previous_stream!=self.stream_supported:
             self.stream_rate=rate
             self._reset_preview_connection()
@@ -220,6 +291,8 @@ class BalloonPanel(QWidget):
             elif t.get('source_span_px') is not None:text+=' · '+fmt(t['source_span_px'],' px')
             self.metrics.setText(self.metrics.text()+text)
         self.shared_speed.setText('목표 PWM '+str(state.get('auto_cruise_pwm') or v.get('shared_cruise_pwm') or '—')+' · 최종 출력 '+str((state.get('pca') or {}).get('throttle_pwm','—')))
+        if self.mock or not self.camera_enabled:
+            self.preview_scroll.set_frame_aspect(0,0)
         if self.mock:self.image.setPixmap(QPixmap());self.image.setText('SIMULATION · 모의 감지 상태\n실제 카메라 영상 아님')
         elif not self.camera_enabled:self.image.setPixmap(QPixmap());self.image.setText('카메라 꺼짐')
 
@@ -357,7 +430,8 @@ class BalloonPanel(QWidget):
         if len(raw)>MAX_JPEG_BYTES or not pix.loadFromData(raw,'JPG'):
             if not self.last_image:self.image.setText('영상 형식 오류 · 다시 수신 중')
             return False
-        self.image.setPixmap(pix.scaled(self.image.size(),Qt.KeepAspectRatio,Qt.SmoothTransformation))
+        self.preview_scroll.set_frame_aspect(pix.width(),pix.height())
+        self.image.setPixmap(pix)
         self.last_image=time.monotonic();self.samples.append((self.last_image,len(raw)))
         if self.preview_failure is not None:
             logger.info('Preview connection recovered')

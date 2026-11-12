@@ -2,7 +2,7 @@
 
 [프로젝트 소개](../README.md) · [운항·시험](operation.md) · [문제 해결](troubleshooting.md)
 
-통합 정식 v2.4.13는 항로 주행·도보 테스트·풍선 추적을 함께 제공합니다. 영상 의존성 설치 순서와 USB/CSI 점검은 [카메라·풍선 추적 안내](vision.md)를 먼저 따릅니다. 기존 Jetson 항로·NTRIP 로컬 정보는 그대로 사용합니다.
+통합 정식 v2.4.14는 항로 주행·도보 테스트·풍선 추적을 함께 제공합니다. 영상 의존성 설치 순서와 USB/CSI 점검은 [카메라·풍선 추적 안내](vision.md)를 먼저 따릅니다. 기존 Jetson 항로·NTRIP 로컬 정보는 그대로 사용합니다.
 
 ## 준비 환경
 
@@ -18,7 +18,7 @@
 ## 1. 저장소 준비 — Windows PowerShell
 
 ```powershell
-Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_v2.4.13"
+Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_v2.4.14"
 ```
 
 이후 Windows 명령은 저장소 루트에서 실행합니다. `JETSON_IP`는 실제 장치 주소로 바꿉니다.
@@ -70,7 +70,7 @@ bash deployment/jetson/install_jetson_ros.sh
 완료 조건은 다음 출력입니다.
 
 ```text
-RUNNING GATEWAY VERIFIED: v2.4.13
+RUNNING GATEWAY VERIFIED: v2.4.14
 ```
 
 `DEPLOY_ROS`만으로 실행 중인 프로세스가 새 코드로 바뀌지는 않습니다. `INSTALL_ROS.cmd`는 영상 의존성을 이미 검증한 재설치에서 사용할 수 있습니다.
@@ -102,9 +102,9 @@ py -3 -m venv windows_gui\.venv
 .\windows_gui\.venv\Scripts\python.exe windows_gui\app.py
 ```
 
-GUI에서 Jetson 주소와 SSH 접속 정보를 설정하고 연결합니다. SSH, ROS master, ROS gateway, Logger, GPS, RTK 카드는 각각 독립적인 상태입니다. Windows v2.4.13은 Jetson v2.4.13에서 운항 명령을 보냅니다.
+GUI에서 Jetson 주소와 SSH 접속 정보를 설정하고 연결합니다. SSH, ROS master, ROS gateway, Logger, GPS, RTK 카드는 각각 독립적인 상태입니다. Windows v2.4.14은 Jetson v2.4.14에서 운항 명령을 보냅니다.
 
-EXE가 필요하면 저장소 루트에서 `BUILD_ROS_GUI.cmd`를 실행합니다. 결과는 `dist\RCBoatControl_ROS_v2.4.13.exe`입니다. 자세한 빌드·테스트 절차는 [개발·검증](development.md)을 참고합니다.
+EXE가 필요하면 저장소 루트에서 `BUILD_ROS_GUI.cmd`를 실행합니다. 결과는 `dist\RCBoatControl_ROS_v2.4.14.exe`입니다. 자세한 빌드·테스트 절차는 [개발·검증](development.md)을 참고합니다.
 
 ## 6. 설치 확인 및 수동 ROS 실행
 

@@ -13,7 +13,7 @@ from rcboat_ros.common import pack,unpack,fresh
 from rcboat_ros.control_config import validate_cruise
 from rcboat_ros.balloon_tracking import validate_config,TargetTracker,TrackingController
 
-VERSION='2.4.13'
+VERSION='2.4.14'
 PREVIEW_STREAM_BUDGET = 144 * 1024
 PREVIEW_STREAM_HEADER = struct.Struct('!II')
 def public_config(c):
@@ -168,7 +168,7 @@ class Vision:
             def do_GET(self):
                 self.connection.settimeout(1)
                 if token and self.headers.get('X-RCBoat-Token','')!=token:self.send_error(401);return
-                stream_rates={'/stream/12':12,'/stream/8':8,'/stream/5':5}
+                stream_rates={'/stream/14':14,'/stream/12':12,'/stream/8':8,'/stream/5':5}
                 if self.path!='/frame.jpg' and self.path not in stream_rates:self.send_error(404);return
                 if not slots.acquire(False):self.send_error(429);return
                 try:

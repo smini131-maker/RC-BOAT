@@ -156,7 +156,7 @@ w.tabs.setCurrentIndex(4);p.settings_toggle.setChecked(True)
 from PySide6.QtTest import QTest
 QTest.qWait(220);app.processEvents()
 assert p.camera_drawer.isVisible() and p.camera_drawer.width()==280
-assert p.image.geometry().right()<p.camera_drawer.geometry().left()
+assert p.preview_scroll.geometry().right()<p.camera_drawer.geometry().left()
 assert p.camera_drawer.horizontalScrollBar().maximum()==0
 p.settings_toggle.setChecked(False);QTest.qWait(220);app.processEvents()
 assert not p.camera_drawer.isVisible()
@@ -167,7 +167,7 @@ from PySide6.QtCore import QBuffer, QIODevice
 from PySide6.QtGui import QPixmap
 from rcboat_gui.balloon_panel import BalloonPanel, is_vpn_endpoint, vpn_preview_interval, stream_frame_rate
 
-assert stream_frame_rate([180,200,900])==12
+assert stream_frame_rate([180,200,900])==14
 assert stream_frame_rate([480,460,200])==8
 assert stream_frame_rate([900,870,120])==5
 assert is_vpn_endpoint('100.74.153.81') and is_vpn_endpoint('rcboat-jetson.example.ts.net')
@@ -180,6 +180,30 @@ assert vpn_preview_interval(.25, 1024, 30) == .5
 picture=QPixmap(32,18);picture.fill(Qt.magenta)
 buffer=QBuffer();buffer.open(QIODevice.WriteOnly);assert picture.save(buffer,'JPEG')
 jpeg=bytes(buffer.data())
+# Drag the video to reveal the lower frame without changing scale or the controls.
+from PySide6.QtCore import QPoint
+panel=BalloonPanel()
+panel.timer.stop()
+panel.resize(960,390)
+panel.show()
+assert panel.display_frame(jpeg)
+QTest.qWait(80)
+bar=panel.preview_scroll.verticalScrollBar()
+assert bar.maximum()>60
+assert panel.preview_scroll.horizontalScrollBar().maximum()==0
+original_size=panel.image.pixmap().size()
+original_controls=panel.start_button.geometry()
+QTest.mousePress(panel.image,Qt.LeftButton,pos=QPoint(250,170))
+QTest.mouseMove(panel.image,QPoint(250,65))
+QTest.mouseRelease(panel.image,Qt.LeftButton,pos=QPoint(250,65))
+assert bar.value()>0
+assert panel.image.pixmap().size()==original_size
+assert panel.start_button.geometry()==original_controls
+assert panel.display_frame(jpeg)
+assert bar.value()>0, 'new camera frame reset the scroll position'
+panel.shutdown()
+panel.close()
+
 requests=[]
 release_stalled_request=Event()
 class PreviewHandler(BaseHTTPRequestHandler):
@@ -222,11 +246,12 @@ with ThreadingHTTPServer(('127.0.0.1',0),PreviewHandler) as server:
         assert requests==[None,None,'"frame-1"'] and len(preview.samples)==1
         assert not preview.image.pixmap().isNull()
         first_connection=preview.network
+        last_displayed=preview.last_image
         fetch_preview()
         assert preview.network is not first_connection
         fetch_preview()
         assert requests[3:]==['"frame-1"',None]
-        assert preview.etag=='' and len(preview.samples)==1, 'Old frame displayed'
+        assert preview.etag=='' and preview.last_image in (0,last_displayed), 'Old frame displayed'
         fetch_preview()
         assert not preview.image.pixmap().isNull() and preview.preview_failure is None
     finally:
@@ -235,7 +260,7 @@ with ThreadingHTTPServer(('127.0.0.1',0),PreviewHandler) as server:
         server.shutdown();thread.join(timeout=2)
 
 w.rc_graph.append(None,None);assert w.rc_graph.series[0][-1] is None
-locked=SSHWorker._normalize(dict(success=True,version='2.4.13',gateway_online=True,master_online=True,telemetry={
+locked=SSHWorker._normalize(dict(success=True,version='2.4.14',gateway_online=True,master_online=True,telemetry={
     'safety':dict(mode='MANUAL',estop=True,actuator_locked=True,estop_reason='MAINTENANCE_CHECK',estop_time_utc='2026-11-10T10:00:00Z'),
     'vision':dict(enabled=True,model_ready=True,camera_online=True,target={'acquired':True,'predicted':False})}))
 w.update_telemetry(locked);app.processEvents()

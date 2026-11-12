@@ -85,6 +85,7 @@ class SSHWorker(QThread):
         self._ssh_health_thread = None
         self._status_thread = None
         self._ssh_wakeup = threading.Event()
+        self._status_wakeup = threading.Event()
         self._halt = threading.Event()
         self._control_rtt_ms = None
         self._control_ack_at = 0.0
@@ -181,6 +182,7 @@ class SSHWorker(QThread):
         self._host_key_event.set()
         self._halt.set()
         self._ssh_wakeup.set()
+        self._status_wakeup.set()
         with self._io_lock:
             sockets=list(self._active_sockets)
         for connection in sockets:
@@ -344,7 +346,7 @@ class SSHWorker(QThread):
         }
         logger_state = str(ground.get("state") or ("recording" if ground.get("active") else "idle"))
         return {
-            "type": "telemetry", "software_version": response.get("version", "2.4.13"),
+            "type": "telemetry", "software_version": response.get("version", "2.4.14"),
             "backend": {"name": str(response.get("backend") or "ROS Noetic"),
                         "ready": bool(response.get("gateway_online", True)), "node_count": len(nodes),
                         "master_online": bool(response.get("master_online")),
@@ -515,8 +517,12 @@ class SSHWorker(QThread):
             if not result.get("success"):
                 raise ConnectionError("operator link rejected")
         now = time.monotonic()
+        link_recovered = now - self._control_ack_at >= 2.5
         self._control_rtt_ms = round((now - started) * 1000)
         self._control_ack_at = now
+        if link_recovered and not self._stop_requested:
+            self._status_wakeup.set()
+            self._ssh_wakeup.set()
 
     def _update_ssh_health(self) -> bool:
         """One owner probes SSH; a transient timeout does not destroy the session."""
@@ -705,7 +711,8 @@ class SSHWorker(QThread):
                         self.log.emit("ROS gateway offline: " + message)
                         self._backend_error = message
                         self._backend_error_at = now
-            self._halt.wait(max(.05, interval - (time.monotonic() - started)))
+            self._status_wakeup.wait(max(.05, interval - (time.monotonic() - started)))
+            self._status_wakeup.clear()
 
     def _run_connections(self) -> None:
         link_thread = threading.Thread(target=self._operator_link_loop, daemon=True)

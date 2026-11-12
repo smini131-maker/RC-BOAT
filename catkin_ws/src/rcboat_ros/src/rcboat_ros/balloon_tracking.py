@@ -13,7 +13,7 @@ DEFAULTS={
     'pink_min_saturation':45,'pink_min_value':55,'inference_hz':15.,'max_frame_age_s':1.5,
     'acquire_frames':3,'steering_gain':.85,'steering_deadband':.04,'steering_right_sign':-1,
     'predict_s':2.0,'search_timeout_s':15.0,'search_period_s':5.0,'search_turn_strength':.8,
-    'camera_hfov_deg':62.0,'camera_yaw_deg':0.0,'preview_port':8766,'preview_hz':12.,
+    'camera_hfov_deg':62.0,'camera_yaw_deg':0.0,'preview_port':8766,'preview_hz':14.,
     'preview_width':480,'preview_jpeg_quality':50,
     'long_range_enabled':True,'roi_min_size':96,'roi_context_scale':4.0,
     'roi_max_candidates':12,'roi_full_interval':4,'min_source_span_px':4.0,
