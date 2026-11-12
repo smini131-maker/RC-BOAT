@@ -1,7 +1,7 @@
 """Live balloon detection and one-click tracking; camera settings stay collapsed."""
 import ipaddress
 import logging
-import os,time
+import os,statistics,struct,time
 from collections import deque
 from PySide6.QtCore import Qt,QTimer,QUrl,Signal,QVariantAnimation,QEasingCurve
 from PySide6.QtGui import QPixmap
@@ -14,6 +14,13 @@ logger = logging.getLogger('rcboat.preview')
 TAILSCALE_IPV4 = ipaddress.ip_network('100.64.0.0/10')
 TAILSCALE_IPV6 = ipaddress.ip_network('fd7a:115c:a1e0::/48')
 VPN_PREVIEW_BYTES_PER_SECOND = 160 * 1024
+STREAM_HEADER = struct.Struct('!II')
+MAX_JPEG_BYTES = 150000
+
+
+def stream_frame_rate(samples):
+    delay = statistics.median(samples)
+    return 5 if delay >= 850 else 8 if delay >= 420 else 12
 
 
 def is_vpn_endpoint(host):
@@ -39,6 +46,8 @@ class BalloonPanel(QWidget):
         super().__init__();self.network=self._preview_network();self.reply=None;self.host='';self.port=8766
         self.preview_request_at=0.;self.preview_retry_at=0.;self.preview_failure=None
         self.vpn_preview=False;self.gateway_ms=None
+        self.stream_supported=False;self.stream_rate=12;self.stream_rates=deque(maxlen=3)
+        self.stream_buffer=bytearray();self.stream_received_at=0.
         self.remote_enabled=False;self.camera_enabled=False;self.mock=False;self.last_image=0;self.samples=deque(maxlen=60);self.etag=''
         self.dirty=False;self.synced=False;self.syncing=False;self.generation=0;self.pending=None;self.stamp=0;self.waiting_start=False
         self.tracking_session=None;self.mode_since=None
@@ -144,7 +153,20 @@ class BalloonPanel(QWidget):
         camera_was_enabled=self.camera_enabled
         backend=state.get('backend') or {}
         self.vpn_preview=is_vpn_endpoint(host)
-        self.gateway_ms=backend.get('status_rtt_ms')
+        self.gateway_ms=backend.get('control_rtt_ms')
+        previous_stream=self.stream_supported
+        self.stream_supported=v.get('preview_stream') is True
+        if previous_endpoint!=(self.host,self.port):
+            self.stream_rates.clear()
+        if self.vpn_preview and self.stream_supported:
+            if self.gateway_ms is not None:
+                self.stream_rates.append(self.gateway_ms)
+            elif backend.get('gateway_online'):
+                self.stream_rates.append(850)
+        rate=stream_frame_rate(self.stream_rates) if self.stream_rates else 12
+        if rate!=self.stream_rate or previous_stream!=self.stream_supported:
+            self.stream_rate=rate
+            self._reset_preview_connection()
         self.mock=bool(state.get('mock'));self.remote_enabled=bool(backend.get('gateway_online'));self.camera_enabled=bool(v.get('enabled'))
         mode_since=state.get('mode_since_monotonic')
         if not self.remote_enabled or state.get('estop') or (self.mode_since is not None and mode_since!=self.mode_since):
@@ -189,7 +211,7 @@ class BalloonPanel(QWidget):
         for editor in self.editors:editor.setEnabled(not self.camera_enabled)
         self.sync_config(v.get('configuration') or {},v.get('applied_monotonic') or 0)
         def fmt(value,suffix=''):return '—' if value is None else f'{float(value):.1f}{suffix}'
-        self.metrics.setText(('풍선 감지' if visible else '추적 유지' if active and t.get('predicted') else '감지 대기')+
+        self.metrics.setText('Jetson 판단 · '+('풍선 감지' if visible else '추적 유지' if active and t.get('predicted') else '감지 대기')+
             ' · '+fmt(v.get('processed_fps'),' fps')+' · '+fmt(v.get('inference_ms'),' ms'))
         view=v.get('detector_view') or {}
         if view.get('native_width'):
@@ -213,6 +235,8 @@ class BalloonPanel(QWidget):
         previous,self.network=self.network,self._preview_network()
         previous.deleteLater()
         self.etag=''
+        self.stream_buffer.clear()
+        self.stream_received_at=0.
         self.preview_retry_at=0.
 
     def _preview_transport_failed(self,error):
@@ -234,18 +258,57 @@ class BalloonPanel(QWidget):
             self.last_image=0;self.etag='';self.samples.clear();self.bandwidth.clear()
             self.image.clear();self.image.setText('새 영상 수신 대기 · 이전 영상 만료')
         if self.reply is not None:
-            if now-self.preview_request_at>(1.2 if self.vpn_preview else 1.8):self._preview_transport_failed('request timeout')
+            last_activity=self.stream_received_at or self.preview_request_at
+            if now-last_activity>(1.2 if self.vpn_preview else 1.8):
+                self._preview_transport_failed('request timeout')
             return
         if now<self.preview_retry_at:return
-        host='['+self.host+']' if ':' in self.host else self.host;req=QNetworkRequest(QUrl(f'http://{host}:{self.port}/frame.jpg'));req.setTransferTimeout(1500)
+        host='['+self.host+']' if ':' in self.host else self.host
+        path=f'/stream/{self.stream_rate}' if self.stream_supported else '/frame.jpg'
+        req=QNetworkRequest(QUrl(f'http://{host}:{self.port}{path}'))
+        req.setTransferTimeout(1500)
         token=os.getenv('RCBOAT_GATEWAY_TOKEN','')
         if token:req.setRawHeader(b'X-RCBoat-Token',token.encode())
         if self.etag:req.setRawHeader(b'If-None-Match',self.etag.encode())
         reply=self.network.get(req)
         self.reply=reply
         self.preview_request_at=now
-        reply.finished.connect(lambda:self.frame_finished(reply))
-        reply.downloadProgress.connect(lambda received,total:reply.abort() if self.reply is reply and received>200000 else None)
+        if self.stream_supported:
+            reply.setReadBufferSize(64000)
+            reply.readyRead.connect(lambda:self.read_stream(reply))
+            reply.finished.connect(lambda:self.stream_finished(reply))
+        else:
+            reply.finished.connect(lambda:self.frame_finished(reply))
+            reply.downloadProgress.connect(lambda received,total:reply.abort() if self.reply is reply and received>200000 else None)
+
+    def read_stream(self,reply):
+        if reply is not self.reply or reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)!=200:
+            return
+        self.stream_buffer.extend(bytes(reply.readAll()))
+        latest=None
+        while len(self.stream_buffer)>=STREAM_HEADER.size:
+            size,age_ms=STREAM_HEADER.unpack_from(self.stream_buffer)
+            if size<=0 or size>MAX_JPEG_BYTES:
+                self._preview_transport_failed('invalid frame length')
+                return
+            end=STREAM_HEADER.size+size
+            if len(self.stream_buffer)<end:
+                break
+            self.stream_received_at=time.monotonic()
+            if age_ms<=500:
+                latest=bytes(self.stream_buffer[STREAM_HEADER.size:end])
+            del self.stream_buffer[:end]
+        if latest is not None:
+            self.display_frame(latest)
+
+    def stream_finished(self,reply):
+        try:
+            if reply is self.reply:
+                status=reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
+                self.reply=None
+                self._preview_transport_failed(f'video stream closed ({status or reply.error().name})')
+        finally:
+            reply.deleteLater()
 
     def frame_finished(self,reply):
         try:
@@ -283,24 +346,28 @@ class BalloonPanel(QWidget):
             if max_frame_age>1.2:
                 if not self.last_image:self.image.setText('오래된 영상 건너뜀 · 다음 프레임 대기')
                 return
-            raw=bytes(reply.readAll());pix=QPixmap()
-            if len(raw)>150000 or not pix.loadFromData(raw,'JPG'):
-                if not self.last_image:self.image.setText('영상 형식 오류 · 다시 수신 중')
-                return
-            # Header pairs work with both Qt 6.6 and the Qt 6.12 str-only reader.
-            self.etag=headers.get(b'etag',b'').decode('ascii',errors='ignore')
-            self.image.setPixmap(pix.scaled(self.image.size(),Qt.KeepAspectRatio,Qt.SmoothTransformation))
-            self.last_image=time.monotonic();self.samples.append((self.last_image,len(raw)))
-            if self.preview_failure is not None:
-                logger.info('Preview connection recovered')
-                self.preview_failure=None
-            if len(self.samples)>1:
-                elapsed=max(.1,self.samples[-1][0]-self.samples[0][0])
-                data_rate=sum(n for _,n in list(self.samples)[1:])/elapsed/1024
-                self.bandwidth.setText(f'미리보기 {(len(self.samples)-1)/elapsed:.1f} fps · {data_rate:.0f} KiB/s · 응답 {request_seconds*1000:.0f} ms')
-                self.bandwidth.setToolTip('영상 요청부터 프레임 수신까지 걸린 시간')
+            raw=bytes(reply.readAll())
+            if self.display_frame(raw,request_seconds):
+                self.etag=headers.get(b'etag',b'').decode('ascii',errors='ignore')
         finally:
             reply.deleteLater()
+
+    def display_frame(self,raw,request_seconds=None):
+        pix=QPixmap()
+        if len(raw)>MAX_JPEG_BYTES or not pix.loadFromData(raw,'JPG'):
+            if not self.last_image:self.image.setText('영상 형식 오류 · 다시 수신 중')
+            return False
+        self.image.setPixmap(pix.scaled(self.image.size(),Qt.KeepAspectRatio,Qt.SmoothTransformation))
+        self.last_image=time.monotonic();self.samples.append((self.last_image,len(raw)))
+        if self.preview_failure is not None:
+            logger.info('Preview connection recovered')
+            self.preview_failure=None
+        if len(self.samples)>1:
+            elapsed=max(.1,self.samples[-1][0]-self.samples[0][0])
+            data_rate=sum(n for _,n in list(self.samples)[1:])/elapsed/1024
+            latency='' if request_seconds is None else f' · 응답 {request_seconds*1000:.0f} ms'
+            self.bandwidth.setText(f'PC 영상 {(len(self.samples)-1)/elapsed:.1f} fps · {data_rate:.0f} KiB/s'+latency)
+        return True
     def shutdown(self):
         self.timer.stop();self.remote_enabled=False
         reply,self.reply=self.reply,None

@@ -165,8 +165,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Event, Thread
 from PySide6.QtCore import QBuffer, QIODevice
 from PySide6.QtGui import QPixmap
-from rcboat_gui.balloon_panel import BalloonPanel, is_vpn_endpoint, vpn_preview_interval
+from rcboat_gui.balloon_panel import BalloonPanel, is_vpn_endpoint, vpn_preview_interval, stream_frame_rate
 
+assert stream_frame_rate([180,200,900])==12
+assert stream_frame_rate([480,460,200])==8
+assert stream_frame_rate([900,870,120])==5
 assert is_vpn_endpoint('100.74.153.81') and is_vpn_endpoint('rcboat-jetson.example.ts.net')
 assert not is_vpn_endpoint('10.16.147.215') and not is_vpn_endpoint('')
 assert vpn_preview_interval(.04, 1024, 30) == 1/12
@@ -232,7 +235,7 @@ with ThreadingHTTPServer(('127.0.0.1',0),PreviewHandler) as server:
         server.shutdown();thread.join(timeout=2)
 
 w.rc_graph.append(None,None);assert w.rc_graph.series[0][-1] is None
-locked=SSHWorker._normalize(dict(success=True,version='2.4.12',gateway_online=True,master_online=True,telemetry={
+locked=SSHWorker._normalize(dict(success=True,version='2.4.13',gateway_online=True,master_online=True,telemetry={
     'safety':dict(mode='MANUAL',estop=True,actuator_locked=True,estop_reason='MAINTENANCE_CHECK',estop_time_utc='2026-11-10T10:00:00Z'),
     'vision':dict(enabled=True,model_ready=True,camera_online=True,target={'acquired':True,'predicted':False})}))
 w.update_telemetry(locked);app.processEvents()

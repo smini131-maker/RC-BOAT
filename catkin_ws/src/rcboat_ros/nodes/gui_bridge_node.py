@@ -22,7 +22,7 @@ from rcboat_ros.gps_settings import load_hdop,save_hdop,validate_hdop
 from rcboat_ros.corrections import refresh_transport_status,refresh_receiver_status
 
 
-VERSION = "2.4.12"
+VERSION = "2.4.13"
 SOCKET = os.path.expanduser("~/rcboat_ros_data/gui_bridge.sock")
 TOPICS = {
     "gps": "/rcboat/gps/status", "ntrip": "/rcboat/ntrip/status", "route": "/rcboat/route/state",
@@ -35,6 +35,9 @@ TOPICS = {
 class Bridge:
     def __init__(self):
         self.cache = {}
+        self.route_catalog = ([], [])
+        self.route_catalog_revision = "empty"
+        self.route_catalog_lock = threading.Lock()
         source=pathlib.Path(__file__).resolve()
         self.runtime_identity={'source':str(source),
             'source_sha256':hashlib.sha256(source.read_bytes().replace(b'\r\n',b'\n')).hexdigest(),
@@ -215,6 +218,19 @@ class Bridge:
         if errors: raise RuntimeError("; ".join(errors))
         return result
 
+    def compact_route_status(self, telemetry, known_revision):
+        route = dict(telemetry.get("route") or {})
+        catalog = (route.pop("routes", []), route.pop("multipaths", []))
+        with self.route_catalog_lock:
+            if self.route_catalog != catalog:
+                self.route_catalog = catalog
+                self.route_catalog_revision = hashlib.sha256(pack(routes=catalog[0], multipaths=catalog[1]).encode()).hexdigest()
+            revision = self.route_catalog_revision
+        if known_revision != revision:
+            route["routes"], route["multipaths"] = catalog
+        telemetry["route"] = route
+        return revision
+
     def dispatch(self, payload):
         if self.token and payload.get("token") != self.token:
             return {"success": False, "error": "gateway authentication failed"}
@@ -236,6 +252,9 @@ class Bridge:
             except Exception:
                 nodes = []; master_online = False
             telemetry = dict(self.cache)
+            catalog_revision = None
+            if "route_catalog_revision" in args:
+                catalog_revision = self.compact_route_status(telemetry, args["route_catalog_revision"])
             nav=dict(telemetry.get('navigation',{}))
             nav['fresh']=fresh(nav.get('monotonic',0),1.0,time.monotonic())
             telemetry['navigation']=nav
@@ -245,7 +264,8 @@ class Bridge:
                                         "samples": self.gps_log_samples}
             return {"success": True, "version": VERSION, "backend": "ROS Noetic", "master_online": master_online,
                     "gateway_online": True, "runtime_identity": self.runtime_identity, "telemetry": telemetry,
-                    "gps_settings":dict(self.gps_settings),"nodes": nodes, "ground_tests": self.tests()}
+                    "gps_settings":dict(self.gps_settings),"nodes": nodes, "ground_tests": self.tests(),
+                    "route_catalog_revision": catalog_revision}
         if command == "gps_log_start": self.start_gps_log(); return {"success": True, "response": {"file_path": self.gps_log_path}}
         if command == "gps_log_stop":
             path = self.gps_log_path; samples = self.gps_log_samples; self.close_gps_log()

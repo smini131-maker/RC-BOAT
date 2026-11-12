@@ -35,6 +35,34 @@ finally:
     health.join(2); heartbeat.join(2)
 assert not health.is_alive() and not heartbeat.is_alive()
 
+worker = SSHWorker('127.0.0.1', 22, 'fixture', '')
+entered=threading.Event();release=threading.Event();ack=threading.Event()
+def slow_status(payload):
+    if payload['action']=='status':
+        entered.set()
+        release.wait(3)
+    else:
+        ack.set()
+    return dict(success=True,version=JETSON_VERSION)
+worker._bridge=slow_status
+worker._send_operator_link=lambda connected:None
+worker._open_ssh_terminal=lambda error:error
+worker.start()
+try:
+    assert entered.wait(1)
+    worker.send_command('GROUND_TEST_STOP')
+    assert ack.wait(.8), 'Command waited for the telemetry response'
+finally:
+    worker.stop()
+    release.set()
+    assert worker.wait(2500)
+
+cached=dict(route_catalog_revision='a',telemetry=dict(route=dict(routes=[dict(id='1')],multipaths=[])))
+worker._merge_route_catalog(cached)
+compact=dict(route_catalog_revision='a',telemetry=dict(route=dict(active_route_id='1')))
+worker._merge_route_catalog(compact)
+assert compact['telemetry']['route']==dict(active_route_id='1',routes=[dict(id='1')],multipaths=[])
+
 # A stalled SSH reconnect must not block normal ROS command delivery.
 worker = SSHWorker('127.0.0.1', 22, 'fixture', '')
 entered = threading.Event(); release = threading.Event(); command_processed = threading.Event()

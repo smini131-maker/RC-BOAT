@@ -105,6 +105,33 @@ class VisionNodeTests(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as error:urllib.request.urlopen(req,timeout=2)
         self.assertEqual(error.exception.code,503)
 
+    def test_stream_reuses_jpeg_and_sends_only_new_frames(self):
+        self.v.config['preview_port']=0
+        self.v.start_preview()
+        with self.v.lock:
+            self.v.enabled=True
+            self.v.preview=b'first'
+            self.v.preview_at=self.m.time.monotonic()
+        client=http.client.HTTPConnection('127.0.0.1',self.v.server.server_port,timeout=2)
+        try:
+            client.request('GET','/stream/12')
+            response=client.getresponse()
+            self.assertEqual(response.status,200)
+            header=self.m.PREVIEW_STREAM_HEADER
+            size,age=header.unpack(response.read(header.size))
+            self.assertLess(age,500)
+            self.assertEqual(response.read(size),b'first')
+            with self.v.lock:
+                self.v.preview=b'second'
+                self.v.preview_at=self.m.time.monotonic()
+                self.v.preview_sequence+=1
+            size,_=header.unpack(response.read(header.size))
+            self.assertEqual(response.read(size),b'second')
+        finally:
+            with self.v.lock:self.v.enabled=False
+            client.close()
+
+
 class CameraAdapterTests(unittest.TestCase):
     def test_usb_failure_falls_back_to_csi_and_files_cannot_control(self):
         from rcboat_ros.camera_io import open_camera
@@ -144,6 +171,23 @@ class CameraAdapterTests(unittest.TestCase):
         cap.release();self.assertTrue(captures[1].released)
 
 class VisionGatewayTests(unittest.TestCase):
+    def test_compact_status_keeps_route_updates_and_omits_unchanged_catalog(self):
+        with tempfile.TemporaryDirectory() as directory:
+            module=harness.load_node('gui_bridge_node',Path(directory))
+            with patch.object(module.rospy,'set_param',create=True):
+                bridge=module.Bridge()
+            route=dict(routes=[dict(id='one')],multipaths=[dict(id='a')],selected_route_id='one')
+            first=dict(route=route)
+            revision=bridge.compact_route_status(first,'')
+            self.assertEqual(first['route']['routes'],route['routes'])
+            compact=dict(route=route)
+            self.assertEqual(bridge.compact_route_status(compact,revision),revision)
+            self.assertEqual(compact['route'],dict(selected_route_id='one'))
+            self.assertIn('routes',route)
+            changed=dict(route=dict(route,routes=[dict(id='two')],selected_route_id='two'))
+            self.assertNotEqual(bridge.compact_route_status(changed,revision),revision)
+            self.assertEqual(changed['route']['routes'],[dict(id='two')])
+
     def test_service_routing_and_complete_line_snapshot_hash(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);m=harness.load_node('gui_bridge_node',root)

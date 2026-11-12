@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Optional camera node; no actuator ownership. Latest frame only and on-demand JPEG."""
 import datetime as dt
-import json,os,threading,time
+import json,os,socket,struct,threading,time
 from collections import deque
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
@@ -13,7 +13,9 @@ from rcboat_ros.common import pack,unpack,fresh
 from rcboat_ros.control_config import validate_cruise
 from rcboat_ros.balloon_tracking import validate_config,TargetTracker,TrackingController
 
-VERSION='2.4.12'
+VERSION='2.4.13'
+PREVIEW_STREAM_BUDGET = 144 * 1024
+PREVIEW_STREAM_HEADER = struct.Struct('!II')
 def public_config(c):
     c=dict(c)
     if c['camera_type']=='rtsp':
@@ -136,12 +138,43 @@ class Vision:
         class Handler(BaseHTTPRequestHandler):
             protocol_version='HTTP/1.1'
             disable_nagle_algorithm=True
+            def send_stream(self, fps):
+                self.close_connection=True
+                self.connection.setsockopt(socket.SOL_SOCKET,socket.SO_SNDBUF,16384)
+                self.connection.settimeout(.65)
+                self.send_response(200)
+                self.send_header('Content-Type','application/octet-stream')
+                self.send_header('Cache-Control','no-store')
+                self.send_header('Connection','close')
+                self.end_headers()
+                previous_sequence=-1
+                while not owner.stopping:
+                    started=time.monotonic()
+                    with owner.lock:
+                        if not owner.enabled:
+                            return
+                        owner.preview_requested_at=started
+                        payload,stamp,sequence=owner.preview,owner.preview_at,owner.preview_sequence
+                    if sequence==previous_sequence or not payload or not fresh(stamp,.5,started):
+                        time.sleep(.02)
+                        continue
+                    packet=PREVIEW_STREAM_HEADER.pack(len(payload),max(0,round((started-stamp)*1000)))+payload
+                    self.wfile.write(packet)
+                    owner.preview_count+=1;owner.preview_bytes+=len(payload)
+                    previous_sequence=sequence
+                    interval=max(1/fps,len(packet)/PREVIEW_STREAM_BUDGET)
+                    time.sleep(max(0,interval-(time.monotonic()-started)))
+
             def do_GET(self):
                 self.connection.settimeout(1)
                 if token and self.headers.get('X-RCBoat-Token','')!=token:self.send_error(401);return
-                if self.path!='/frame.jpg':self.send_error(404);return
+                stream_rates={'/stream/12':12,'/stream/8':8,'/stream/5':5}
+                if self.path!='/frame.jpg' and self.path not in stream_rates:self.send_error(404);return
                 if not slots.acquire(False):self.send_error(429);return
                 try:
+                    if self.path in stream_rates:
+                        self.send_stream(stream_rates[self.path])
+                        return
                     with owner.lock:
                         owner.preview_requested_at=time.monotonic();payload=owner.preview;stamp=owner.preview_at
                         sequence=getattr(owner,'preview_sequence',0)
@@ -168,7 +201,7 @@ class Vision:
             status=dict(self.detail,software_version=VERSION,enabled=self.enabled,model_ready=self.model_ready,camera_online=online,live_source=self.live_source,
                 tracking_session=self.tracking_session,
                 source_type=self.source_type,frame_age_s=round(now-self.frame_at,3) if self.frame_at else None,max_frame_age_s=c['max_frame_age_s'],
-                preview_port=c['preview_port'],preview_error=self.preview_error,preview_frames_sent=self.preview_count,preview_bytes_sent=self.preview_bytes,
+                preview_port=c['preview_port'],preview_stream=True,preview_error=self.preview_error,preview_frames_sent=self.preview_count,preview_bytes_sent=self.preview_bytes,
                 preview_generated=self.preview_sequence,processed_frames=self.processed_frames,
                 configuration=public_config(c),applied_monotonic=self.applied_at,error=self.error,monotonic=now,shared_cruise_pwm=rospy.get_param('/rcboat/cruise_pwm',6650))
             self.status_pub.publish(pack(**status));self.desired_pub.publish(pack(**desired))
