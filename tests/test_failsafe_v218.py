@@ -102,6 +102,32 @@ class SupervisorTests(unittest.TestCase):
         self.s.nav['monotonic']=self.s.nav['route_monotonic']=self.now
         self.assert_manual_stop('GPS_INVALID_OR_STALE')
 
+    def test_heading_shock_keeps_same_session_neutral_during_gps_grace(self):
+        self.s.nav.update(desired_throttle_pwm=6450, navigation_protection={'reason': 'HEADING_SHOCK'})
+        self.assertEqual(self.s._command(), ('NAVIGATION', 6100, 6450, False))
+
+        self.now += .5
+        self.refresh()
+        self.s.gps.update(healthy=False, data_validity='stale', last_valid_monotonic=self.now - 2.01)
+        self.s.nav.update(valid=False, ramp_active=False, navigation_protection={'reason': 'HEADING_SHOCK'})
+        self.assertEqual(self.s._command(), ('NAVIGATION_GPS_GRACE', 6000, 6450, True))
+        self.assertTrue(self.s.armed)
+        self.assertEqual(self.s.reason, 'NAVIGATION_HEADING_SHOCK_GPS_GRACE')
+
+        self.now += .5
+        self.refresh()
+        self.s.nav.update(gps_solution_monotonic=self.now, desired_throttle_pwm=6450,
+                          navigation_protection={'reason': 'HEADING_SHOCK'})
+        self.assertEqual(self.s._command(), ('NAVIGATION', 6100, 6450, False))
+        self.assertIsNone(self.s.ground_gps_gap_since)
+        self.assertEqual(self.s.reason, '')
+
+    def test_gps_grace_ignores_heading_shock_from_previous_navigation_session(self):
+        self.s.gps['last_valid_monotonic'] = self.now - 2.01
+        self.s.nav.update(ramp_session_monotonic=self.s.mode_since - 1,
+                          navigation_protection={'reason': 'HEADING_SHOCK'})
+        self.assertEqual(self.s._command(), ('NAVIGATION_GPS_GRACE', 6000, 6650, False))
+
     def test_goal_arrival(self):
         self.s.nav['route_complete'] = True
         self.assert_manual_stop('TARGET_ARRIVED')

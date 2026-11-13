@@ -34,8 +34,10 @@ def gsa(fix_type, pdop='', hdop='', vdop=''):
     return nmea(','.join(['GNGSA','A',fix_type,*(['']*12),pdop,hdop,vdop,'1']))
 
 
-def nav_pvt(pdop, fix_type=3, flags=1):
+def nav_pvt(pdop, fix_type=3, flags=1, *, itow=0, heading=0):
     payload=bytearray(92)
+    struct.pack_into('<I',payload,0,itow)
+    struct.pack_into('<i',payload,64,round(heading*100000))
     payload[20]=fix_type
     payload[21]=flags
     struct.pack_into('<ii',payload,24,1290000000,350000000)
@@ -120,6 +122,46 @@ class CorrectionTests(unittest.TestCase):
             parser=MixedGpsParser();parser.feed(gga(value))
             self.assertIsNone(parser.state['receiver_correction_age_s'])
             self.assertEqual(parser.state['receiver_correction_age_status'],'invalid')
+
+
+class CourseSampleTests(unittest.TestCase):
+    def test_ubx_poll_repeat_does_not_replace_course_or_timestamp(self):
+        parser = MixedGpsParser()
+        with patch('rcboat_ros.gps_mix.time.monotonic', return_value=100):
+            parser.feed(nav_pvt(100, itow=1000, heading=359))
+        with patch('rcboat_ros.gps_mix.time.monotonic', return_value=101):
+            parser.feed(nav_pvt(100, itow=1000, heading=80))
+        result = refresh_receiver_status(parser.state, 101)
+        self.assertEqual(result['course_sample_id'], 'UBX:1000')
+        self.assertEqual(result['course_sample_monotonic'], 100)
+        self.assertAlmostEqual(result['heading_deg'], 359)
+
+        with patch('rcboat_ros.gps_mix.time.monotonic', return_value=102):
+            parser.feed(nav_pvt(100, itow=2000, heading=1))
+        self.assertEqual(parser.state['course_sample_id'], 'UBX:2000')
+        self.assertEqual(parser.state['course_sample_monotonic'], 102)
+        self.assertAlmostEqual(parser.state['heading_deg'], 1)
+
+    def test_only_valid_rmc_course_with_new_epoch_refreshes_provenance(self):
+        parser = MixedGpsParser()
+        with patch('rcboat_ros.gps_mix.time.monotonic', return_value=100):
+            parser.feed(nmea('GNRMC,120000.10,A,3504.5,N,12905.0,E,2.0,35,031126'))
+        with patch('rcboat_ros.gps_mix.time.monotonic', return_value=101):
+            parser.feed(gga(''))
+            parser.feed(nmea('GPRMC,120000.100,A,3504.5,N,12905.0,E,2.0,55,031126'))
+        self.assertEqual(parser.state['course_sample_id'], 'RMC:031126:120000.1')
+        self.assertEqual(parser.state['last_valid_monotonic'], 101)
+        self.assertEqual(parser.state['course_sample_monotonic'], 100)
+        self.assertEqual(parser.state['heading_deg'], 35)
+
+        with patch('rcboat_ros.gps_mix.time.monotonic', return_value=102):
+            parser.feed(nmea('GNRMC,120001.00,V,3504.5,N,12905.0,E,2.0,60,031126'))
+        self.assertEqual(parser.state['course_sample_monotonic'], 100)
+        with patch('rcboat_ros.gps_mix.time.monotonic', return_value=103):
+            parser.feed(nmea('GNRMC,120000.100,A,3504.5,N,12905.0,E,2.0,61,041126'))
+        self.assertEqual(parser.state['course_sample_id'], 'RMC:041126:120000.1')
+        self.assertEqual(parser.state['course_sample_monotonic'], 103)
+        self.assertEqual(parser.state['heading_deg'], 61)
 
 
 class DopTests(unittest.TestCase):

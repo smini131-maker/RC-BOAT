@@ -49,6 +49,8 @@ class MockWorker(QThread):
         self.auto_cruise_pwm = 6650
         self.throttle_ramp = NavigationThrottleRamp()
         self.cruise_applied_monotonic = time.monotonic()
+        self.curve_slowdown_enabled = True
+        self.curve_slowdown_applied_monotonic = 0.0
         self.routes = deepcopy(self.ROUTES)
         self.multipaths = deepcopy(self.MULTIPATHS)
         self.selected_multipath_id = "training_set_a"
@@ -141,6 +143,12 @@ class MockWorker(QThread):
                 value = validate_cruise(kwargs.get("value"))
                 self.auto_cruise_pwm = value
                 self.cruise_applied_monotonic = time.monotonic()
+            elif command == 'NAV_CURVE_SLOWDOWN':
+                enabled = kwargs.get('enabled')
+                if type(enabled) is not bool:
+                    raise ValueError('enabled must be a boolean')
+                self.curve_slowdown_enabled = enabled
+                self.curve_slowdown_applied_monotonic = time.monotonic()
             elif command == "SET_MULTIPATH":
                 limits = {
                     "endpoint_tolerance_m": (0.10, 1.00),
@@ -364,6 +372,9 @@ class MockWorker(QThread):
             acknowledgement.update(configuration=dict(self.vision_config),applied_monotonic=self.vision_applied_at)
         if ok and command=='SET_AUTO_CRUISE_PWM':
             acknowledgement.update(value=self.auto_cruise_pwm,cruise_applied_monotonic=self.cruise_applied_monotonic)
+        if ok and command=='NAV_CURVE_SLOWDOWN':
+            acknowledgement.update(curve_slowdown_enabled=self.curve_slowdown_enabled,
+                                   curve_slowdown_applied_monotonic=self.curve_slowdown_applied_monotonic)
         if ok and command=='SET_GPS_SETTINGS':
             acknowledgement.update(navigation_max_hdop=self.gps_max_hdop,applied_monotonic=self.gps_settings_applied_monotonic)
         if command == "DOWNLOAD_GROUND_RESULTS" and ok:
@@ -426,7 +437,7 @@ class MockWorker(QThread):
             self.telemetry.emit(
                 {
                     "type": "telemetry",
-                    "backend": {"name": "SIM", "version":"2.4.22", "ready": True, "node_count": 10,
+                    "backend": {"name": "SIM", "version":"2.4.23", "ready": True, "node_count": 10,
                                 "master_online": True, "gateway_online": True,
                                 "ssh_connected": False,
                                 "logger_state": "recording" if self.ground_test_active else "idle"},
@@ -444,6 +455,8 @@ class MockWorker(QThread):
                     "ramp_throttle_pwm": self.throttle if nav_active and not self.estop else None,
                     "final_throttle_pwm": self.throttle,
                     "cruise_applied_monotonic": self.cruise_applied_monotonic,
+                    "curve_slowdown_enabled": self.curve_slowdown_enabled,
+                    "curve_slowdown_applied_monotonic": self.curve_slowdown_applied_monotonic,
                     "rc_input_calibration": deepcopy(RC_DEFAULTS),
                     "pca_output_calibration": dict(OUTPUT_DEFAULTS),
                     "gps_recording": {"active": self.gps_recording, "name": self.gps_recording_name, "point_count": len(self.gps_recording_points), "minimum_distance_m": self.recording_minimum_distance_m, "minimum_interval_s": self.recording_minimum_interval_s, "arrival_radius_m": self.recording_arrival_radius_m},

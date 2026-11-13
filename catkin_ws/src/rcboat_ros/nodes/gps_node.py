@@ -32,7 +32,7 @@ def main():
                 parser.feed(data)
             except Exception as exc:
                 rospy.logerr('GPS read fault %s',exc)
-                pub.publish(pack(software_version="2.4.22",fix=False,healthy=False,data_validity='invalid',
+                pub.publish(pack(software_version="2.4.23",fix=False,healthy=False,data_validity='invalid',
                                  transport_connected=False,error=str(exc)))
                 raise  # roslaunch respawns GPS only; manual RC control stays alive.
             now=time.monotonic()
@@ -44,7 +44,7 @@ def main():
             if now-last_publish>=.25:
                 result=refresh_receiver_status(parser.state,now)
                 result.update(parser.dop_snapshot(now))
-                result["software_version"]="2.4.22"
+                result["software_version"]="2.4.23"
                 result['transport_connected']=True
                 update=float(result.get('last_update_monotonic') or 0)
                 result['gps_data_age_s']=round(now-update,3) if update and now>=update else None

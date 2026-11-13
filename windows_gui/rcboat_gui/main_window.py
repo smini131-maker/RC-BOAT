@@ -93,6 +93,9 @@ class MainWindow(QMainWindow):
         self._pending_cruise_value = None
         self._confirmed_cruise_pwm = None
         self._cruise_applied_stamp = 0.0
+        self._curve_slowdown_enabled = None
+        self._curve_slowdown_stamp = -1.0
+        self._curve_slowdown_request = None
         self._gps_settings_dirty=False
         self._syncing_gps_settings=False
         self._pending_gps_settings=None
@@ -903,11 +906,15 @@ class MainWindow(QMainWindow):
             self._pending_gps_settings=None
             self._pending_cruise_request = self._pending_cruise_value = None
             self._update_cruise_label()
+            self._curve_slowdown_enabled = None
+            self._curve_slowdown_stamp = -1.0
+            self._curve_slowdown_request = None
             self._gateway_online = self._ssh_online = False
             self.cards["ros_master"].set_value("확인 전", "NO_DATA")
             self.cards["gps"].set_value("no_data",False)
             self.cards["rtk"].set_value("no_data",False)
         self._refresh_connection_button()
+        self._update_curve_slowdown()
         self.balloon_panel.set_connected(connected)
         self.simulation_badge.setVisible(connected and self.is_simulation)
         if connected and self.is_simulation:
@@ -1125,6 +1132,32 @@ class MainWindow(QMainWindow):
 
     def reset_auto_speed(self) -> None:
         self._set_auto_speed_editor(CRUISE_DEFAULT, dirty=True)
+
+    def _update_curve_slowdown(self) -> None:
+        self.curve_slowdown.setChecked(self._curve_slowdown_enabled is not False)
+        self.curve_slowdown.setEnabled(self._gateway_online and self._curve_slowdown_enabled is not None
+                                      and self._curve_slowdown_request is None)
+        self.curve_slowdown.setText('커브 감속 · 적용 중' if self._curve_slowdown_request else '커브 감속')
+
+    def _confirm_curve_slowdown(self, value, stamp) -> None:
+        if (type(value) is bool and type(stamp) in (int, float) and math.isfinite(stamp)
+                and stamp >= 0 and stamp >= self._curve_slowdown_stamp):
+            self._curve_slowdown_enabled = value
+            self._curve_slowdown_stamp = stamp
+
+    def set_curve_slowdown(self, enabled: bool) -> None:
+        if self._curve_slowdown_request is None and self._gateway_online and self._curve_slowdown_enabled is not None:
+            request = self.command('NAV_CURVE_SLOWDOWN', enabled=enabled)
+            if request is not None:
+                self._curve_slowdown_request = request
+                QTimer.singleShot(6000, lambda: self._curve_slowdown_timeout(request))
+        self._update_curve_slowdown()
+
+    def _curve_slowdown_timeout(self, request) -> None:
+        if self._curve_slowdown_request == request:
+            self._curve_slowdown_request = None
+            self._update_curve_slowdown()
+            self.log('커브 감속 응답 없음 · 적용 상태를 확인하세요')
 
     def clear_estop(self) -> None:
         answer = QMessageBox.question(self, "비상정지 해제", "비상정지 잠금을 해제할까요? 수동 모드에서 조종기 스로틀 중립 0.3초 확인 후 수동 조종이 가능합니다. 추적·항로 주행은 자동으로 재시작하지 않습니다.")
@@ -1736,6 +1769,12 @@ class MainWindow(QMainWindow):
                 self._auto_speed_dirty=self.auto_speed_spin.value()!=self._confirmed_cruise_pwm
             self._pending_cruise_request=self._pending_cruise_value=None
             self._update_cruise_label()
+        if (ack.get('command') == 'NAV_CURVE_SLOWDOWN' and self._curve_slowdown_request is not None
+                and ack.get('request_id') == self._curve_slowdown_request):
+            if ack.get('ok'):
+                self._confirm_curve_slowdown(ack.get('curve_slowdown_enabled'), ack.get('curve_slowdown_applied_monotonic'))
+            self._curve_slowdown_request = None
+            self._update_curve_slowdown()
         if ack.get("ok"):
             if (
                 ack.get("command") == "SELECT_ROUTE"
@@ -1925,6 +1964,7 @@ class MainWindow(QMainWindow):
         backend = state.get("backend") or {}
         if backend.get("status_unavailable"):
             self._gateway_online = False
+            self._update_curve_slowdown()
             self._update_ssh_card(backend)
             self.cards["backend"].set_value("상태 응답 없음 · 재시도", "WARNING")
             self.cards["ros_master"].set_value("상태 확인 불가", "NO_DATA")
@@ -1979,10 +2019,32 @@ class MainWindow(QMainWindow):
             "BALLOON":"풍선 추적 주행", "REMOTE_ACTIVE": "PC 원격 조종 중", "EMERGENCY_STOP": "비상정지",
             "GROUND_TEST": "도보 테스트 중",
         }.get(operation, operation)
-        self.cards["mode"].set_value(mode_ko if mode_ko==operation_ko else f"{mode_ko} · {operation_ko}", not state.get("estop", False))
+        protection = state.get('navigation_protection') or {}
+        if operation == 'NAVIGATION_GPS_GRACE' and state.get('failsafe_reason') == 'NAVIGATION_HEADING_SHOCK_GPS_GRACE':
+            protection = {'reason':'HEADING_SHOCK', 'throttle_limit_pwm':6450}
+        protection_reason = protection.get('reason')
+        protection_label = {
+            'HEADING_SHOCK': '방향 급변 · 중립 대기',
+            'RUDDER': '큰 조향 · 감속',
+            'CROSS_TRACK': '경로 이탈 · 감속',
+            'POSITION_QUALITY': 'GPS 품질 저하 · 감속',
+            'ENDPOINT': '최종 지점 접근 · 감속',
+        }.get(protection_reason)
+        mode_text = mode_ko if mode_ko == operation_ko else f'{mode_ko} · {operation_ko}'
+        show_protection = (mode == 'NAVIGATION' and not state.get('estop') and protection_label
+                           and (state.get('navigation_active') or protection_reason == 'HEADING_SHOCK'))
+        if show_protection:
+            if operation == 'NAVIGATION_GPS_GRACE':
+                mode_text = f'{mode_ko} · GPS 데이터 지연 유예'
+            limit = protection.get('throttle_limit_pwm')
+            limit_text = f' / {limit:g} PWM' if type(limit) in (int, float) and math.isfinite(limit) else ''
+            mode_text += f' · {protection_label}{limit_text}'
+        self.cards['mode'].set_value(mode_text, 'WARNING' if show_protection else not state.get('estop', False))
         backend = state.get("backend") or {}
         backend_ready = bool(backend.get("ready", True))
         self._gateway_online = bool(backend.get("gateway_online",backend_ready))
+        self._confirm_curve_slowdown(state.get('curve_slowdown_enabled'), state.get('curve_slowdown_applied_monotonic'))
+        self._update_curve_slowdown()
         self._update_ssh_card(backend)
         backend_name = str(backend.get("name") or ("SIM" if state.get("mock") else "ROS"))
         node_count = int(backend.get("node_count") or 0)
@@ -2068,6 +2130,7 @@ class MainWindow(QMainWindow):
             "GUI_LINK_TIMEOUT": "GUI/통신 응답 소실 → 수동 전환",
             "GPS_INVALID_OR_STALE": "GPS 무효/갱신 중단 → 수동 전환",
             "GROUND_TEST_GPS_GRACE": "GPS 복구 유예 · 중립 출력 · 기록 계속",
+            "NAVIGATION_HEADING_SHOCK_GPS_GRACE": "GPS 데이터 지연 유예 · 방향 급변 · 중립",
             "TARGET_ARRIVED": "목표 도착 → 수동 전환",
             "NAVIGATION_TIMEOUT": "항법 응답 소실 → 수동 전환",
             "NAVIGATION_INVALID": "항법 계산 불가 → 수동 전환",

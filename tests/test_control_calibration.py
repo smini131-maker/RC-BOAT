@@ -201,6 +201,18 @@ class CruiseServiceTests(unittest.TestCase):
                 self.assertFalse(result['success'])
             call.assert_not_called()
 
+    def test_gateway_routes_curve_checkbox_to_navigation(self):
+        bridge_module = harness.load_node('gui_bridge_node', Path(self.tmp.name))
+        bridge = bridge_module.Bridge.__new__(bridge_module.Bridge)
+        bridge.token = ''
+        bridge.service = lambda namespace, command, args: (
+            self.assertEqual(namespace, '/rcboat/navigation/execute')
+            or json.loads(self.nav.execute(types.SimpleNamespace(
+                action=command, arguments_json=json.dumps(args))).response_json))
+        result = bridge.dispatch({'action': 'nav_curve_slowdown', 'arguments': {'enabled': False}})
+        self.assertTrue(result['success'])
+        self.assertFalse(result['response']['curve_slowdown_enabled'])
+
     def test_final_actuator_gate_preserves_lock_and_output_modes(self):
         # Loading the real actuator module does not construct/open an I2C driver.
         import importlib.util

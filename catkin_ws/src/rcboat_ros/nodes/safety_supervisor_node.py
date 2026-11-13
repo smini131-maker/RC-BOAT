@@ -18,6 +18,7 @@ MODES={'AUTO_SAFE','AUTO','MANUAL','REMOTE','NAVIGATION','GROUND_TEST','BALLOON'
 from rcboat_ros.balloon_tracking import balloon_camera_ready,safe_balloon_output
 
 BALLOON_CAMERA_RECOVERY_S = 5.0
+NAVIGATION_SHOCK_GPS_GRACE = 'NAVIGATION_HEADING_SHOCK_GPS_GRACE'
 
 class Supervisor:
     def __init__(self):
@@ -205,7 +206,7 @@ class Supervisor:
         self.ground_gps_gap_since=None;self.ground_gps_recovery_stamp=None
         self.ground_gps_grace_remaining_s=0.0
         self.gps_grace_mode=None
-        if self.reason in ('GROUND_TEST_GPS_GRACE','NAVIGATION_GPS_GRACE'):self.reason=''
+        if self.reason in ('GROUND_TEST_GPS_GRACE','NAVIGATION_GPS_GRACE',NAVIGATION_SHOCK_GPS_GRACE):self.reason=''
 
     def _ground_gps_grace(self,now):
         gps_ok=bool(self.gps.get('healthy')) and gps_is_healthy(self.gps,now,2.0)
@@ -336,6 +337,11 @@ class Supervisor:
         # GPS hard faults must lock autonomous navigation, not physically safe manual takeover.
         if self.estop:return 'ESTOP',s,t,True
         if self.mode=='NAVIGATION' and self.armed and self.ground_gps_gap_since is not None:
+            protection=self.nav.get('navigation_protection')
+            if (self.nav.get('ramp_session_monotonic')==self.mode_since and
+                    isinstance(protection,dict) and protection.get('reason')=='HEADING_SHOCK'):
+                self.reason=NAVIGATION_SHOCK_GPS_GRACE
+                return 'NAVIGATION_GPS_GRACE',s,t,True
             return 'NAVIGATION_GPS_GRACE',SAFE_STEERING,self.navigation_gps_grace_pwm,False
         if self.mode=='GROUND_TEST':
             if self.ground_gps_gap_since is not None:
@@ -383,7 +389,7 @@ class Supervisor:
                 if self.mode=='NAVIGATION':
                     msg.navigation_session_monotonic=self.mode_since
                 self.cmd.publish(msg)
-                self.state.publish(pack(software_version="2.4.22",mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
+                self.state.publish(pack(software_version="2.4.23",mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
                                         estop_reason=self.estop_reason,estop_time_utc=self.estop_time_utc,estop_origin=self.estop_origin,
                                         mode_since_monotonic=self.mode_since,
                                         ground_test_actuation_enabled=self.ground_test_actuation_enabled,

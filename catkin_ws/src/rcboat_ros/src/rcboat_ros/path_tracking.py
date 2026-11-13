@@ -8,7 +8,7 @@ import re
 import uuid
 from pathlib import Path
 from .common import clamp
-from .control_config import CRUISE_MAX
+from .control_config import CRUISE_DEFAULT, CRUISE_MAX, number
 from .geo import enrich_waypoints
 
 R = 6371000.0
@@ -392,7 +392,7 @@ def _route_polyline(route):
     try:
         result=[(float(p['lat']),float(p['lon'])) if isinstance(p,dict)
                 else (float(p[0]),float(p[1])) for p in points]
-        return result if len(result)>=2 else []
+        return result
     except (ValueError,TypeError,IndexError,KeyError):
         return []
 
@@ -415,7 +415,108 @@ def _ahead_point(position,points,lookahead_m):
         remaining-=available
     return points[-1]
 
-def tracking_heading(gps,route,config):
+def _active_leg(position, points, route):
+    """Use the leg selected by route progress, even near other parallel legs."""
+    index = route.get('target_waypoint_index')
+    if type(index) is not int or not 1 <= index < len(points):
+        return None
+    start, end = points[index-1:index+1]
+    east, north = local_xy(start, end)
+    length = math.hypot(east, north)
+    if length < .05:
+        return None
+    x, y = local_xy(start, position)
+    along = (x*east + y*north) / length
+    _, cte = segment_cross_track(position, start, end)
+    return start, end, length, along, cte
+
+
+def moving_course_sample(gps, now):
+    """Course over ground is reliable for this protection only while moving."""
+    try:
+        stamp = number(gps.get('course_sample_monotonic'))
+        speed = number(gps.get('speed_mps'))
+        accuracy = number(gps.get('hacc_m'))
+        course = number(gps.get('heading_deg'))
+    except ValueError:
+        return None
+    sample_id = gps.get('course_sample_id')
+    if (not gps.get('healthy') or not gps.get('fix') or
+            not isinstance(sample_id, str) or not sample_id or
+            not 0 <= now-stamp <= 1.5 or stamp <= 0 or
+            speed < .6 or not 0 < accuracy <= 2.0 or not 0 <= course < 360):
+        return None
+    return sample_id, stamp, course
+
+
+def navigation_throttle_limit(command, course, requested, curve_slowdown=True, stop=6450):
+    """Apply a small turn reduction without compounding stricter protection limits."""
+    lateral = abs(command.get('active_leg_cross_track_m') or 0)
+    limits = {
+        'CROSS_TRACK': round(CRUISE_MAX + (CRUISE_DEFAULT-CRUISE_MAX)*clamp((lateral-.5)/1.5, 0, 1)),
+    }
+    if curve_slowdown:
+        angle = abs(command.get('desired_rudder_angle_deg', 0))
+        reduction = .10 * clamp((angle-8)/19, 0, 1)
+        limits['RUDDER'] = requested - round(max(0, requested-stop)*reduction)
+    if course is None:
+        limits['POSITION_QUALITY'] = CRUISE_DEFAULT
+    final_distance = command.get('final_waypoint_distance_m')
+    if final_distance is not None and final_distance <= 4:
+        limits['ENDPOINT'] = CRUISE_DEFAULT
+    reason = min(limits, key=limits.get)
+    limit = min(requested, limits[reason])
+    return {'reason': reason if limit < requested else '', 'throttle_limit_pwm': limit}
+
+
+class HeadingShockProtection:
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.leg = None
+        self.sample = None
+        self.error = None
+        self.hold_until = None
+        self.good_samples = 0
+
+    @property
+    def holding(self):
+        return self.hold_until is not None
+
+    def update(self, leg, sample, error, now):
+        if leg != self.leg:
+            # A waypoint change can change the requested bearing without the boat turning.
+            self.leg = leg
+            self.error = None
+            self.good_samples = 0
+        if sample is None:
+            self.error = None
+            self.good_samples = 0
+            return self.holding
+        if self.sample is not None and (sample[0] == self.sample[0] or sample[1] <= self.sample[1]):
+            return self.holding
+        previous, previous_error = self.sample, self.error
+        self.sample, self.error = sample, abs(error)
+        if self.holding:
+            if sample[1] >= self.hold_until and self.error <= 45:
+                self.good_samples += 1
+                if self.good_samples >= 2:
+                    self.hold_until = None
+                    self.good_samples = 0
+            else:
+                self.good_samples = 0
+        elif previous_error is not None and sample[1] - previous[1] <= 2:
+            turn = abs(angle_error(sample[2], previous[2]))
+            increase = self.error - previous_error
+            fast_departure = self.error >= 55 and increase >= 35
+            severe_departure = self.error >= 100 and increase > 0
+            if turn >= 25 and (fast_departure or severe_departure):
+                self.hold_until = now + .75
+        return self.holding
+
+
+def tracking_heading(gps,route,config,protect=False):
     """Return guidance geometry; CTE > 0 means left of the oriented segment."""
     pos=(float(gps['latitude']),float(gps['longitude']))
     target=(float(route['target_lat']),float(route['target_lon']))
@@ -428,8 +529,23 @@ def tracking_heading(gps,route,config):
                     float(config.get('lookahead_min_m',2.0)),float(config.get('lookahead_max_m',10.0)))
     correction=0.0;cte=float(route.get('cross_track_error_m') or 0)
     used_target=target
+    leg = _active_leg(pos, points, route) if protect else None
+    leg_cte = None
+    final_distance = None
+    if leg is not None:
+        start, end, length, along, leg_cte = leg
+        # Near or beyond the waypoint, keep the waypoint bearing rather than
+        # steering along a leg that the boat is about to leave.
+        if mode == 'HEADING' and 0 <= along <= length-min(lookahead, length*.5):
+            correction = clamp(math.degrees(math.atan2(leg_cte, lookahead)), -35, 35)
+            desired = (bearing(start, end) + correction) % 360
+            cte = leg_cte
+        if route['target_waypoint_index'] == len(points)-1:
+            final_distance = meters(pos, target)
+    elif protect and len(points) == 1:
+        final_distance = meters(pos, target)
     if mode!='HEADING':
-        if not points:raise ValueError('polyline required for experimental tracking mode')
+        if len(points)<2:raise ValueError('polyline required for experimental tracking mode')
         _,i,cte=nearest_route(pos,points)
         if mode=='HEADING_CTE':
             correction=clamp(math.degrees(math.atan2(cte,lookahead))*0.5,-35,35)
@@ -442,15 +558,14 @@ def tracking_heading(gps,route,config):
             desired=bearing(pos,used_target)
     return dict(controller_mode=mode,target_heading_deg=desired,
                 cross_track_error_m=cte,cte_correction_deg=correction,
+                active_leg_cross_track_m=leg_cte, final_waypoint_distance_m=final_distance,
                 lookahead_m=lookahead,lookahead_target_lat=used_target[0],
                 lookahead_target_lon=used_target[1])
 
-def navigation_command(gps, route, config, stopped_once=False):
+def navigation_command(gps, route, config, stopped_once=False, protect=False):
     """Return steering demand and steady cruise per stable heading-error bands."""
     if not route or not gps or gps.get('heading_deg') is None: raise ValueError('heading and route required')
-    pos=(gps['latitude'],gps['longitude'])
-    target=(route['target_lat'],route['target_lon'])
-    geometry=tracking_heading(gps,route,config)
+    geometry=tracking_heading(gps,route,config,protect)
     desired_heading=geometry['target_heading_deg']
     error=angle_error(desired_heading,float(gps['heading_deg']))
     magnitude=abs(error)

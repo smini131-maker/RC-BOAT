@@ -1,4 +1,4 @@
-version: '2.4.22'
+version: '2.4.23'
 gui_gateway_bind: '0.0.0.0'
 gui_gateway_port: 8765
 ground_test_log_root: '~/rcboat_ros_data/logs/ground_tests'
@@ -59,6 +59,7 @@ endpoint_tolerance_m: 0.75
 # At every GPS update, select the member subroute with the smallest polyline
 # distance. There is no distance threshold, hold timer, priority gate or cooldown.
 tracking_mode: 'HEADING'
+curve_slowdown_enabled: true
 lookahead_base_m: 2.0
 lookahead_speed_gain_s: 2.5
 lookahead_min_m: 2.0

@@ -23,7 +23,7 @@ from rcboat_ros.corrections import refresh_transport_status,refresh_receiver_sta
 from rcboat_ros.gps_mix import refresh_dop_status
 
 
-VERSION = "2.4.22"
+VERSION = "2.4.23"
 SOCKET = os.path.expanduser("~/rcboat_ros_data/gui_bridge.sock")
 TOPICS = {
     "gps": "/rcboat/gps/status", "ntrip": "/rcboat/ntrip/status", "route": "/rcboat/route/state",
@@ -301,7 +301,7 @@ class Bridge:
                                                          "compatible_routes")
             else "/rcboat/vision/execute" if command in ("vision_enable","vision_configure","vision_reset_tracking","vision_status")
             else "/rcboat/ntrip/execute" if command == "configure"
-            else "/rcboat/navigation/execute" if command in ("set_tracking_mode", "set_auto_cruise_pwm") else None
+            else "/rcboat/navigation/execute" if command in ("set_tracking_mode", "set_auto_cruise_pwm", "nav_curve_slowdown") else None
         )
         if not namespace: return {"success": False, "error": "unsupported action"}
         try: return {"success": True, "response": self.service(namespace, command, args)}

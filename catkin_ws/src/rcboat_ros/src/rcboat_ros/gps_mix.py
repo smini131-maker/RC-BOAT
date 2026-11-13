@@ -56,7 +56,8 @@ class MixedGpsParser:
                     'last_update_monotonic':0,'utc_time':None,'utc_status':'no_data',
                     'receiver_correction_age_s':None,'receiver_correction_age_status':'unsupported',
                     'receiver_correction_age_monotonic':None,'nav_pvt_count':0,
-                    'heading_source':'unsupported','ubx_count':0,'nmea_count':0,'error_count':0}
+                    'heading_source':'unsupported','course_sample_id':None,'course_sample_monotonic':None,
+                    'ubx_count':0,'nmea_count':0,'error_count':0}
         self.snrs=[]
         self.last_pvt=0.0
         self.dop_samples = {source: {} for source in ('gsa', 'gga', 'pvt')}
@@ -122,6 +123,12 @@ class MixedGpsParser:
                 if bytes((a,b))!=frame[-2:]: self.state['error_count']+=1;continue
                 self.state['ubx_count']+=1
                 if frame[2:4]==b'\x01\x07' and size>=92:self._nav_pvt(frame[6:-2])
+    def _record_course(self, heading, source, sample_id, now):
+        if self.state['course_sample_id'] == sample_id or not math.isfinite(heading):
+            return
+        self.state.update(heading_deg=heading % 360, heading_source=source,
+                          course_sample_id=sample_id, course_sample_monotonic=now)
+
     def _valid(self):
         a=self.state
         if a.get('fix') and a['latitude'] is not None and a['longitude'] is not None:
@@ -172,8 +179,13 @@ class MixedGpsParser:
             if (time.monotonic()-self.last_pvt)>1.5 and cells[2]=='A' and cells[3] and cells[5]:
                 a['latitude']=self.nmea_coord(cells[3],cells[4]); a['longitude']=self.nmea_coord(cells[5],cells[6]); a['fix']=True
                 if cells[7]:a['speed_mps']=float(cells[7])*0.5144444444
-                if cells[8]:a['heading_deg']=float(cells[8])%360
-                if cells[8]:a['heading_source']='GNSS_COG_NMEA'
+                if cells[8] and len(cells) > 9:
+                    whole, _, fraction = cells[1].partition('.')
+                    date = cells[9]
+                    if len(whole) == len(date) == 6 and whole.isdigit() and date.isdigit() and (not fraction or fraction.isdigit()):
+                        fraction = fraction.rstrip('0')
+                        sample_id = f'RMC:{date}:{whole}' + (f'.{fraction}' if fraction else '')
+                        self._record_course(float(cells[8]), 'GNSS_COG_NMEA', sample_id, now)
                 self._valid()
         elif kind=='GSA' and len(cells)>=18 and cells[2] in ('2','3'):
             # A no-fix GSA for one constellation can arrive alongside a valid
@@ -209,7 +221,9 @@ class MixedGpsParser:
         except (ValueError,IndexError,struct.error):a['utc_status']='invalid'
         a['fix']=fix>=2 and bool(flags&1)
         if a['fix']:
-            a.update(latitude=lat,longitude=lon,heading_deg=head%360)
-            a['heading_source']='GNSS_COG_UBX'
+            a.update(latitude=lat,longitude=lon)
+            # NAV-PVT polls and periodic reports can repeat the same GPS epoch.
+            itow = struct.unpack_from('<I', p)[0]
+            self._record_course(head, 'GNSS_COG_UBX', f'UBX:{itow}', self.last_pvt)
             self._valid()
         a['rtk_state']='RTK_FIXED' if carr==2 else 'RTK_FLOAT' if carr==1 else ('DGPS' if flags&2 else 'NO_RTK')

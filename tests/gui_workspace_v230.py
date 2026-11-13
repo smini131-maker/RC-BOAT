@@ -101,6 +101,37 @@ for mode, color in [('NAVIGATION', '#38d996'), ('GROUND_TEST', '#ff6474'), ('REM
     update_dashboard_quality(w,dict(mode=mode,pca={'throttle_pwm':7842}))
     assert color in w.value_labels['pca_throttle'].value_label.styleSheet()
 w.reset_auto_speed()
+nav_state = {'safety': {'mode':'NAVIGATION', 'armed':True}, 'navigation': {'fresh':True}}
+nav_state['navigation']['navigation_protection'] = {'reason':'RUDDER', 'throttle_limit_pwm':6800}
+w.update_telemetry(SSHWorker._normalize(dict(success=True, telemetry=nav_state)))
+assert '큰 조향 · 감속 / 6800 PWM' in w.cards['mode'].value_label.text()
+nav_state['safety']['gps_grace_active'] = True
+nav_state['navigation']['navigation_protection'] = {'reason':'HEADING_SHOCK', 'throttle_limit_pwm':6450}
+w.update_telemetry(SSHWorker._normalize(dict(success=True, telemetry=nav_state)))
+mode_status = w.cards['mode'].value_label.text()
+assert 'GPS 데이터 지연 유예 · 방향 급변 · 중립 대기 / 6450 PWM' in mode_status
+assert '6650' not in mode_status
+nav_state['safety']['reason'] = 'NAVIGATION_HEADING_SHOCK_GPS_GRACE'
+nav_state['navigation']['fresh'] = False
+w.update_telemetry(SSHWorker._normalize(dict(success=True, telemetry=nav_state)))
+assert w.cards['mode'].value_label.text() == mode_status
+nav_state['safety']['mode'] = 'MANUAL'
+w.update_telemetry(SSHWorker._normalize(dict(success=True, telemetry=nav_state)))
+assert '방향 급변' not in w.cards['mode'].value_label.text()
+nav_state['navigation'].update(curve_slowdown_enabled=True, curve_slowdown_applied_monotonic=8)
+curve_state = SSHWorker._normalize(dict(success=True, telemetry=nav_state))
+w.update_telemetry(curve_state)
+assert w.curve_slowdown.isChecked() and w.curve_slowdown.isEnabled()
+with patch.object(w,'command',return_value='curve-toggle') as command:
+    w.curve_slowdown.click()
+    command.assert_called_once_with('NAV_CURVE_SLOWDOWN', enabled=False)
+assert w.curve_slowdown.isChecked() and not w.curve_slowdown.isEnabled()
+assert SSHWorker._translate(dict(command='NAV_CURVE_SLOWDOWN', enabled=False)) == {
+    'action':'nav_curve_slowdown', 'arguments':{'enabled':False}}
+w.on_ack(dict(command='NAV_CURVE_SLOWDOWN', request_id='curve-toggle', ok=True,
+              curve_slowdown_enabled=False, curve_slowdown_applied_monotonic=9))
+w.update_telemetry(curve_state)
+assert not w.curve_slowdown.isChecked() and w.curve_slowdown.isEnabled()
 dop = dict(hdop=1.23, dop_status={'hdop': 'valid', 'pdop': 'stale', 'vdop': 'invalid'})
 w.update_telemetry(SSHWorker._normalize(dict(success=True, telemetry={'gps': dop})))
 assert w.value_labels['hdop'].value_label.text() == '1.23'
@@ -310,7 +341,7 @@ with ThreadingHTTPServer(('127.0.0.1',0),PreviewHandler) as server:
         server.shutdown();thread.join(timeout=2)
 
 w.rc_graph.append(None,None);assert w.rc_graph.series[0][-1] is None
-locked=SSHWorker._normalize(dict(success=True,version='2.4.22',gateway_online=True,master_online=True,telemetry={
+locked=SSHWorker._normalize(dict(success=True,version='2.4.23',gateway_online=True,master_online=True,telemetry={
     'safety':dict(mode='MANUAL',estop=True,actuator_locked=True,estop_reason='MAINTENANCE_CHECK',estop_time_utc='2026-11-10T10:00:00Z'),
     'vision':dict(enabled=True,model_ready=True,camera_online=True,target={'acquired':True,'predicted':False})}))
 w.update_telemetry(locked);app.processEvents()
@@ -322,7 +353,7 @@ assert '재시도' in w.cards['backend'].value_label.text()
 assert w._last_estop and '마지막 확인' in w.estop_banner_text.text()
 w.update_telemetry(locked)
 assert w.cards['ros_master'].value_label.text()=='online'
-master_down=SSHWorker._normalize(dict(success=True,version='2.4.22',gateway_online=True,master_online=False))
+master_down=SSHWorker._normalize(dict(success=True,version='2.4.23',gateway_online=True,master_online=False))
 w.update_telemetry(master_down)
 assert w.cards['ros_master'].value_label.text()=='offline'
 w.update_telemetry(locked)

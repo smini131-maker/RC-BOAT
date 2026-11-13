@@ -44,7 +44,7 @@ public class MainActivity extends Activity {
     private volatile JSONObject latest=new JSONObject();
     private volatile int previewPort=8766;
     private String token="";
-    private final Set<String> allowed=new HashSet<>(Arrays.asList("estop","reset_estop","set_mode","set_auto_cruise_pwm","select_route","select_multipath","set_multipath","record_start","record_stop","record_cancel","upsert_route","delete_route","upsert_multipath","delete_multipath","ground_start","ground_resume","ground_stop","vision_enable","vision_configure","vision_reset_tracking","set_gps_settings","configure","gps_log_start","gps_log_stop","set_tracking_mode"));
+    private final Set<String> allowed=new HashSet<>(Arrays.asList("estop","reset_estop","set_mode","set_auto_cruise_pwm","nav_curve_slowdown","select_route","select_multipath","set_multipath","record_start","record_stop","record_cancel","upsert_route","delete_route","upsert_multipath","delete_multipath","ground_start","ground_resume","ground_stop","vision_enable","vision_configure","vision_reset_tracking","set_gps_settings","configure","gps_log_start","gps_log_stop","set_tracking_mode"));
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -182,7 +182,7 @@ public class MainActivity extends Activity {
             if(gen!=generation)throw new IOException("이전 연결의 명령은 취소됐습니다");
             GatewayClient g=gateway;if(g==null||!connected)throw new IOException("먼저 Jetson에 연결하세요");
             if(!allowed.contains(action))throw new IOException("지원하지 않는 명령");
-            if(action.equals("ground_start")||action.equals("ground_resume")||action.equals("set_mode")&&Arrays.asList("NAVIGATION","BALLOON","REMOTE","AUTO").contains(args.optString("mode")))canMove();
+            if(action.equals("nav_curve_slowdown")||action.equals("ground_start")||action.equals("ground_resume")||action.equals("set_mode")&&Arrays.asList("NAVIGATION","BALLOON","REMOTE","AUTO").contains(args.optString("mode")))canMove();
             JSONObject result=g.request(action,args,10000,6*1024*1024);if(action.equals("configure"))cacheProfile(args);result.put("id",id).put("action",action);emit("ack",result);
             if(action.equals("reset_estop"))poll.execute(this::pollStatus);
         }catch(Exception e){JSONObject failure=data("id",id);try{failure.put("success",false).put("error",e.getMessage());}catch(JSONException ignored){}emit("ack",failure);}

@@ -1,4 +1,4 @@
-# Android 관제 앱 v2.4.22
+# Android 관제 앱 v2.4.23
 
 비상정지 중에는 모든 탭 상단과 하단 제어부가 빨간색으로 바뀌며 ‘ESC·서보 출력 잠금’, 요청 사유·한국 시각을 표시합니다. 추적 시작 버튼도 잠금됩니다. 연결이 끊기면 마지막 확인 상태로 구분합니다. 해제 버튼은 확인 후 잠금만 풀고 자동 주행을 재개하지 않습니다. 목표 도착과 실제 연결 단절은 수동 전환 사유로 표시합니다.
 
@@ -18,8 +18,8 @@ Android 10 이상 휴대폰과 태블릿에 같은 APK를 설치합니다. 휴�
 
 ## 설치와 연결
 
-1. `dist/RCBoatMobile_v2.4.22.apk`를 휴대폰 또는 태블릿에 설치합니다. 연결된 휴대폰에는 USB 디버깅으로 설치할 수 있습니다.
-2. Jetson에 v2.4.22를 배포하고 ROS를 실행합니다. 기존 항로와 Jetson의 NTRIP 로컬 설정을 사용합니다.
+1. `dist/RCBoatMobile_v2.4.23.apk`를 휴대폰 또는 태블릿에 설치합니다. 연결된 휴대폰에는 USB 디버깅으로 설치할 수 있습니다.
+2. Jetson에 v2.4.23을 배포하고 ROS를 실행합니다. 기존 항로와 Jetson의 NTRIP 로컬 설정을 사용합니다.
 3. 휴대폰을 Jetson에 접근할 수 있는 같은 Wi-Fi/네트워크에 연결합니다. 앱 상단 **연결 설정**에서 Jetson IP, gateway 8765, SSH 22, 사용자 `jetson`을 입력합니다. SSH 비밀번호를 입력하면 제어 연결, 비워두면 상태 조회 연결입니다.
 4. 처음 연결할 때 표시되는 SSH 호스트 키를 확인합니다. 변경된 호스트 키는 거부합니다. SSH 비밀번호·gateway 토큰은 메모리에서만 사용하고 저장하지 않습니다. IP·포트·사용자명만 휴대폰에 저장합니다.
 
@@ -27,7 +27,7 @@ PC와 모바일 중 한 관제 앱만 제어 연결합니다. 기존 backend는 
 
 ## 화면과 동작
 
-- **운항:** OpenStreetMap 배경, 저장 항로·웨이포인트 번호·현재 GPS 위치·이동 궤적, 대루트/소루트 선택, 주행 시작과 수동 전환, 순항 PWM 편집·적용 확인을 제공합니다. 항로 주행에서만 7842 PWM까지 사용할 수 있습니다. 주행 시작 시 실제 출력 확인창이 표시됩니다. 배경 지도는 인터넷이 필요하며 지도 다운로드가 실패해도 좌표와 항로 선은 표시합니다.
+- **운항:** OpenStreetMap 배경, 저장 항로·웨이포인트 번호·현재 GPS 위치·이동 궤적, 대루트/소루트 선택, 주행 시작과 수동 전환, 순항 PWM 편집·적용 확인을 제공합니다. 항로 주행에서만 7842 PWM까지 사용할 수 있습니다. 자동 감속이나 중립 대기가 적용되면 순항 PWM 카드에 보호 사유와 현재 상한을 표시합니다. 주행 시작 시 실제 출력 확인창이 표시됩니다. 배경 지도는 인터넷이 필요하며 지도 다운로드가 실패해도 좌표와 항로 선은 표시합니다.
 - **항로:** 유효 GPS 기반 기록 시작/종료 후 저장/취소, 소루트 좌표 추가·수정·삭제, n개 소루트를 묶는 Multi-Path 관리, 전체 항로 CSV/JSON 다운로드를 제공합니다. CSV에는 항로 ID·이름·웨이포인트 번호·위경도·UTM을 포함합니다.
 - **풍선** 탭에서 Jetson이 처리한 실시간 영상과 감지 상자를 볼 수 있습니다. 추적 시작을 누르면 최대 30초 동안 카메라 준비를 기다립니다. BALLOON으로 전환한 뒤 새 프레임에서 풍선을 획득합니다. 수동 전환이나 카메라 끄기 이후에는 다시 추적 시작을 눌러 새 대상을 획득합니다.
 - **GPS·RTK:** 정상 범위와 색상, UTC·UTM·데이터 지연·RTCM 수신 경과·수신기 보정 나이를 구분합니다. HDOP·PDOP·VDOP는 수신 상태에 따라 수치, 미수신, 무효 또는 갱신 지연으로 표시합니다. Jetson의 NTRIP 설정과 사용자명을 불러오며 비밀번호는 Jetson 저장값을 유지합니다. 마지막으로 불러오거나 수정한 Host·Port·Mount Point·사용자명·TLS는 휴대폰 로컬에 보존하여 Jetson 없이 앱을 다시 열어도 표시합니다. 계정/서버 프로필을 APK나 GitHub에 넣지 않습니다. 로컬 프로필 공유 가져오기는 저장 확인창을 표시하고 비밀번호·토큰을 제외하며 장치 연결이나 보정 접속을 시작하지 않습니다. HDOP 편집 중 폴링으로 값이 덮어써지지 않습니다.
@@ -40,7 +40,7 @@ PC와 모바일 중 한 관제 앱만 제어 연결합니다. 기존 backend는 
 JDK 17 이상과 Android SDK 36/build-tools 35.0.0이 필요합니다. SDK 경로가 다르면 `ANDROID_HOME`을 지정합니다. Gradle 8.13은 wrapper로 받습니다.
 
 ```powershell
-Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_Project\RCBoatControl_v2.4.22"
+Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_Project\RCBoatControl_v2.4.23"
 $env:ANDROID_HOME = "$env:USERPROFILE\AndroidSdk"
 & .\mobile_android\build.ps1 -Install
 ```

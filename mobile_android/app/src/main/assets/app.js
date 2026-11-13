@@ -1,12 +1,13 @@
 'use strict';
-const $=id=>document.getElementById(id), VERSION='2.4.22';
+const $=id=>document.getElementById(id), VERSION='2.4.23';
 const state={last:0,online:false,control:false,ssh:'disconnected',version:'',tele:{},ntripProfile:{},targetType:'multipath',routes:[],groups:[],targetDirty:false,pwmDirty:false,pwmPending:null,trackingStart:null,page:'sail',editor:null};
 let sequence=0,toastTimer,routeSignature='',testSignature='',configSynced=false,frameAt=0,map,routeLayer,traceLine,boatMarker,fitBounds,lastCoords='',mapFitted=false,mapFocusSignature='';
 const pending=new Map(),trace=[];
 let healthState={},connectionSignature='',telemetryStale=false,videoState='waiting',frameTimes=[],mapOverlayTimer;
+let curveSlowdownValue=null,curveSlowdownStamp=-1,curveSlowdownRequest=null;
 const fmt=(v,d=1,s='')=>typeof v==='number'&&Number.isFinite(v)?v.toFixed(d)+s:'no_data';
 const set=(id,text,level)=>{const e=$(id);if(!e)return;if(e.textContent!==String(text))e.textContent=text;for(const c of ['good','bad','warn'])e.classList.toggle(c,c===level);};
-const safetyReason=value=>({BALLOON_POP_ESTIMATED:'근접 풍선 소실 · 파열 추정 · 수동 전환',TARGET_ARRIVED:'목표 도착 · 수동 전환',SSH_DISCONNECTED:'SSH 단절 · 수동 전환',GUI_LINK_TIMEOUT:'관제 연결 만료 · 수동 전환',EMERGENCY_STOP:'비상정지 요청',ESTOP_CLEARED_NEUTRAL_REQUIRED:'비상정지 해제 · 스로틀 중립 확인 대기'})[value]||value;
+const safetyReason=value=>({BALLOON_POP_ESTIMATED:'근접 풍선 소실 · 파열 추정 · 수동 전환',TARGET_ARRIVED:'목표 도착 · 수동 전환',SSH_DISCONNECTED:'SSH 단절 · 수동 전환',GUI_LINK_TIMEOUT:'관제 연결 만료 · 수동 전환',EMERGENCY_STOP:'비상정지 요청',ESTOP_CLEARED_NEUTRAL_REQUIRED:'비상정지 해제 · 스로틀 중립 확인 대기',NAVIGATION_HEADING_SHOCK_GPS_GRACE:'GPS 데이터 지연 유예 · 방향 급변 · 중립'})[value]||value;
 const modeName=value=>({MANUAL:'수동',AUTO_SAFE:'자동 대기',AUTO:'자동 직진',NAVIGATION:'항로 주행',BALLOON:'풍선 추적',GROUND_TEST:'도보 테스트',REMOTE:'원격 조종'})[value]||value||'확인 전';
 const elem=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e;};
 function eventLog(text){const line=elem('div');line.append(elem('time','',new Date().toLocaleTimeString('ko-KR',{hour12:false})),document.createTextNode(text));if(!$('events').firstElementChild)$('events').textContent='';$('events').prepend(line);while($('events').children.length>100)$('events').lastChild.remove();}
@@ -22,6 +23,53 @@ function command(action,args={}){
 async function run(action,args={},label='반영 완료'){try{const result=await command(action,args);message(label);return result;}catch(e){message(e.message);throw e;}}
 function bind(id,fn){$(id).addEventListener('click',()=>Promise.resolve().then(fn).catch(()=>{}));}
 function readyToMove(){return state.online&&Date.now()-state.last<2500&&state.control&&state.ssh==='connected'&&state.version===VERSION&&!state.tele.safety?.estop;}
+function renderCurveSlowdown(){
+ const input=$('curveSlowdown');
+ input.checked=curveSlowdownValue!==false;
+ input.disabled=curveSlowdownValue===null||curveSlowdownRequest!==null||!readyToMove();
+ set('curveSlowdownLabel',curveSlowdownRequest===null?'커브 감속':'커브 감속 · 적용 중');
+}
+function confirmCurveSlowdown(navigation){
+ const value=navigation.curve_slowdown_enabled,stamp=navigation.curve_slowdown_applied_monotonic;
+ if(typeof value==='boolean'&&Number.isFinite(stamp)&&stamp>=0&&stamp>=curveSlowdownStamp){
+  curveSlowdownValue=value;curveSlowdownStamp=stamp;
+ }
+ renderCurveSlowdown();
+}
+function resetCurveSlowdown(){
+ curveSlowdownValue=null;curveSlowdownStamp=-1;curveSlowdownRequest=null;
+ renderCurveSlowdown();
+}
+$('curveSlowdown').addEventListener('change',async event=>{
+ const enabled=event.target.checked;
+ if(curveSlowdownValue===null||curveSlowdownRequest!==null||!readyToMove()){renderCurveSlowdown();return;}
+ const request=command('nav_curve_slowdown',{enabled});curveSlowdownRequest=request;
+ renderCurveSlowdown();
+ try{
+  const ack=await request;
+  if(curveSlowdownRequest===request)confirmCurveSlowdown(ack.response||{});
+ }catch(error){
+  if(curveSlowdownRequest===request)message(error.message);
+ }finally{
+  if(curveSlowdownRequest===request){curveSlowdownRequest=null;renderCurveSlowdown();}
+ }
+});
+function renderNavigationProtection(safety={}, navigation={}){
+ const active=safety.mode==='NAVIGATION'&&safety.armed&&!safety.estop;
+ const shockGrace=safety.gps_grace_active&&safety.reason==='NAVIGATION_HEADING_SHOCK_GPS_GRACE';
+ const protection=shockGrace?{reason:'HEADING_SHOCK',throttle_limit_pwm:6450}:navigation.fresh?navigation.navigation_protection||{}:{};
+ const labels={HEADING_SHOCK:'방향 급변 · 중립 대기',RUDDER:'큰 조향 · 감속',CROSS_TRACK:'경로 이탈 · 감속',POSITION_QUALITY:'GPS 품질 저하 · 감속',ENDPOINT:'최종 지점 접근 · 감속'};
+ const parts=[];
+ if(active){
+  const label=labels[protection.reason];
+  if(safety.gps_grace_active)parts.push(protection.reason==='HEADING_SHOCK'?'GPS 데이터 지연 유예':'GPS 데이터 지연 유예 · 조향 중앙 / 6650 PWM');
+  if(label&&(!safety.gps_grace_active||protection.reason==='HEADING_SHOCK')){
+   const limit=protection.throttle_limit_pwm;
+   parts.push(label+(Number.isFinite(limit)?` / ${limit} PWM`:''));
+  }
+ }
+ const line=$('navigationProtection');line.hidden=!parts.length;set('navigationProtection',parts.join(' · '),'warn');
+}
 const PWM_MIN=6480,PWM_MAX=7842,PWM_STEP=10,PWM_LEGACY=7397;
 const PWM_LAST_STEP=Math.floor((PWM_MAX-PWM_MIN)/PWM_STEP),PWM_MAX_INDEX=PWM_LAST_STEP+1;
 function validatePwm(v){return Number.isInteger(v)&&v>=PWM_MIN&&v<=PWM_MAX&&(v===PWM_MAX||v===PWM_LEGACY||(v-PWM_MIN)%PWM_STEP===0);}
@@ -41,7 +89,7 @@ function page(name){state.page=name;document.querySelectorAll('.page').forEach(e
 document.querySelectorAll('nav button').forEach(b=>b.addEventListener('click',()=>page(b.dataset.page)));
 function openConnect(){$('connectionDialog').showModal();}
 bind('connectionBadge',openConnect);bind('openSettings',openConnect);bind('closeConnect',()=>$('connectionDialog').close());
-$('connectForm').addEventListener('submit',e=>{e.preventDefault();const c={host:$('host').value.trim(),gateway_port:Number($('gatewayPort').value),ssh_port:Number($('sshPort').value),username:$('username').value.trim(),password:$('sshPassword').value,token:$('gatewayToken').value};if(!c.host||!c.username)return;configSynced=false;mapFitted=false;state.trackingStart=null;state.last=0;state.online=false;state.control=false;Boat.connect(JSON.stringify(c));$('sshPassword').value='';$('gatewayToken').value='';$('connectionDialog').close();set('connectionBadge','연결 중');});
+$('connectForm').addEventListener('submit',e=>{e.preventDefault();const c={host:$('host').value.trim(),gateway_port:Number($('gatewayPort').value),ssh_port:Number($('sshPort').value),username:$('username').value.trim(),password:$('sshPassword').value,token:$('gatewayToken').value};if(!c.host||!c.username)return;configSynced=false;mapFitted=false;state.trackingStart=null;state.last=0;state.online=false;state.control=false;resetCurveSlowdown();Boat.connect(JSON.stringify(c));$('sshPassword').value='';$('gatewayToken').value='';$('connectionDialog').close();set('connectionBadge','연결 중');});
 bind('disconnect',()=>{Boat.disconnect();$('connectionDialog').close();});
 bind('estop',()=>{remoteRelease();return run('estop',{origin:'mobile',reason:'OPERATOR_ESTOP'},'비상정지 요청 완료');});
 async function manual(){remoteRelease();return run('set_mode',{mode:'MANUAL'},'수동 전환 완료');}
@@ -166,7 +214,7 @@ $('estop').textContent=active?'■ 비상정지 ON':'■ 비상정지';
 if(active){const reason=safe.estop_reason==='MAINTENANCE_CHECK'?'점검 중 출력 잠금':'조작자 비상정지 요청',at=safe.estop_time_utc?new Date(safe.estop_time_utc).toLocaleTimeString('en-GB',{hour12:false,timeZone:'Asia/Seoul'})+' KST':'시각 확인 전';set('estopDetail',`${reason} · ${at}`);set('trackingStatus','비상정지 잠금 · 해제 후 추적을 시작하세요','bad');}
 $('bannerResetEstop').disabled=!state.online||state.version!==VERSION;
 }
-function markTelemetryStale(){if(telemetryStale)return;telemetryStale=true;$('bannerResetEstop').disabled=true;state.trackingStart=null;remoteRelease();set('currentMode','상태 지연','warn');set('modePill','상태 stale','warn');['gpsQuick','rtkQuick','lockQuick','speed','rampPwm','finalPwm'].forEach(id=>set(id,'stale','warn'));$('gpsMetrics').querySelectorAll('b').forEach(e=>{e.textContent='stale';e.className='warn';});motionAvailability();}
+function markTelemetryStale(){if(telemetryStale)return;telemetryStale=true;renderCurveSlowdown();renderNavigationProtection();$('bannerResetEstop').disabled=true;state.trackingStart=null;remoteRelease();set('currentMode','상태 지연','warn');set('modePill','상태 stale','warn');['gpsQuick','rtkQuick','lockQuick','speed','rampPwm','finalPwm'].forEach(id=>set(id,'stale','warn'));$('gpsMetrics').querySelectorAll('b').forEach(e=>{e.textContent='stale';e.className='warn';});motionAvailability();}
 function videoHealth(){
 if(!$('previewToggle').checked||state.page!=='camera'){set('videoState','미리보기 꺼짐');set('framePlaceholder','미리보기를 켜면 감지 영상이 표시됩니다');return;}
 if(!state.online){clearFrame();set('videoState','Jetson 연결 대기');set('framePlaceholder','Jetson 연결 대기');return;}
@@ -216,6 +264,8 @@ const session=balloonSession(safe);
 if(session!==balloonSession(previousSafety)||previousCameraEnabled!==vision.enabled)clearFrame();
 if(reconnecting)syncPreview();
 emergencyDisplay(safe);
+confirmCurveSlowdown(nav);
+renderNavigationProtection(safe,nav);
 updateHealth({...s.mobile,ros:s.mobile?.ros||'online'});const publicNtrip=state.tele.ntrip||{};if(!$('ntripDetails').dataset.dirty){for(const [id,key]of[['nHost','host'],['nPort','port'],['nMount','mountpoint'],['nUser','username']])if(publicNtrip[key]!==undefined&&$(id).value!==String(publicNtrip[key]))$(id).value=publicNtrip[key];if(publicNtrip.tls!==undefined)$('nTls').checked=publicNtrip.tls;}
 set('modePill',modeName(safe.mode),safe.estop?'bad':safe.armed?'good':'');set('speed',fmt(g.speed_mps,2)+' m/s');set('gpsQuick',g.data_validity||'no_data',g.healthy?'good':'bad');set('rtkQuick',g.rtk_state||'no_data',g.rtk_state==='RTK_FIXED'?'good':'warn');set('lockQuick',safe.actuator_locked?'잠금':'출력 허용',safe.actuator_locked?'warn':'good');set('rampPwm',fmt(nav.ramp_throttle_pwm,0));set('finalPwm',fmt(act.actual_throttle_pwm,0));set('failsafe',safetyReason(safe.failsafe_reason||safe.reason)||'안전 전환 사유 없음',safe.failsafe_reason||safe.reason?'warn':'');set('safetyText',safe.estop?'비상정지 잠금':`${safe.actuator_locked?'출력 잠금':'출력 허용'} · ${fmt(act.actual_steering_pwm,0)} / ${fmt(act.actual_throttle_pwm,0)}`,safe.estop?'bad':'');
 set('coords',g.latitude==null?'좌표 no_data':`${fmt(g.latitude,6)}, ${fmt(g.longitude,6)}`);const active=state.routes.find(r=>r.id===state.tele.route?.active_route_id);set('activeRoute',active?.name||'—');set('missionStatus',state.version!==VERSION?`Jetson v${state.version} · v${VERSION} 배포 필요`:!state.control?'조회 전용 · 제어하려면 SSH 연결 필요':`WP ${state.tele.route?.target_waypoint_index??'—'} · 항로 거리 ${fmt(state.tele.route?.distance_to_route_m,2,' m')}`,state.version!==VERSION?'bad':'');
@@ -228,9 +278,9 @@ set('visionMetric',`${fmt(vision.processed_fps,1,' fps')} · ${fmt(vision.infere
 if(state.page==='sail'){renderRoutes();updateMap();}else if(state.page==='routes')renderRoutes();else if(state.page==='gps')renderGps();const tests=s.ground_tests||[],ts=JSON.stringify(tests);if(ts!==testSignature){testSignature=ts;const old=$('testSelect').value;$('testSelect').replaceChildren(elem('option','','최신 완료 테스트'));$('testSelect').firstChild.value='';for(const t of tests.filter(t=>t.complete)){const o=elem('option','',t.id);o.value=t.id;$('testSelect').append(o);}$('testSelect').value=[...$('testSelect').options].some(o=>o.value===old)?old:'';}
 motionAvailability();videoHealth();}
 function clearFrame(){if(frameAt){frameAt=0;frameTimes=[];}if(!$('frame').hidden){$('frame').hidden=true;$('frame').removeAttribute('src');}$('liveBadge').hidden=true;$('framePlaceholder').hidden=false;}
-function disconnected(text){frameAt=0;frameTimes=[];$('bannerResetEstop').disabled=true;if(!$('estopBanner').hidden)set('estopDetail','마지막 확인: 비상정지 · 연결이 끊겨 현재 출력 확인 불가');healthState={ros:'offline',ssh:'disconnected'};remoteRelease();state.online=false;state.control=false;state.trackingStart=null;updateHealth(healthState);set('connectionBadge',text||'연결 해제','bad');$('connectionBadge').classList.remove('online');document.querySelectorAll('.motion').forEach(b=>b.disabled=true);set('safetyText','연결 상태를 확인하세요 · 원격 출력 확인 불가','warn');set('currentMode','연결 끊김','bad');set('modePill','상태 stale','warn');['gpsQuick','rtkQuick','lockQuick','speed','rampPwm','finalPwm'].forEach(id=>set(id,'stale','warn'));$('connections').replaceChildren(elem('div','bad','연결 끊김 · 이전 상태 만료'));$('gpsMetrics').querySelectorAll('b').forEach(e=>{e.textContent='stale';e.className='warn';});['gnssState','ntripState','visionState','loggerState','targetPhase'].forEach(id=>set(id,'stale','warn'));['recordStart','recordStop','recordCancel'].forEach(id=>$(id).disabled=true);clearFrame();}
+function disconnected(text){renderNavigationProtection();frameAt=0;frameTimes=[];$('bannerResetEstop').disabled=true;if(!$('estopBanner').hidden)set('estopDetail','마지막 확인: 비상정지 · 연결이 끊겨 현재 출력 확인 불가');healthState={ros:'offline',ssh:'disconnected'};remoteRelease();state.online=false;state.control=false;state.trackingStart=null;resetCurveSlowdown();updateHealth(healthState);set('connectionBadge',text||'연결 해제','bad');$('connectionBadge').classList.remove('online');document.querySelectorAll('.motion').forEach(b=>b.disabled=true);set('safetyText','연결 상태를 확인하세요 · 원격 출력 확인 불가','warn');set('currentMode','연결 끊김','bad');set('modePill','상태 stale','warn');['gpsQuick','rtkQuick','lockQuick','speed','rampPwm','finalPwm'].forEach(id=>set(id,'stale','warn'));$('connections').replaceChildren(elem('div','bad','연결 끊김 · 이전 상태 만료'));$('gpsMetrics').querySelectorAll('b').forEach(e=>{e.textContent='stale';e.className='warn';});['gnssState','ntripState','visionState','loggerState','targetPhase'].forEach(id=>set(id,'stale','warn'));['recordStart','recordStop','recordCancel'].forEach(id=>$(id).disabled=true);clearFrame();}
 function localProfile(p){state.ntripProfile=p;if(!$('ntripDetails').dataset.dirty){for(const [id,key]of[['nHost','host'],['nPort','port'],['nMount','mountpoint'],['nUser','username']])if(p[key]!==undefined)$(id).value=p[key];if(p.tls!==undefined)$('nTls').checked=p.tls;}if(p.host)set('ntripSummary',`${p.host}:${p.port||2101} / ${p.mountpoint||''} · ${p.username||'사용자 미설정'} · 휴대폰에 저장됨`);}
-window.onNative=(event,d)=>{if(event==='ntrip_profile'){localProfile(d);return;}if(event==='settings'){$('host').value=d.host;$('username').value=d.username;$('gatewayPort').value=d.gateway_port;$('sshPort').value=d.ssh_port;set('appVersion',d.version);return;}if(event==='status'){render(d);return;}if(event==='link_health'){updateHealth(d);if(state.last&&Date.now()-state.last>2500)markTelemetryStale();return;}if(event==='frame_health'){videoState=d.state;videoHealth();return;}if(event==='ack'){const p=pending.get(d.id);if(!p)return;clearTimeout(p.timer);pending.delete(d.id);if(d.success)p.resolve(d);else p.reject(new Error(d.error||'명령 거부'));return;}if(event==='message'){message(d.text);return;}if(event==='offline'){updateHealth({ros:'delayed'});if(Date.now()-state.last>2500)markTelemetryStale();return;}if(event==='disconnected'){disconnected('연결 해제');return;}if(event==='frame'&&state.page==='camera'&&$('previewToggle').checked){frameAt=Date.now()-Math.max(0,d.source_age_ms||0);videoState='online';if(d.url&&/^https:\/\/appassets\.androidplatform\.net\/preview\.jpg\?v=[0-9_]+$/.test(d.url))$('frame').src=d.url;else if(d.image)$('frame').src='data:image/jpeg;base64,'+d.image;else return;$('frame').hidden=false;$('liveBadge').hidden=false;$('framePlaceholder').hidden=true;videoHealth();}};
+window.onNative=(event,d)=>{if(event==='ntrip_profile'){localProfile(d);return;}if(event==='settings'){$('host').value=d.host;$('username').value=d.username;$('gatewayPort').value=d.gateway_port;$('sshPort').value=d.ssh_port;set('appVersion',d.version);return;}if(event==='status'){render(d);return;}if(event==='link_health'){updateHealth(d);renderCurveSlowdown();if(state.last&&Date.now()-state.last>2500)markTelemetryStale();return;}if(event==='frame_health'){videoState=d.state;videoHealth();return;}if(event==='ack'){const p=pending.get(d.id);if(!p)return;clearTimeout(p.timer);pending.delete(d.id);if(d.success)p.resolve(d);else p.reject(new Error(d.error||'명령 거부'));return;}if(event==='message'){message(d.text);return;}if(event==='offline'){updateHealth({ros:'delayed'});if(Date.now()-state.last>2500)markTelemetryStale();return;}if(event==='disconnected'){disconnected('연결 해제');return;}if(event==='frame'&&state.page==='camera'&&$('previewToggle').checked){frameAt=Date.now()-Math.max(0,d.source_age_ms||0);videoState='online';if(d.url&&/^https:\/\/appassets\.androidplatform\.net\/preview\.jpg\?v=[0-9_]+$/.test(d.url))$('frame').src=d.url;else if(d.image)$('frame').src='data:image/jpeg;base64,'+d.image;else return;$('frame').hidden=false;$('liveBadge').hidden=false;$('framePlaceholder').hidden=true;videoHealth();}};
 $('frame').addEventListener('load',()=>{frameTimes.push(Date.now());while(frameTimes.length>1&&Date.now()-frameTimes[0]>3000)frameTimes.shift();videoHealth();});
 setInterval(()=>{if(state.last&&Date.now()-state.last>2500){markTelemetryStale();updateHealth({ros:Date.now()-state.last>8000?'offline':'delayed'});}videoHealth();},500);
 document.addEventListener('visibilitychange',()=>{if(document.hidden){state.trackingStart=null;remoteRelease();clearFrame();}});initMap();document.querySelectorAll('.motion').forEach(b=>b.disabled=true);if(window.Boat)Boat.ready();

@@ -246,6 +246,11 @@ class SSHWorker(QThread):
             }}
         if command == "SET_AUTO_CRUISE_PWM":
             return {"action": "set_auto_cruise_pwm", "arguments": {"value": validate_cruise(kwargs.get("value"))}}
+        if command == 'NAV_CURVE_SLOWDOWN':
+            enabled = kwargs.get('enabled')
+            if type(enabled) is not bool:
+                raise ValueError('enabled must be a boolean')
+            return {'action':'nav_curve_slowdown', 'arguments':{'enabled':enabled}}
         if command == "DISABLE_NTRIP":
             return {"action": "configure", "arguments": {"enabled": False}}
         if command == "REFRESH_NTRIP":
@@ -347,7 +352,7 @@ class SSHWorker(QThread):
         }
         logger_state = str(ground.get("state") or ("recording" if ground.get("active") else "idle"))
         return {
-            "type": "telemetry", "software_version": response.get("version", "2.4.22"),
+            "type": "telemetry", "software_version": response.get("version", "2.4.23"),
             "backend": {"name": str(response.get("backend") or "ROS Noetic"),
                         "ready": bool(response.get("gateway_online", True)), "node_count": len(nodes),
                         "master_online": response.get("master_online"),
@@ -369,6 +374,10 @@ class SSHWorker(QThread):
             "manual_waiting_for_neutral": bool(safety.get("manual_rearm_pending")),
             "auto_cruise_pwm": nav.get("auto_cruise_pwm") if nav.get('fresh',False) else None,
             "ramp_throttle_pwm": nav.get('ramp_throttle_pwm') if nav.get('fresh',False) else None,
+            "curve_slowdown_enabled": nav.get('curve_slowdown_enabled'),
+            "curve_slowdown_applied_monotonic": nav.get('curve_slowdown_applied_monotonic'),
+            "navigation_protection": (nav.get('navigation_protection') or {}
+                                      if ros_mode == 'NAVIGATION' and safety.get('armed') and nav.get('fresh') else {}),
             "final_throttle_pwm": safety.get('throttle_pwm'),
             "vision":cache.get("vision") or {}, "vision_desired":cache.get("vision_desired") or {},
             "balloon_armed":ros_mode=="BALLOON" and bool(safety.get("armed")),

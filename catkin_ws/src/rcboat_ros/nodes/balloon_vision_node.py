@@ -13,7 +13,7 @@ from rcboat_ros.common import pack,unpack,fresh
 from rcboat_ros.control_config import validate_cruise
 from rcboat_ros.balloon_tracking import validate_config,TargetTracker,TrackingController
 
-VERSION='2.4.22'
+VERSION='2.4.23'
 PREVIEW_STREAM_BUDGET = 144 * 1024
 PREVIEW_STREAM_HEADER = struct.Struct('!II')
 def public_config(c):

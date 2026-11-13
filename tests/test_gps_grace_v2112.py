@@ -134,12 +134,13 @@ class NavigationProvenanceTests(unittest.TestCase):
             module=logger_tests.load_node('navigation_node',Path(directory))
         nav=module.Navigation.__new__(module.Navigation)
         nav.lock=threading.RLock()
+        nav.heading_shock=module.HeadingShockProtection()
         nav.throttle_ramp=module.NavigationThrottleRamp();nav.safety={};nav.safety_received_at=0;nav.ramp_session=None
         nav.config={'tracking_mode':'HEADING','target_speed_mps':.6,'cruise_pwm':6650}
         nav.gps={'healthy':True,'heading_deg':12,'last_valid_monotonic':100.0}
         nav.route={'monotonic':100.0,'target_lat':35,'active_route_id':'C'}
         nav.large_turn_seen=False;nav.paused_until=0;nav.pub=base.Publisher()
-        def calculate(gps,route,config,seen):
+        def calculate(gps,route,config,seen,protect=False):
             nav.gps=dict(gps,last_valid_monotonic=100.1)
             return {'heading_error_deg':0,'initial_turn_pause_requested':False}
         with patch.object(module.time,'monotonic',return_value=100.2), \
