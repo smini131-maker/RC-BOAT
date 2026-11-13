@@ -383,7 +383,7 @@ class Supervisor:
                 if self.mode=='NAVIGATION':
                     msg.navigation_session_monotonic=self.mode_since
                 self.cmd.publish(msg)
-                self.state.publish(pack(software_version="2.4.14",mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
+                self.state.publish(pack(software_version="2.4.18",mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
                                         estop_reason=self.estop_reason,estop_time_utc=self.estop_time_utc,estop_origin=self.estop_origin,
                                         mode_since_monotonic=self.mode_since,
                                         ground_test_actuation_enabled=self.ground_test_actuation_enabled,

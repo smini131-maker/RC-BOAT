@@ -1,5 +1,6 @@
 """Static YOLOv8n inference without PyTorch on Jetson; neural shape AND target colour."""
 import hashlib,json
+import time
 from pathlib import Path
 import numpy as np
 from .long_range import RegionPlanner, target_colour_mask
@@ -163,14 +164,18 @@ class BalloonDetector:
         if not isinstance(frame,np.ndarray) or frame.ndim!=3 or frame.shape[2]!=3 or not frame.size or frame.dtype!=np.uint8:
             raise ValueError('nonempty uint8 BGR frame required')
         cv2=self.cv2;size=self.config['input_size']
+        start = time.monotonic()
         crop,detail=self.planner.plan(frame,self.config,cv2)
+        planned = time.monotonic()
         x0,y0,xend,yend=crop;view=frame[y0:yend,x0:xend];h,w=view.shape[:2];scale=min(size/w,size/h)
         rw,rh=round(w*scale),round(h*scale);left,top=(size-rw)//2,(size-rh)//2
         padded=np.full((size,size,3),114,np.uint8);padded[top:top+rh,left:left+rw]=cv2.resize(view,(rw,rh))
         blob=cv2.dnn.blobFromImage(padded,1/255.,(size,size),swapRB=True,crop=False)
+        prepared = time.monotonic()
         if self.backend_name=='onnxruntime':prediction=self.backend.run(None,{self.backend.get_inputs()[0].name:blob})[0]
         elif self.backend_name=='tensorrt':prediction=self.backend.run(blob)
         else:self.backend.setInput(blob);prediction=self.backend.forward()
+        inferred = time.monotonic()
         detections=decode_predictions(prediction,view.shape,size,scale,(left,top),self.config['confidence'],self.config['nms_iou'],cv2)
         target_colour=self.config.get('target_colour','pink')
         for item in detections:
@@ -192,6 +197,11 @@ class BalloonDetector:
             if item['pink_confirmed']:item['label']=target_colour+'_balloon'
         self.planner.observe(detections)
         detail['model_input']=size;detail['requested_resolution_met']=frame.shape[1]>=self.config['width'] and frame.shape[0]>=self.config['height']
+        detail.setdefault('timing_ms', {}).update(
+            roi_plan=round((planned-start)*1000, 2),
+            input_prep=round((prepared-planned)*1000, 2),
+            model_run=round((inferred-prepared)*1000, 2),
+            postprocess=round((time.monotonic()-inferred)*1000, 2))
         self.last_view=detail
         return detections
     def reset_search(self):

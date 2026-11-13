@@ -129,6 +129,62 @@ class ProfileMigrationTests(unittest.TestCase):
 
 @unittest.skipIf(cv2 is None,'numpy/OpenCV checked in the vision-numeric CI job')
 class NativeCropTests(unittest.TestCase):
+    def test_colour_candidate_ranking_matches_scalar_rules_in_a_dense_scan(self):
+        from rcboat_ros.long_range import _rank_colour_candidates
+
+        rng = np.random.default_rng(2418)
+        frame_area = 1920 * 1080
+        widths = rng.integers(1, 42, size=12000)
+        heights = rng.integers(1, 42, size=12000)
+        stats = np.column_stack((
+            rng.integers(0, 1878, size=12000),
+            rng.integers(0, 1038, size=12000),
+            widths,
+            heights,
+            rng.integers(1, widths * heights + 1),
+        )).astype(np.int32)
+        stats = np.vstack((np.array([[0, 0, 1920, 1080, frame_area]], dtype=np.int32), stats))
+
+        legacy = []
+        for x, y, width, height, area in stats[1:]:
+            if area < 4 or area > frame_area * .2 or min(width, height) < 2:
+                continue
+            if not .15 <= width / height <= 6:
+                continue
+            compactness = area / max(1, width * height)
+            aspect = min(width, height) / max(width, height)
+            score = .5 * math.sqrt(min(int(area), 256) / 256) + .3 * compactness + .2 * aspect
+            legacy.append((score, tuple(map(int, (x, y, width, height)))))
+        legacy.sort(key=lambda item: -item[0])
+
+        self.assertEqual(_rank_colour_candidates(stats, frame_area, 12), [box for _, box in legacy[:12]])
+
+    def test_colour_candidate_ranking_preserves_label_order_and_filter_boundaries(self):
+        from rcboat_ros.long_range import _rank_colour_candidates
+
+        stats = np.array([
+            [0, 0, 16, 16, 256],  # The background label is skipped even if its score is high.
+            [31, 22, 4, 4, 16],
+            [11, 42, 4, 4, 16],
+            [21, 32, 4, 4, 16],
+            [1, 1, 2, 2, 4],  # Minimum accepted area.
+            [2, 2, 3, 20, 25],  # Minimum accepted width/height ratio.
+            [3, 3, 12, 2, 20],  # Maximum accepted width/height ratio.
+            [4, 4, 20, 20, 300],  # Maximum accepted area for a 1,500-pixel frame.
+            [5, 5, 20, 20, 301],
+            [6, 6, 2, 2, 3],
+            [7, 7, 2, 14, 15],
+            [8, 8, 13, 2, 15],
+            [9, 9, 1, 9, 9],
+        ], dtype=np.int32)
+
+        first = (4, 4, 20, 20)
+        ties = [(31, 22, 4, 4), (11, 42, 4, 4), (21, 32, 4, 4)]
+        self.assertEqual(_rank_colour_candidates(stats, 1500, 3), [first, *ties[:2]])
+        self.assertEqual(_rank_colour_candidates(stats, 1500, 12),
+                         [first, *ties, (1, 1, 2, 2), (3, 3, 12, 2), (2, 2, 3, 20)])
+        self.assertEqual(_rank_colour_candidates(stats[:1], 1500, 12), [])
+
     def frame(self,x=1700,y=200):
         image=np.zeros((1080,1920,3),np.uint8)
         cv2.circle(image,(x,y),4,(160,0,255),-1)
@@ -176,12 +232,21 @@ class NativeCropTests(unittest.TestCase):
     def test_one_network_pass_mapping_and_pink_uses_original_pixels(self):
         d=self.fake_detector([np.zeros((1,5,0)),[[[160,160,26.6667,26.6667,.9]]]])
         self.assertEqual(d.detect(self.frame()),[])
+        scan_timings = {'colour_mask', 'component_label', 'candidate_rank'}
+        detector_timings = {'roi_plan', 'input_prep', 'model_run', 'postprocess'}
+        self.assertEqual(set(d.last_view['timing_ms']), scan_timings | detector_timings)
         result=d.detect(self.frame());self.assertEqual(d.backend.calls,2)
         self.assertEqual(d.backend.blob.shape,(1,3,320,320))
         self.assertEqual(len(result),1);self.assertTrue(result[0]['pink_confirmed'])
         self.assertTrue(np.allclose(result[0]['bbox'],[1696,196,1704,204],atol=1))
         self.assertEqual(d.last_view['kind'],'roi');self.assertTrue(d.last_view['requested_resolution_met'])
         self.assertGreater(result[0]['source_span_px'],7)
+        self.assertTrue(all(math.isfinite(value) and value >= 0 for value in d.last_view['timing_ms'].values()))
+        d.planner.observed_at = 100
+        with patch('rcboat_ros.long_range.time.monotonic', return_value=100.1):
+            d.detect(self.frame())
+        self.assertEqual(d.last_view['roi_source'], 'recent_detection')
+        self.assertEqual(set(d.last_view['timing_ms']), detector_timings)
 
     def test_colour_only_or_subpixel_box_never_confirms(self):
         d=self.fake_detector([np.zeros((1,5,0))]);self.assertFalse(d.detect(self.frame()))

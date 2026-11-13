@@ -6,6 +6,8 @@ Only the balloon network AND the model profile’s colour check can confirm a ta
 import math
 import time
 
+import numpy as np
+
 
 def target_colour_mask(hsv, config, cv2):
     """Apply the same HSV gate to ROI proposals and neural detections."""
@@ -37,6 +39,26 @@ def square_crop(box, shape, minimum, context):
     return int(left), int(top), min(w, int(left+side)), min(h, int(top+side))
 
 
+def _rank_colour_candidates(stats, frame_area, limit):
+    # OpenCV stats are x, y, width, height, area, with background first.
+    components = stats[1:]
+    widths, heights, areas = components[:, 2:].T
+    plausible = ((areas >= 4) & (areas <= frame_area * .2)
+                 & (widths >= 2) & (heights >= 2))
+    components = components[plausible]
+    widths, heights, areas = components[:, 2:].T
+    ratio = widths / heights
+    plausible = (ratio >= .15) & (ratio <= 6)
+    components = components[plausible]
+    widths, heights, areas = components[:, 2:].T
+    compactness = areas / (widths * heights)
+    aspect = np.minimum(widths, heights) / np.maximum(widths, heights)
+    score = .5 * np.sqrt(np.minimum(areas, 256) / 256) + .3 * compactness + .2 * aspect
+    # Preserve OpenCV label order for equal scores, as the previous stable sort did.
+    ranked = np.argsort(-score, kind='stable')[:limit]
+    return [tuple(row) for row in components[ranked, :4].tolist()]
+
+
 class RegionPlanner:
     def __init__(self):
         self.calls = 0
@@ -63,30 +85,29 @@ class RegionPlanner:
             crop = square_crop(self.last_box, frame.shape, config['roi_min_size'], config['roi_context_scale'])
             detail.update(kind='roi', crop=list(crop), roi_source='recent_detection')
             return crop, detail
+        start = time.monotonic()
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         mask = target_colour_mask(hsv, config, cv2)
+        mask_done = time.monotonic()
         _, _, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
-        rows = []
-        for x, y, bw, bh, area in stats[1:]:
-            if area < 4 or area > w*h*.2 or min(bw,bh) < 2 or not .15 <= bw/bh <= 6:
-                continue
-            compact = area/max(1, bw*bh)
-            aspect = min(bw,bh)/max(bw,bh)
-            score = .5*math.sqrt(min(int(area),256)/256) + .3*compact + .2*aspect
-            rows.append((score, [int(x),int(y),int(x+bw),int(y+bh)]))
-        rows.sort(key=lambda item: -item[0])
-        rows = rows[:config['roi_max_candidates']]
-        detail['colour_candidates'] = len(rows)
+        labels_done = time.monotonic()
+        boxes = [(x, y, x+bw, y+bh) for x, y, bw, bh in
+                 _rank_colour_candidates(stats, w*h, config['roi_max_candidates'])]
+        detail['colour_candidates'] = len(boxes)
+        detail['timing_ms'] = dict(
+            colour_mask=round((mask_done-start)*1000, 2),
+            component_label=round((labels_done-mask_done)*1000, 2),
+            candidate_rank=round((time.monotonic()-labels_done)*1000, 2))
         chosen = None
-        if recent and rows:
+        if recent and boxes:
             a = self.last_box
             radius = max(config['roi_min_size'], 2*max(a[2]-a[0],a[3]-a[1]))
-            near = [(math.hypot((b[0]+b[2]-a[0]-a[2])/2,(b[1]+b[3]-a[1]-a[3])/2), b) for _,b in rows]
+            near = [(math.hypot((b[0]+b[2]-a[0]-a[2])/2,(b[1]+b[3]-a[1]-a[3])/2), b) for b in boxes]
             distance, box = min(near,key=lambda item:item[0])
             if distance <= radius:
                 chosen = box
-        if chosen is None and rows and self.calls % config['roi_full_interval'] != 1:
-            chosen = rows[self.cursor % len(rows)][1]
+        if chosen is None and boxes and self.calls % config['roi_full_interval'] != 1:
+            chosen = boxes[self.cursor % len(boxes)]
             self.cursor += 1
         if chosen is None:
             return full, detail

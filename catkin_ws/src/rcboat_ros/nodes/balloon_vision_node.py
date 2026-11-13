@@ -13,7 +13,7 @@ from rcboat_ros.common import pack,unpack,fresh
 from rcboat_ros.control_config import validate_cruise
 from rcboat_ros.balloon_tracking import validate_config,TargetTracker,TrackingController
 
-VERSION='2.4.14'
+VERSION='2.4.18'
 PREVIEW_STREAM_BUDGET = 144 * 1024
 PREVIEW_STREAM_HEADER = struct.Struct('!II')
 def public_config(c):
@@ -280,19 +280,28 @@ class Vision:
                         with self.lock:self.model_ready=True;self.error=''
                 with self.lock:frame=self.frame;stamp=self.frame_at;frame_id=self.frame_id
                 if frame is None or frame_id==processed:time.sleep(.02);continue
+                detect_start=time.monotonic()
                 processed=frame_id;detections=self.detector.detect(frame) if self.detector else [];end=time.monotonic()
                 if self.detector is not None:ends.append(end)
                 with self.lock:
                     if not self.enabled or revision!=self.revision or stamp<self.tracking_reset_at:continue
+                    track_start=time.monotonic()
                     target,desired=self.track_frame(detections,frame.shape,stamp,end,c)
                     if self.detector is None:desired['valid']=False
                     self.desired=desired
                     if self.detector is not None:self.processed_frames+=1
                     self.desired_pub.publish(pack(**desired))
+                    detector_view=dict(getattr(self.detector,'last_view',{}))
+                    if self.detector is not None:
+                        detector_view['timing_ms']=dict(
+                            detector_view.get('timing_ms',{}),
+                            loop_setup=round((detect_start-start)*1000,2),
+                            tracking_lock_wait=round((track_start-end)*1000,2),
+                            track_and_publish=round((time.monotonic()-track_start)*1000,2))
                     self.detail=dict(reason=target.get('phase','IDLE'),target=target,detections=detections,inference_ms=round((end-start)*1000,1),processed_frame_monotonic=stamp,
                         processed_fps=round((len(ends)-1)/(ends[-1]-ends[0]),2) if self.detector is not None and len(ends)>1 and ends[-1]>ends[0] else None,backend=self.detector.backend_name if self.detector else 'unavailable',
                         prediction_source='bearing_triangulation' if target.get('world_estimate') else 'image_motion',
-                        detector_view=dict(getattr(self.detector,'last_view',{})),
+                        detector_view=detector_view,
                         range_validation='not_field_validated',design_goal_distance_m=100)
                     if self.detector is not None:self.error=''
             except Exception as exc:
