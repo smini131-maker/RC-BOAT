@@ -18,7 +18,7 @@
 ## 1. 저장소 준비 — Windows PowerShell
 
 ```powershell
-Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_v2.4.16"
+Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_v2.4.17"
 ```
 
 이후 Windows 명령은 저장소 루트에서 실행합니다. `JETSON_IP`는 실제 장치 주소로 바꿉니다.

@@ -108,6 +108,9 @@ class BalloonPanel(QWidget):
         self.vpn_preview=False;self.gateway_ms=None
         self.stream_supported=False;self.stream_rate=14;self.stream_rates=deque(maxlen=3)
         self.stream_buffer=bytearray();self.stream_received_at=0.
+        self.stream_failures=0;self.snapshot_until=0.
+        self.stream_first_frame_at=0.;self.stream_rate_changed_at=0.
+        self.video_requested=False
         self.remote_enabled=False;self.camera_enabled=False;self.mock=False;self.last_image=0;self.samples=deque(maxlen=60);self.etag=''
         self.dirty=False;self.synced=False;self.syncing=False;self.generation=0;self.pending=None;self.stamp=0;self.waiting_start=False
         self.tracking_session=None;self.mode_since=None
@@ -165,11 +168,19 @@ class BalloonPanel(QWidget):
         for b in (self.enable_button,self.disable_button,self.stop_button,self.download_button,self.start_button):b.setEnabled(connected)
         self.save_button.setEnabled(connected)
         if not connected:
+            self.video_requested=False
+            self.stream_failures=0;self.snapshot_until=0.
             self.waiting_start=False;self.synced=False;self.pending=None;self.image.clear();self.image.setText('ROS 연결 대기');self.summary.setText('카메라 연결 대기');self.last_image=0
             self.etag='';self.samples.clear()
             self.bandwidth.clear()
         if self.remote_enabled!=was_connected:
             self._reset_preview_connection()
+    def set_status_unavailable(self):
+        self.waiting_start=False
+        self.summary.setText('Jetson 상태 응답 대기')
+        for button in (self.enable_button,self.disable_button,self.start_button,self.download_button,self.save_button):
+            button.setEnabled(False)
+
     def begin_tracking(self):
         if not self.remote_enabled or self.waiting_start or self.tracking_session is not None:return
         self.waiting_start=True;self.start_button.setEnabled(False);self.summary.setText('카메라 준비 대기')
@@ -222,16 +233,22 @@ class BalloonPanel(QWidget):
         self.stream_supported=v.get('preview_stream') is True
         if previous_endpoint!=(self.host,self.port):
             self.stream_rates.clear()
+            self.stream_failures=0;self.snapshot_until=0.
+            self.stream_rate_changed_at=0.
         if self.vpn_preview and self.stream_supported:
             if self.gateway_ms is not None:
                 self.stream_rates.append(self.gateway_ms)
-            elif backend.get('gateway_online'):
-                self.stream_rates.append(850)
         rate=stream_frame_rate(self.stream_rates) if self.stream_rates else 14
-        if rate!=self.stream_rate or previous_stream!=self.stream_supported:
+        now=time.monotonic()
+        rate_changed=(rate!=self.stream_rate and
+                      (rate<self.stream_rate or now-self.stream_rate_changed_at>=5.))
+        if rate_changed or previous_stream!=self.stream_supported:
             self.stream_rate=rate
-            self._reset_preview_connection()
+            self.stream_rate_changed_at=now
+            if self.reply is not None and self.reply.property('rcboat_preview_stream'):
+                self._reset_preview_connection()
         self.mock=bool(state.get('mock'));self.remote_enabled=bool(backend.get('gateway_online'));self.camera_enabled=bool(v.get('enabled'))
+        self.video_requested=self.camera_enabled
         mode_since=state.get('mode_since_monotonic')
         if not self.remote_enabled or state.get('estop') or (self.mode_since is not None and mode_since!=self.mode_since):
             self.waiting_start=False
@@ -241,6 +258,9 @@ class BalloonPanel(QWidget):
         if (session!=self.tracking_session or camera_was_enabled!=self.camera_enabled or
                 previous_endpoint!=(self.host,self.port) or was_connected!=self.remote_enabled):
             self.tracking_session=session
+            if previous_endpoint!=(self.host,self.port) or camera_was_enabled!=self.camera_enabled:
+                self.stream_failures=0
+                self.snapshot_until=0.
             self._reset_preview_connection()
             self.last_image=0
             self.samples.clear();self.bandwidth.clear()
@@ -301,20 +321,26 @@ class BalloonPanel(QWidget):
         self.etag=''
         self.stream_buffer.clear()
         self.stream_received_at=0.
+        self.stream_first_frame_at=0.
         self.preview_retry_at=0.
 
-    def _preview_transport_failed(self,error):
+    def _preview_transport_failed(self,error,stream=False):
+        now=time.monotonic()
+        if stream:
+            self.stream_failures+=1
+            if self.stream_failures>=2:
+                self.snapshot_until=now+5.
         if self.preview_failure is None:
             logger.warning('Preview connection interrupted: %s',error)
         self.preview_failure=error
         self._reset_preview_connection()
-        self.preview_retry_at=time.monotonic()+(.7 if self.vpn_preview else .25)
+        self.preview_retry_at=now+.25
         if not self.last_image:
             self.image.setText('영상 연결 지연 · 재연결 중')
 
     def fetch_frame(self):
         if (not self.isVisible() or not self.show_preview.isChecked() or
-                not self.remote_enabled or not self.camera_enabled or not self.host or self.mock):
+                not self.video_requested or not self.host or self.mock):
             if self.reply is not None:self._reset_preview_connection()
             return
         now=time.monotonic()
@@ -323,21 +349,24 @@ class BalloonPanel(QWidget):
             self.image.clear();self.image.setText('새 영상 수신 대기 · 이전 영상 만료')
         if self.reply is not None:
             last_activity=self.stream_received_at or self.preview_request_at
-            if now-last_activity>(1.2 if self.vpn_preview else 1.8):
-                self._preview_transport_failed('request timeout')
+            streaming=self.reply.property('rcboat_preview_stream') is True
+            if now-last_activity>(1.8 if streaming or not self.vpn_preview else 1.2):
+                self._preview_transport_failed('request timeout',stream=streaming)
             return
         if now<self.preview_retry_at:return
         host='['+self.host+']' if ':' in self.host else self.host
-        path=f'/stream/{self.stream_rate}' if self.stream_supported else '/frame.jpg'
+        streaming=self.stream_supported and now>=self.snapshot_until
+        path=f'/stream/{self.stream_rate}' if streaming else '/frame.jpg'
         req=QNetworkRequest(QUrl(f'http://{host}:{self.port}{path}'))
-        req.setTransferTimeout(1500)
+        req.setTransferTimeout(1800 if streaming else 1500)
         token=os.getenv('RCBOAT_GATEWAY_TOKEN','')
         if token:req.setRawHeader(b'X-RCBoat-Token',token.encode())
         if self.etag:req.setRawHeader(b'If-None-Match',self.etag.encode())
         reply=self.network.get(req)
+        reply.setProperty('rcboat_preview_stream',streaming)
         self.reply=reply
         self.preview_request_at=now
-        if self.stream_supported:
+        if streaming:
             reply.setReadBufferSize(64000)
             reply.readyRead.connect(lambda:self.read_stream(reply))
             reply.finished.connect(lambda:self.stream_finished(reply))
@@ -353,7 +382,7 @@ class BalloonPanel(QWidget):
         while len(self.stream_buffer)>=STREAM_HEADER.size:
             size,age_ms=STREAM_HEADER.unpack_from(self.stream_buffer)
             if size<=0 or size>MAX_JPEG_BYTES:
-                self._preview_transport_failed('invalid frame length')
+                self._preview_transport_failed('invalid frame length',stream=True)
                 return
             end=STREAM_HEADER.size+size
             if len(self.stream_buffer)<end:
@@ -362,15 +391,19 @@ class BalloonPanel(QWidget):
             if age_ms<=500:
                 latest=bytes(self.stream_buffer[STREAM_HEADER.size:end])
             del self.stream_buffer[:end]
-        if latest is not None:
-            self.display_frame(latest)
+        if latest is not None and self.display_frame(latest):
+            now=time.monotonic()
+            if not self.stream_first_frame_at:
+                self.stream_first_frame_at=now
+            elif now-self.stream_first_frame_at>=2.:
+                self.stream_failures=0
 
     def stream_finished(self,reply):
         try:
             if reply is self.reply:
                 status=reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
                 self.reply=None
-                self._preview_transport_failed(f'video stream closed ({status or reply.error().name})')
+                self._preview_transport_failed(f'video stream closed ({status or reply.error().name})',stream=True)
         finally:
             reply.deleteLater()
 
@@ -379,13 +412,15 @@ class BalloonPanel(QWidget):
             if reply is not self.reply:
                 return
             self.reply=None
-            if not self.remote_enabled or not self.camera_enabled or not self.show_preview.isChecked():
+            if not self.video_requested or not self.show_preview.isChecked():
                 return
             completed=time.monotonic()
             request_seconds=completed-self.preview_request_at
             status=reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
             if self.vpn_preview:
                 interval=vpn_preview_interval(request_seconds, reply.bytesAvailable(), self.gateway_ms)
+                if completed<self.snapshot_until:
+                    interval=max(.2,interval)
                 self.preview_retry_at=max(completed, self.preview_request_at+interval)
             else:
                 self.preview_retry_at=self.preview_request_at+1/12

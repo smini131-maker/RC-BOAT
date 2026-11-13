@@ -49,7 +49,7 @@ class SSHWorker(QThread):
     STATUS_POLL_INTERVAL_S = 1.0
     STATUS_RETRY_INTERVAL_S = .35
     STATUS_STALE_S = 2.5
-    SSH_RETRY_INTERVAL_S = 3.0
+    SSH_RETRY_INTERVAL_S = 1.5
     SSH_HEALTH_INTERVAL_S = 1.0
     SSH_HEALTH_TIMEOUT_S = 2.0
     SSH_DELAY_GRACE_S = 5.0
@@ -89,6 +89,7 @@ class SSHWorker(QThread):
         self._halt = threading.Event()
         self._control_rtt_ms = None
         self._control_ack_at = 0.0
+        self._heartbeat_missed = False
         self._route_catalog_revision = ""
         self._route_catalog = {}
         self._host_key_event = threading.Event()
@@ -349,7 +350,7 @@ class SSHWorker(QThread):
             "type": "telemetry", "software_version": response.get("version", "2.4.14"),
             "backend": {"name": str(response.get("backend") or "ROS Noetic"),
                         "ready": bool(response.get("gateway_online", True)), "node_count": len(nodes),
-                        "master_online": bool(response.get("master_online")),
+                        "master_online": response.get("master_online"),
                         "gateway_online": bool(response.get("gateway_online", True)),
                         "ssh_connected": bool(ssh_connected), "logger_state": logger_state,
                         "ssh_state": (cache.get('operator_link',{}).get('ssh_state','connected') if ssh_connected else 'disconnected'),
@@ -517,7 +518,8 @@ class SSHWorker(QThread):
             if not result.get("success"):
                 raise ConnectionError("operator link rejected")
         now = time.monotonic()
-        link_recovered = now - self._control_ack_at >= 2.5
+        link_recovered = self._heartbeat_missed or not self._control_ack_at
+        self._heartbeat_missed = False
         self._control_rtt_ms = round((now - started) * 1000)
         self._control_ack_at = now
         if link_recovered and not self._stop_requested:
@@ -571,7 +573,7 @@ class SSHWorker(QThread):
                 # server must not delay the independent ROS safety lease.
                 self._send_operator_link(self._ssh_confirmed)
             except (OSError, ValueError):
-                pass  # The Jetson expires the lease independently.
+                self._heartbeat_missed = True  # The Jetson expires the lease independently.
             for _ in range(10):
                 if self._stop_requested:
                     break
@@ -593,7 +595,7 @@ class SSHWorker(QThread):
                 client.load_host_keys(str(self.known_hosts_path))
             client.set_missing_host_key_policy(ConfirmHostKeyPolicy(self))
             client.connect(self.host, port=self.port, username=self.username,
-                           password=self._password or None, timeout=3, auth_timeout=4,
+                           password=self._password or None, timeout=1.5, auth_timeout=4,
                            banner_timeout=4, look_for_keys=True, allow_agent=True)
             transport = client.get_transport()
             if transport is None:
@@ -616,6 +618,7 @@ class SSHWorker(QThread):
                 self._client = client
             self.terminal_state.emit(True, f"{self.username}@{self.host}")
             self.log.emit("SSH 관리 채널 연결 완료")
+            self._status_wakeup.set()
             return ""
         except Exception as exc:
             self._close_ssh("SSH disconnected", notify=False)
@@ -641,7 +644,7 @@ class SSHWorker(QThread):
                 last_attempt = now
                 last_error = self._open_ssh_terminal(last_error)
             if self._client is None:
-                self._ssh_wakeup.wait(.4)
+                self._ssh_wakeup.wait(.25)
             else:
                 self._ssh_wakeup.clear()
                 self._halt.wait(self.SSH_HEALTH_INTERVAL_S)
@@ -688,6 +691,8 @@ class SSHWorker(QThread):
                 self._backend_version = str(response.get("version") or "unknown")
                 self._merge_route_catalog(response)
                 state = self._normalize(response, self._ssh_confirmed)
+                if self._ssh_confirmed and self._ssh_delay_since is not None:
+                    state["backend"]["ssh_state"] = "delayed"
                 last_success = time.monotonic()
                 state["backend"]["status_rtt_ms"] = round((last_success - started) * 1000)
                 state["backend"]["control_rtt_ms"] = (
@@ -703,9 +708,13 @@ class SSHWorker(QThread):
                     break
                 now = time.monotonic()
                 if now - last_success >= self.STATUS_STALE_S:
-                    offline = {"success": True, "backend": "ROS Noetic",
-                               "master_online": False, "gateway_online": False, "telemetry": {}, "nodes": []}
-                    self.telemetry.emit(self._normalize(offline, self._ssh_confirmed))
+                    self.telemetry.emit({
+                        "backend": {
+                            "status_unavailable": True,
+                            "ssh_connected": self._ssh_confirmed,
+                            "ssh_state": "delayed" if self._ssh_delay_since is not None else "connected",
+                        },
+                    })
                     message = str(exc)
                     if message != self._backend_error or now - self._backend_error_at >= 15.0:
                         self.log.emit("ROS gateway offline: " + message)

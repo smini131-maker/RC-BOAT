@@ -235,6 +235,9 @@ with ThreadingHTTPServer(('127.0.0.1',0),PreviewHandler) as server:
     thread=Thread(target=server.serve_forever,daemon=True);thread.start()
     preview=BalloonPanel();preview.timer.stop();preview.show()
     preview.update_state(dict(ready,vision=dict(ready['vision'],preview_port=server.server_port)),'127.0.0.1')
+    preview.set_status_unavailable()
+    assert preview.video_requested and not preview.start_button.isEnabled()
+    assert '상태 응답 대기' in preview.summary.text()
     def fetch_preview():
         for _ in range(60):
             if time.monotonic()>=preview.preview_retry_at:break
@@ -262,6 +265,14 @@ with ThreadingHTTPServer(('127.0.0.1',0),PreviewHandler) as server:
         assert preview.etag=='' and preview.last_image in (0,last_displayed), 'Old frame displayed'
         fetch_preview()
         assert not preview.image.pixmap().isNull() and preview.preview_failure is None
+        preview.stream_supported=True
+        preview._preview_transport_failed('simulated stream timeout',stream=True)
+        preview._preview_transport_failed('simulated stream timeout',stream=True)
+        assert preview.snapshot_until>time.monotonic()
+        fetch_preview()
+        assert not preview.image.pixmap().isNull()
+        assert preview.video_requested
+
     finally:
         release_stalled_request.set()
         preview.shutdown();preview.close()
@@ -274,6 +285,17 @@ locked=SSHWorker._normalize(dict(success=True,version='2.4.14',gateway_online=Tr
 w.update_telemetry(locked);app.processEvents()
 assert w.estop_banner.isVisible() and '점검 중' in w.estop_banner_text.text() and '19:00:00 KST' in w.estop_banner_text.text()
 assert '비상정지' in w.balloon_panel.summary.text() and not w.balloon_panel.start_button.isEnabled()
+w.update_telemetry({'backend':{'status_unavailable':True,'ssh_connected':True,'ssh_state':'delayed'}})
+assert w.cards['ros_master'].value_label.text()=='상태 확인 불가'
+assert '재시도' in w.cards['backend'].value_label.text()
+assert w._last_estop and '마지막 확인' in w.estop_banner_text.text()
+w.update_telemetry(locked)
+assert w.cards['ros_master'].value_label.text()=='online'
+master_down=SSHWorker._normalize(dict(success=True,version='2.4.14',gateway_online=True,master_online=False))
+w.update_telemetry(master_down)
+assert w.cards['ros_master'].value_label.text()=='offline'
+w.update_telemetry(locked)
+
 for index in range(w.tabs.count()):
     w.tabs.setCurrentIndex(index);app.processEvents();assert w.estop_banner.isVisible()
 w._set_connected(False);assert w.estop_banner.isVisible() and '현재 출력 확인 불가' in w.estop_banner_text.text()

@@ -845,7 +845,12 @@ class MainWindow(QMainWindow):
         self.logs.append(f"[{stamp}] {text}")
         logging.getLogger("rcboat.gui").info("%s",text)
 
-    def toggle_connection(self) -> None:
+    def auto_connect(self) -> None:
+        if self.password.text():
+            self.toggle_connection(save_credentials=False)
+
+    @Slot()
+    def toggle_connection(self, *, save_credentials: bool = True) -> None:
         if self._disconnecting or self._closing:
             return
         if self.worker and self.worker.isRunning():
@@ -863,13 +868,14 @@ class MainWindow(QMainWindow):
             )
             self.settings.setValue("port", self.port.value())
             self.settings.setValue("username", self.username.text().strip())
-            if self.remember.isChecked():
-                try:
-                    save_password(self.host.text().strip(), self.username.text().strip(), self.password.text())
-                except Exception as exc:
-                    QMessageBox.warning(self, "비밀번호 저장 실패", f"Windows 자격 증명 관리자에 저장하지 못했습니다: {exc}")
-            else:
-                delete_password(self.host.text().strip(), self.username.text().strip())
+            if save_credentials:
+                if self.remember.isChecked():
+                    try:
+                        save_password(self.host.text().strip(), self.username.text().strip(), self.password.text())
+                    except Exception as exc:
+                        QMessageBox.warning(self, "비밀번호 저장 실패", f"Windows 자격 증명 관리자에 저장하지 못했습니다: {exc}")
+                else:
+                    delete_password(self.host.text().strip(), self.username.text().strip())
         worker.setParent(self)
         worker.finished.connect(self._on_worker_finished, Qt.QueuedConnection)
         worker.connected.connect(self.on_connected, Qt.QueuedConnection)
@@ -898,7 +904,7 @@ class MainWindow(QMainWindow):
             self._pending_cruise_request = self._pending_cruise_value = None
             self._update_cruise_label()
             self._gateway_online = self._ssh_online = False
-            self.cards["ros_master"].set_value("offline",False)
+            self.cards["ros_master"].set_value("확인 전", "NO_DATA")
             self.cards["gps"].set_value("no_data",False)
             self.cards["rtk"].set_value("no_data",False)
         self._refresh_connection_button()
@@ -1891,9 +1897,33 @@ class MainWindow(QMainWindow):
             return f"{value:.{digits}f}{suffix}"
         return f"{value}{suffix}"
 
+    def _update_ssh_card(self, backend):
+        self._ssh_online = bool(backend.get("ssh_connected"))
+        if not self._ssh_online:
+            self.cards["ssh"].set_value("disconnected", False)
+        elif backend.get("ssh_state") == "delayed":
+            self.cards["ssh"].set_value("delayed · 연결 유지", "WARNING")
+        else:
+            self.cards["ssh"].set_value("connected", True)
+        self._refresh_connection_button()
+
     @Slot(dict)
     def update_telemetry(self, state: dict) -> None:
         if self._disconnecting or self._closing:return
+        backend = state.get("backend") or {}
+        if backend.get("status_unavailable"):
+            self._gateway_online = False
+            self._update_ssh_card(backend)
+            self.cards["backend"].set_value("상태 응답 없음 · 재시도", "WARNING")
+            self.cards["ros_master"].set_value("상태 확인 불가", "NO_DATA")
+            self.cards["mode"].set_value("현재 모드 확인 불가", "WARNING")
+            self.safety_badge.setText("출력 상태 확인 불가")
+            self.cards["gps"].set_value("갱신 대기", "NO_DATA")
+            self.cards["rtk"].set_value("갱신 대기", "NO_DATA")
+            if self._last_estop:
+                self.estop_banner_text.setText("■ 마지막 확인: 비상정지 작동 · 현재 출력 확인 불가")
+            self.balloon_panel.set_status_unavailable()
+            return
         self._last_estop=state.get('estop') is True
         self.estop_banner.setVisible(self._last_estop)
         if self._last_estop:
@@ -1907,7 +1937,8 @@ class MainWindow(QMainWindow):
             self.safety_badge.setText('출력 잠금' if state.get('actuator_locked') else '출력 허용')
             self.safety_badge.setStyleSheet('')
         self.estop_button.setText('■ 비상정지 작동 중' if self._last_estop else '비상 정지')
-        self.balloon_panel.update_state(state,self.host.text().strip())
+        active_host = self.worker.host if isinstance(self.worker, SSHWorker) else self.host.text().strip()
+        self.balloon_panel.update_state(state,active_host)
         devices, gps, rc, pca = state.get("devices", {}), state.get("gps", {}), state.get("rc", {}), state.get("pca", {})
         mode = state.get("mode", "-")
         self.current_mode = str(mode)
@@ -1940,8 +1971,7 @@ class MainWindow(QMainWindow):
         backend = state.get("backend") or {}
         backend_ready = bool(backend.get("ready", True))
         self._gateway_online = bool(backend.get("gateway_online",backend_ready))
-        self._ssh_online = bool(backend.get("ssh_connected"))
-        self._refresh_connection_button()
+        self._update_ssh_card(backend)
         backend_name = str(backend.get("name") or ("SIM" if state.get("mock") else "ROS"))
         node_count = int(backend.get("node_count") or 0)
         backend_version = str(backend.get("version") or "unknown")
@@ -1955,10 +1985,11 @@ class MainWindow(QMainWindow):
         if status_rtt is not None:
             backend_hint += f" · ROS 상태 조회 왕복 {status_rtt} ms"
         self.cards["backend"].setToolTip(backend_hint)
-        self.cards["ssh"].set_value("delayed · 연결 유지" if backend.get('ssh_state')=='delayed' and backend.get('ssh_connected') else "connected" if backend.get("ssh_connected") else "disconnected",
-                                    bool(backend.get("ssh_connected")))
-        self.cards["ros_master"].set_value("online" if backend.get("master_online") else "offline",
-                                           bool(backend.get("master_online")))
+        master_online = backend.get("master_online")
+        if master_online is None:
+            self.cards["ros_master"].set_value("상태 확인 불가", "NO_DATA")
+        else:
+            self.cards["ros_master"].set_value("online" if master_online else "offline", bool(master_online))
         logger_state = str(backend.get("logger_state") or "idle")
         self.cards["logger"].set_value(logger_state, logger_state in {"idle", "recording", "stopping"})
         mock = bool(state.get("mock"))

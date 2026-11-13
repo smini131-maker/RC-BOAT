@@ -2,9 +2,9 @@
 
 ROS Noetic 기반 RC 보트 자율운항 및 Windows 관제 시스템입니다. Jetson에서 GNSS/RTK 수신, 항로 선택, 조향·스로틀 제어와 시험 기록을 처리하고, Windows GUI에서 항로 편집과 운항 상태 확인, 시험 로그 다운로드를 수행합니다.
 
-**Windows 관제 v2.4.16**는 영상 전체를 창에 맞춰 표시하며, 낮은 창에서는 영상 영역만 세로로 스크롤할 수 있습니다. EXE를 직접 열면 기본 Tailscale 주소와 저장된 자격 증명으로 자동 연결합니다. Jetson ROS와 Android는 v2.4.14를 사용합니다. 기존 화면에서 PC 한 대가 운항을 제어합니다. [육상 PC 운항 안내](docs/remote-operator.md)
+**Windows 관제 v2.4.17**는 영상 전체를 창에 맞춰 표시하며, 낮은 창에서는 영상 영역만 세로로 스크롤할 수 있습니다. EXE를 직접 열면 기본 Tailscale 주소와 저장된 자격 증명으로 자동 연결합니다. Jetson ROS와 Android는 v2.4.14를 사용합니다. 기존 화면에서 PC 한 대가 운항을 제어합니다. [육상 PC 운항 안내](docs/remote-operator.md)
 
-ROS 이전 **v1.6.0은 별도 레거시로 유지**합니다. 원본은 [release/1.6.0 브랜치](https://github.com/smini131-maker/RC-BOAT/tree/release/1.6.0), 로컬 보존 폴더는 `RCBoatControl_v1.6.0`입니다. ROS 최신 프로젝트 폴더는 `RCBoatControl_v2.4.16`이며 아래 배포 명령은 ROS 버전에만 적용합니다.
+ROS 이전 **v1.6.0은 별도 레거시로 유지**합니다. 원본은 [release/1.6.0 브랜치](https://github.com/smini131-maker/RC-BOAT/tree/release/1.6.0), 로컬 보존 폴더는 `RCBoatControl_v1.6.0`입니다. ROS 최신 프로젝트 폴더는 `RCBoatControl_v2.4.17`이며 아래 배포 명령은 ROS 버전에만 적용합니다.
 
 v2.4.6은 Windows에서 수신한 카메라 JPEG가 표시되지 않던 오류를 수정합니다. Android는 카메라 탭에서 미리보기를 기본으로 켜고, 같은 탭에서 Jetson에 재연결하면 영상 수신을 재개합니다.
 
@@ -54,7 +54,7 @@ Windows GUI ── TCP 8765 ── Jetson / ROS Noetic
 ## 시작하기
 
 ```powershell
-Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_v2.4.16"
+Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_v2.4.17"
 ```
 
 Windows GUI를 소스에서 실행하려면:

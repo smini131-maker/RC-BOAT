@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import encodings.idna  # Load before the network threads use getaddrinfo.
 import sys
 from pathlib import Path
 from rcboat_gui.runtime_logging import configure,install_qt_handler
@@ -38,7 +39,7 @@ def main() -> int:
     window = MainWindow()
     window.show()
     if auto_connect and window.password.text():
-        QTimer.singleShot(0, window.toggle_connection)
+        QTimer.singleShot(250, window.auto_connect)
     if smoke_test:
         app.processEvents()
         if "--screenshot" in sys.argv:
