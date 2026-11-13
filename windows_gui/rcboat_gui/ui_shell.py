@@ -76,7 +76,7 @@ def build_shell(w):
     w.estop_banner_clear=QPushButton('비상정지 해제');w.estop_banner_clear.clicked.connect(w.clear_estop);emergency_row.addWidget(w.estop_banner_clear)
     w.estop_banner.hide();outer.addWidget(w.estop_banner)
     connect=QGroupBox('장치 연결');grid=QGridLayout(connect);grid.setContentsMargins(10,8,10,8)
-    w.host=QLineEdit('10.123.65.215');w.port=QSpinBox();w.port.setRange(1,65535);w.port.setValue(22);w.port.setMaximumWidth(85)
+    w.host=QLineEdit();w.port=QSpinBox();w.port.setRange(1,65535);w.port.setValue(22);w.port.setMaximumWidth(85)
     w.username=QLineEdit('jetson');w.password=QLineEdit();w.password.setEchoMode(QLineEdit.Password)
     for col,(label,widget) in enumerate((('Jetson 주소',w.host),('SSH 포트',w.port),('사용자',w.username),('비밀번호',w.password))):
         grid.addWidget(QLabel(label),0,col);grid.addWidget(widget,1,col)

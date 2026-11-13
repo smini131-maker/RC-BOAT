@@ -42,7 +42,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import JETSON_VERSION, __version__ as APP_VERSION
+from . import DEFAULT_JETSON_HOST, JETSON_VERSION, __version__ as APP_VERSION
 from .credentials import delete_password, load_password, save_password
 from .mock_worker import MockWorker
 from .ssh_worker import SSHWorker
@@ -828,7 +828,9 @@ class MainWindow(QMainWindow):
             self.worker.interrupt_terminal()
 
     def _load_settings(self) -> None:
-        self.host.setText(self.settings.value("host", "10.123.65.215"))
+        # The VPN address is stable across hotspot changes. A manual LAN
+        # address applies only to the current session.
+        self.host.setText(DEFAULT_JETSON_HOST)
         self.port.setValue(int(self.settings.value("port", 22)))
         self.username.setText(self.settings.value("username", "jetson"))
         self.ntrip_username.setText(self.settings.value("ntrip_username", ""))
@@ -859,7 +861,6 @@ class MainWindow(QMainWindow):
                 gateway_port=int(os.getenv("RCBOAT_GATEWAY_PORT", "8765")),
                 gateway_token=os.getenv("RCBOAT_GATEWAY_TOKEN", ""),
             )
-            self.settings.setValue("host", self.host.text().strip())
             self.settings.setValue("port", self.port.value())
             self.settings.setValue("username", self.username.text().strip())
             if self.remember.isChecked():
