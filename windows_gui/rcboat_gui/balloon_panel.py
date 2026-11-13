@@ -274,7 +274,7 @@ class BalloonPanel(QWidget):
             'TRACKING':'풍선 추적 중', 'ACQUIRING':'풍선 감지 확인 중',
             'TURN_BACK':'되돌아가기', 'POSITION_REACQUIRE':'추정 위치 접근',
             'PREDICTING':'위치 예측', 'SEARCHING':'예측 추적',
-            'POP_PENDING':'근접 풍선 소실 확인 중 · 정지', 'POP_ESTIMATED':'파열 추정',
+            'NEAR_APPROACH':'근접 접근 · 색상 확인', 'NEAR_WAIT':'근접 표적 대기 · 중립',
         }
         text=phase_labels.get(t.get('phase'),'풍선 감지 대기') if self.camera_enabled else '카메라 꺼짐'
         if self.waiting_start:text='카메라 준비 대기'

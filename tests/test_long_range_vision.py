@@ -317,6 +317,35 @@ class NativeCropTests(unittest.TestCase):
         self.assertGreater(detection['pink_fraction'],.12)
         self.assertFalse(detection['pink_confirmed'])
 
+    def test_close_red_support_accepts_a_filled_frame_and_clipped_target(self):
+        from rcboat_ros.balloon_detector import near_red_visual_support
+
+        config = dict(validate_config({}), target_colour='red')
+        box = [380., 50., 1540., 1030.]
+        frame = np.zeros((1080, 1920, 3), np.uint8)
+        cv2.ellipse(frame, (960, 540), (720, 760), 0, 0, 360, (15, 20, 170), -1)
+        self.assertTrue(near_red_visual_support(frame, box, config, cv2))
+        frame[:] = (50, 8, 150)  # Crimson around the other end of the HSV hue range.
+        self.assertTrue(near_red_visual_support(frame, box, config, cv2))
+
+    def test_close_red_support_rejects_missing_target_and_unrelated_red(self):
+        from rcboat_ros.balloon_detector import near_red_visual_support
+
+        config = dict(validate_config({}), target_colour='red')
+        box = [380., 50., 1540., 1030.]
+        frame = np.zeros((1080, 1920, 3), np.uint8)
+        self.assertFalse(near_red_visual_support(frame, box, config, cv2))
+        frame[500:580, 900:1020] = (10, 10, 180)
+        self.assertFalse(near_red_visual_support(frame, box, config, cv2))
+        # Red occupies most of the old box, but little of its central portion.
+        frame[:] = (10, 10, 180)
+        frame[255:825, 630:1290] = 0
+        self.assertFalse(near_red_visual_support(frame, box, config, cv2))
+        frame[:] = (10, 10, 180)
+        self.assertFalse(near_red_visual_support(frame, [910, 490, 1010, 590], config, cv2))
+        self.assertFalse(near_red_visual_support(frame, [0, 0, 720, 1080], config, cv2))
+        self.assertFalse(near_red_visual_support(frame, None, config, cv2))
+
     def test_wrong_capture_resolution_is_reported_and_close_approach_uses_full_frame(self):
         d=self.fake_detector([np.zeros((1,5,0))]);d.detect(np.zeros((480,640,3),np.uint8))
         self.assertFalse(d.last_view['requested_resolution_met'])

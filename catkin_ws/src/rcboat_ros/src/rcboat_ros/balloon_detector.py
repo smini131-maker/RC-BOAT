@@ -88,6 +88,37 @@ def large_red_shape_supported(frame,bbox,config,cv2):
             and w>=.24*view.shape[1] and h>=.24*view.shape[0])
 
 
+def near_red_visual_support(frame, previous_box, config, cv2):
+    """Check if a previously verified close red target still covers its last box."""
+    if config.get('target_colour') != 'red' or previous_box is None:
+        return False
+    height, width = frame.shape[:2]
+    left, top, right, bottom = previous_box
+    if not (0 <= left < right <= width and 0 <= top < bottom <= height):
+        return False
+    box_width, box_height = right - left, bottom - top
+    fills_view = box_height / height >= .8 or box_width * box_height / (width * height) >= .4
+    if not fills_view or abs((left + right) / width - 1) >= .45:
+        return False
+
+    region = frame[int(top):int(bottom), int(left):int(right)]
+    box_height, box_width = region.shape[:2]
+    if not region.size:
+        return False
+    scale = min(1., 96 / max(box_height, box_width))
+    if scale < 1.:
+        region = cv2.resize(region, (max(1, round(box_width * scale)),
+                                     max(1, round(box_height * scale))), interpolation=cv2.INTER_AREA)
+    mask = target_colour_mask(cv2.cvtColor(region, cv2.COLOR_BGR2HSV), config, cv2)
+    if cv2.countNonZero(mask) < .5 * mask.size:
+        return False
+    # Require overlap around the center of the last box, where an advancing
+    # target should still be visible even after its contour leaves the image.
+    rows, columns = mask.shape
+    core = mask[rows//4:rows-rows//4, columns//4:columns-columns//4]
+    return cv2.countNonZero(core) >= .65 * core.size
+
+
 class TensorRTBackend:
     """TensorRT 8 binding API (JetPack 4/5), optional and target-device generated."""
     def __init__(self,path,onnx_hash):

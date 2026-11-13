@@ -281,9 +281,6 @@ class Supervisor:
         return ''
 
     def _balloon_fault(self,now,gps_ok,delay):
-        if (self.vision_desired.get('completion_reason')=='BALLOON_POP_ESTIMATED' and
-                safe_balloon_output(self.vision,self.vision_desired,now,self.mode_since)==(SAFE_STEERING,SAFE_THROTTLE)):
-            return 'BALLOON_POP_ESTIMATED'
         if not gps_ok:
             if not delay:return 'GPS_INVALID_OR_STALE'
             if self.balloon_gps_gap_since is None:
@@ -383,7 +380,7 @@ class Supervisor:
                 if self.mode=='NAVIGATION':
                     msg.navigation_session_monotonic=self.mode_since
                 self.cmd.publish(msg)
-                self.state.publish(pack(software_version="2.4.19",mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
+                self.state.publish(pack(software_version="2.4.20",mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
                                         estop_reason=self.estop_reason,estop_time_utc=self.estop_time_utc,estop_origin=self.estop_origin,
                                         mode_since_monotonic=self.mode_since,
                                         ground_test_actuation_enabled=self.ground_test_actuation_enabled,

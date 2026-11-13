@@ -13,7 +13,7 @@ from rcboat_ros.common import pack,unpack,fresh
 from rcboat_ros.control_config import validate_cruise
 from rcboat_ros.balloon_tracking import validate_config,TargetTracker,TrackingController
 
-VERSION='2.4.19'
+VERSION='2.4.20'
 PREVIEW_STREAM_BUDGET = 144 * 1024
 PREVIEW_STREAM_HEADER = struct.Struct('!II')
 def public_config(c):
@@ -68,10 +68,24 @@ class Vision:
         self.preview_at = 0.
         self.desired_pub.publish(pack())
 
-    def track_frame(self, detections, shape, stamp, now, config):
+    def near_support(self, frame, detections, stamp, now, config):
+        if (self.tracking_session is None or not self.live_source or self.detector is None
+                or stamp < self.tracking_reset_at or not fresh(stamp, config['max_frame_age_s'], now)
+                or any(item.get('pink_confirmed') for item in detections)):
+            return False
+        box = self.tracker.near_reference_box(now, config)
+        if box is None:
+            return False
+        from rcboat_ros.balloon_detector import near_red_visual_support
+        return near_red_visual_support(frame, box, self.detector.config, self.detector.cv2)
+
+    def track_frame(self, detections, shape, stamp, now, config, near_visual_support=False):
         if self.tracking_session is None or stamp < self.tracking_reset_at:
             return {}, {}
-        target = self.tracker.update(detections, shape[1], shape[0], now, config, self.gps)
+        target = {}
+        if fresh(stamp, config['max_frame_age_s'], now):
+            target = self.tracker.update(detections, shape[1], shape[0], now, config, self.gps,
+                                         near_visual_support=near_visual_support)
         cruise = validate_cruise(rospy.get_param('/rcboat/cruise_pwm', 6650))
         desired = self.controller.command(target, stamp, now, config, cruise, self.tracking_session)
         return target, desired
@@ -286,7 +300,8 @@ class Vision:
                 with self.lock:
                     if not self.enabled or revision!=self.revision or stamp<self.tracking_reset_at:continue
                     track_start=time.monotonic()
-                    target,desired=self.track_frame(detections,frame.shape,stamp,end,c)
+                    near_visual_support=self.near_support(frame,detections,stamp,track_start,c)
+                    target,desired=self.track_frame(detections,frame.shape,stamp,time.monotonic(),c,near_visual_support)
                     if self.detector is None:desired['valid']=False
                     self.desired=desired
                     if self.detector is not None:self.processed_frames+=1
@@ -300,7 +315,9 @@ class Vision:
                             track_and_publish=round((time.monotonic()-track_start)*1000,2))
                     self.detail=dict(reason=target.get('phase','IDLE'),target=target,detections=detections,inference_ms=round((end-start)*1000,1),processed_frame_monotonic=stamp,
                         processed_fps=round((len(ends)-1)/(ends[-1]-ends[0]),2) if self.detector is not None and len(ends)>1 and ends[-1]>ends[0] else None,backend=self.detector.backend_name if self.detector else 'unavailable',
-                        prediction_source='bearing_triangulation' if target.get('world_estimate') else 'image_motion',
+                        prediction_source=('near_red_visual_support' if target.get('near_visual_support') else
+                                           'bearing_triangulation' if target.get('world_estimate') else
+                                           'image_motion' if target.get('predicted') and not target.get('motion_hold') else None),
                         detector_view=detector_view,
                         range_validation='not_field_validated',design_goal_distance_m=100)
                     if self.detector is not None:self.error=''

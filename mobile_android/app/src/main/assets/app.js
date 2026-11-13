@@ -1,5 +1,5 @@
 'use strict';
-const $=id=>document.getElementById(id), VERSION='2.4.19';
+const $=id=>document.getElementById(id), VERSION='2.4.20';
 const state={last:0,online:false,control:false,ssh:'disconnected',version:'',tele:{},ntripProfile:{},targetType:'multipath',routes:[],groups:[],targetDirty:false,pwmDirty:false,pwmPending:null,trackingStart:null,page:'sail',editor:null};
 let sequence=0,toastTimer,routeSignature='',testSignature='',configSynced=false,frameAt=0,map,routeLayer,traceLine,boatMarker,fitBounds,lastCoords='',mapFitted=false,mapFocusSignature='';
 const pending=new Map(),trace=[];
@@ -174,7 +174,7 @@ function renderBalloon(safety,vision,session){
  const delay=active&&safety.reason==='BALLOON_CAMERA_DELAY';
  const phaseLabels={TRACKING:'실시간 추적',ACQUIRING:'감지 확인',PREDICTING:'위치 예측',
   TURN_BACK:'되돌아가기',POSITION_REACQUIRE:'추정 위치 접근',SEARCHING:'예측 추적',
-  POP_PENDING:'근접 풍선 소실 확인',POP_ESTIMATED:'파열 추정'};
+  NEAR_APPROACH:'근접 접근 · 색상 확인',NEAR_WAIT:'근접 표적 대기 · 중립'};
  const phase=delay?'카메라 응답 대기':phaseLabels[target.phase]||'감지 대기';
  set('visionState',delay?'카메라 응답 지연':vision.camera_online?'실시간 영상':
   vision.error?'카메라 오류':vision.enabled?'영상 대기':'카메라 꺼짐',delay?'warn':vision.camera_online?'good':vision.error?'bad':'');
@@ -191,7 +191,6 @@ function renderBalloon(safety,vision,session){
  let label=vision.enabled?phase:'카메라 꺼짐';
  if(state.trackingStart)label='카메라 준비 대기';
  if(delay)label='카메라 응답 대기 · 출력 정지';
- else if(active&&target.phase==='POP_PENDING')label='근접 풍선 소실 확인 중 · 정지';
  if(safety.estop)label='비상정지 잠금 · 해제 후 추적을 시작하세요';
  set('trackingStatus',label,safety.estop?'bad':phase==='실시간 추적'?'good':'warn');
 }

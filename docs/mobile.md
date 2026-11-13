@@ -1,6 +1,6 @@
-# Android 관제 앱 v2.4.19
+# Android 관제 앱 v2.4.20
 
-비상정지 중에는 모든 탭 상단과 하단 제어부가 빨간색으로 바뀌며 ‘ESC·서보 출력 잠금’, 요청 사유·한국 시각을 표시합니다. 추적 시작 버튼도 잠금됩니다. 연결이 끊기면 마지막 확인 상태로 구분합니다. 해제 버튼은 확인 후 잠금만 풀고 자동 주행을 재개하지 않습니다. 파열 추정·목표 도착·실제 연결 단절은 수동 전환 사유로 표시합니다.
+비상정지 중에는 모든 탭 상단과 하단 제어부가 빨간색으로 바뀌며 ‘ESC·서보 출력 잠금’, 요청 사유·한국 시각을 표시합니다. 추적 시작 버튼도 잠금됩니다. 연결이 끊기면 마지막 확인 상태로 구분합니다. 해제 버튼은 확인 후 잠금만 풀고 자동 주행을 재개하지 않습니다. 목표 도착과 실제 연결 단절은 수동 전환 사유로 표시합니다.
 
 v2.4.2는 Jetson의 정상 입력 timeout 오판과 순간 중립 출력을 수정한 버전입니다. PC·모바일·Jetson의 버전을 맞춥니다. 모바일 화면과 조작 방식은 유지하며, 실제 단절 시 안전 수동 전환은 유지합니다.
 
@@ -18,8 +18,8 @@ Android 10 이상 휴대폰과 태블릿에 같은 APK를 설치합니다. 휴�
 
 ## 설치와 연결
 
-1. `dist/RCBoatMobile_v2.4.19.apk`를 휴대폰 또는 태블릿에 설치합니다. 연결된 휴대폰에는 USB 디버깅으로 설치할 수 있습니다.
-2. Jetson에 v2.4.19를 배포하고 ROS를 실행합니다. 기존 항로와 Jetson의 NTRIP 로컬 설정을 사용합니다.
+1. `dist/RCBoatMobile_v2.4.20.apk`를 휴대폰 또는 태블릿에 설치합니다. 연결된 휴대폰에는 USB 디버깅으로 설치할 수 있습니다.
+2. Jetson에 v2.4.20을 배포하고 ROS를 실행합니다. 기존 항로와 Jetson의 NTRIP 로컬 설정을 사용합니다.
 3. 휴대폰을 Jetson에 접근할 수 있는 같은 Wi-Fi/네트워크에 연결합니다. 앱 상단 **연결 설정**에서 Jetson IP, gateway 8765, SSH 22, 사용자 `jetson`을 입력합니다. SSH 비밀번호를 입력하면 제어 연결, 비워두면 상태 조회 연결입니다.
 4. 처음 연결할 때 표시되는 SSH 호스트 키를 확인합니다. 변경된 호스트 키는 거부합니다. SSH 비밀번호·gateway 토큰은 메모리에서만 사용하고 저장하지 않습니다. IP·포트·사용자명만 휴대폰에 저장합니다.
 
@@ -40,7 +40,7 @@ PC와 모바일 중 한 관제 앱만 제어 연결합니다. 기존 backend는 
 JDK 17 이상과 Android SDK 36/build-tools 35.0.0이 필요합니다. SDK 경로가 다르면 `ANDROID_HOME`을 지정합니다. Gradle 8.13은 wrapper로 받습니다.
 
 ```powershell
-Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_Project\RCBoatControl_v2.4.19"
+Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_Project\RCBoatControl_v2.4.20"
 $env:ANDROID_HOME = "$env:USERPROFILE\AndroidSdk"
 & .\mobile_android\build.ps1 -Install
 ```

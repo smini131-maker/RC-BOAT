@@ -152,6 +152,11 @@ active=dict(ready,mode='BALLOON',mode_since_monotonic=101,balloon_armed=True)
 p.update_state(active,'127.0.0.1');assert '풍선 감지 대기' in p.summary.text()
 active['vision']=dict(ready['vision'],tracking_session=101)
 p.update_state(active,'127.0.0.1');assert '되돌아가기' in p.summary.text()
+for phase, label in [('NEAR_APPROACH', '근접 접근 · 색상 확인'), ('NEAR_WAIT', '근접 표적 대기 · 중립')]:
+    active['vision']['target']={'phase':phase}
+    p.update_state(active,'127.0.0.1')
+    assert p.summary.text()==label
+    assert not p.start_button.isEnabled() and p.stop_button.isEnabled()
 p.update_state(dict(active,failsafe_reason='BALLOON_CAMERA_DELAY'),'127.0.0.1')
 assert '카메라 응답 대기' in p.summary.text()
 p.update_state(dict(ready,mode_since_monotonic=102),'127.0.0.1')
@@ -288,7 +293,7 @@ with ThreadingHTTPServer(('127.0.0.1',0),PreviewHandler) as server:
         server.shutdown();thread.join(timeout=2)
 
 w.rc_graph.append(None,None);assert w.rc_graph.series[0][-1] is None
-locked=SSHWorker._normalize(dict(success=True,version='2.4.19',gateway_online=True,master_online=True,telemetry={
+locked=SSHWorker._normalize(dict(success=True,version='2.4.20',gateway_online=True,master_online=True,telemetry={
     'safety':dict(mode='MANUAL',estop=True,actuator_locked=True,estop_reason='MAINTENANCE_CHECK',estop_time_utc='2026-11-10T10:00:00Z'),
     'vision':dict(enabled=True,model_ready=True,camera_online=True,target={'acquired':True,'predicted':False})}))
 w.update_telemetry(locked);app.processEvents()
@@ -300,7 +305,7 @@ assert '재시도' in w.cards['backend'].value_label.text()
 assert w._last_estop and '마지막 확인' in w.estop_banner_text.text()
 w.update_telemetry(locked)
 assert w.cards['ros_master'].value_label.text()=='online'
-master_down=SSHWorker._normalize(dict(success=True,version='2.4.19',gateway_online=True,master_online=False))
+master_down=SSHWorker._normalize(dict(success=True,version='2.4.20',gateway_online=True,master_online=False))
 w.update_telemetry(master_down)
 assert w.cards['ros_master'].value_label.text()=='offline'
 w.update_telemetry(locked)

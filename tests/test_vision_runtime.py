@@ -6,6 +6,13 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'catkin_ws/src/rcboat_
 from rcboat_ros.balloon_tracking import validate_config
 import test_ground_continuity_v2111 as harness
 from test_balloon_tracking import detection
+from test_balloon_completion_v243 import near_box
+
+try:
+    import cv2
+    import numpy as np
+except ImportError:
+    cv2 = None
 
 class VisionNodeTests(unittest.TestCase):
     def setUp(self):
@@ -51,6 +58,41 @@ class VisionNodeTests(unittest.TestCase):
         self.assertEqual(frame(vision.tracking_reset_at + .1, [detection()]), ({}, {}))
         mode('BALLOON', 105)
         self.assertEqual(frame(vision.tracking_reset_at + .1, [detection()])[0]['phase'], 'ACQUIRING')
+
+    @unittest.skipUnless(cv2 is not None, 'OpenCV and NumPy required')
+    def test_near_colour_support_requires_live_fresh_frames_in_same_session(self):
+        vision = self.v
+        vision.live_source = True
+        vision.detector = types.SimpleNamespace(cv2=cv2, config=dict(vision.config, target_colour='red'))
+        vision.tracking_session = 99.
+        vision.tracking_reset_at = 100.
+        box = near_box()
+        frame = np.full((1080, 1920, 3), (15, 20, 170), dtype=np.uint8)
+        for stamp in (100., 100.1, 100.2):
+            vision.track_frame([box], frame.shape, stamp, stamp, vision.config)
+        self.assertFalse(vision.near_support(frame, [], 99.9, 100.3, vision.config))
+        self.assertFalse(vision.near_support(frame, [box], 100.3, 100.3, vision.config))
+        self.assertFalse(vision.near_support(frame, [], 100.3, 102., vision.config))
+        vision.live_source = False
+        self.assertFalse(vision.near_support(frame, [], 100.3, 100.3, vision.config))
+        vision.live_source = True
+        support = vision.near_support(frame, [], 100.3, 100.3, vision.config)
+        self.assertTrue(support)
+        target, desired = vision.track_frame([], frame.shape, 100.3, 100.3, vision.config,
+                                             near_visual_support=support)
+        self.assertEqual(target['phase'], 'NEAR_APPROACH')
+        self.assertEqual(desired['desired_throttle_pwm'], 6650)
+        frame[:] = 0
+        support = vision.near_support(frame, [], 100.4, 100.4, vision.config)
+        self.assertFalse(support)
+        target, desired = vision.track_frame([], frame.shape, 100.4, 100.4, vision.config,
+                                             near_visual_support=support)
+        self.assertEqual(target['phase'], 'NEAR_WAIT')
+        self.assertEqual(desired['desired_throttle_pwm'], 6450)
+        vision.on_safety(types.SimpleNamespace(data=json.dumps(dict(mode='MANUAL'))))
+        frame[:] = (15, 20, 170)
+        self.assertFalse(vision.near_support(frame, [], 100.5, 100.5, vision.config))
+
     def test_disabled_model_missing_and_camera_stale_cannot_drive(self):
         self.v.desired=dict(valid=True,monotonic=self.now,desired_steering_pwm=4900,desired_throttle_pwm=7397)
         self.v.publish(None)

@@ -23,7 +23,7 @@ from rcboat_ros.corrections import refresh_transport_status,refresh_receiver_sta
 from rcboat_ros.gps_mix import refresh_dop_status
 
 
-VERSION = "2.4.19"
+VERSION = "2.4.20"
 SOCKET = os.path.expanduser("~/rcboat_ros_data/gui_bridge.sock")
 TOPICS = {
     "gps": "/rcboat/gps/status", "ntrip": "/rcboat/ntrip/status", "route": "/rcboat/route/state",

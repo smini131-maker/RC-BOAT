@@ -102,8 +102,14 @@ class TargetTracker:
     def __init__(self):self.reset()
     def reset(self):
         self.target=None;self.streak=0;self.observed_at=None;self.velocity=0.;self.scale_velocity=0.;self.side=1
-        self.estimator=BearingEstimator();self.acquired=False;self.was_close=False;self.near_streak=0;self.absent_frames=0
-    def update(self,detections,width,height,now,config,gps=None):
+        self.estimator=BearingEstimator();self.acquired=False;self.was_close=False;self.near_streak=0;self.near_supported_at=None
+    def near_reference_box(self, now, config):
+        if self.acquired and self.near_streak>=2 and self.near_supported_at is not None:
+            if fresh(self.near_supported_at, config['max_frame_age_s'], now):
+                return self.target['bbox']
+        return None
+
+    def update(self,detections,width,height,now,config,gps=None,near_visual_support=False):
         candidates=[]
         for item in detections:
             try:
@@ -137,22 +143,23 @@ class TargetTracker:
             else:self.velocity=0;self.scale_velocity=0
             if age>1.5:self.streak=0
             self.target=target;self.observed_at=now;self.streak+=1;self.acquired=self.acquired or self.streak>=config['acquire_frames']
-            self.absent_frames=0
             self.side=1 if target['center_x_normalized']>=.03 else -1 if target['center_x_normalized']<=-.03 else self.side
             self.was_close=self.was_close or target['area_ratio']>.12 or target['box_height_ratio']>.55
             nearly_touching=(target['box_height_ratio']>=.80 or target['area_ratio']>=.40) and abs(target['center_x_normalized'])<.45
-            self.near_streak=self.near_streak+1 if nearly_touching else 0
+            self.near_streak=self.near_streak+1 if nearly_touching and age<=config['max_frame_age_s'] else int(nearly_touching)
+            self.near_supported_at=now if self.near_streak>=2 else None
             self.estimator.observe(target,gps or {},now,config)
             return dict(target,phase='TRACKING' if self.acquired else 'ACQUIRING',acquired=self.acquired,
                 predicted=False,lost_age_s=0.,velocity_x=self.velocity,world_estimate=self.estimator.relative(gps or {},now))
         if self.target is None or not self.acquired:return dict(phase='NO_TARGET',acquired=False,predicted=False,lost_age_s=None)
-        self.absent_frames+=1
         if self.near_streak>=2:
-            completed=age>=.35 and self.absent_frames>=3
-            return dict(self.target,phase='POP_ESTIMATED' if completed else 'POP_PENDING',acquired=True,
-                predicted=True,lost_age_s=age,motion_hold=True,
-                completion_reason='BALLOON_POP_ESTIMATED' if completed else None,
-                completion_evidence='centered_near_target_then_absent',world_estimate=self.estimator.relative(gps or {},now))
+            supported=near_visual_support and self.near_reference_box(now,config) is not None
+            if supported:self.near_supported_at=now
+            return dict(self.target,phase='NEAR_APPROACH' if supported else 'NEAR_WAIT',
+                acquired=True,predicted=True,lost_age_s=age,motion_hold=not supported,
+                near_visual_support=bool(supported),world_estimate=None)
+        self.near_streak=0
+        self.near_supported_at=None
         if age>=config['search_timeout_s']:return dict(self.target,phase='LOST_TIMEOUT',acquired=False,predicted=True,lost_age_s=age)
         target=dict(self.target);world=self.estimator.relative(gps or {},now)
         predicted=clamp(target['center_x_normalized']+self.velocity*min(age,config['predict_s']),-1.5,1.5)
@@ -175,7 +182,7 @@ class TrackingController:
             target_pwm=cruise,tracking_session=session,predicted=bool(target.get('predicted')))
         if fresh(frame_time,config['max_frame_age_s'],now) and target.get('motion_hold'):
             self.ramp.reset()
-            out.update(valid=True,completion_reason=target.get('completion_reason'),completion_evidence=target.get('completion_evidence'))
+            out['valid']=True
             return out
         if not fresh(frame_time,config['max_frame_age_s'],now) or not target.get('acquired'):
             self.ramp.reset();return out
