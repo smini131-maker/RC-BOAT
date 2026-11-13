@@ -41,4 +41,4 @@ sudo systemctl is-active --quiet rcboat_ros.service || {
   exit 4
 }
 python3 deployment/jetson/verify_release.py --timeout 45
-echo 'RCBoat ROS Noetic v2.4.18 source AND running gateway verified.'
+echo 'RCBoat ROS Noetic v2.4.19 source AND running gateway verified.'

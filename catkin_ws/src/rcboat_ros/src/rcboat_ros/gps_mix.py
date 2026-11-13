@@ -4,11 +4,54 @@ import math
 import struct
 import time
 
+from .common import fresh, gps_is_healthy
+
+DOP_MAX_AGE_S = 2.0
+# GGA describes the position solution; in multi-GNSS configurations there
+# may be several GSA records per fix. Keep GSA as the HDOP fallback.
+DOP_SOURCES = {'hdop': ('gga', 'gsa'), 'pdop': ('pvt', 'gsa'), 'vdop': ('gsa',)}
+
+
+def dop_value(raw):
+    if isinstance(raw, bool):
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) and value > 0 else None
+
+
+def refresh_dop_status(gps, now):
+    """Hide cached DOP that no longer describes a current receiver fix."""
+    result = dict(gps)
+    statuses = gps.get('dop_status')
+    if not isinstance(statuses, dict):
+        return result
+    statuses = dict(statuses)
+    stamps = gps.get('dop_monotonic') or {}
+    fix_current = gps_is_healthy(gps, now, DOP_MAX_AGE_S)
+    for name in DOP_SOURCES:
+        if statuses.get(name) != 'valid':
+            continue
+        stamp = stamps.get(name) if isinstance(stamps, dict) else None
+        if dop_value(result.get(name)) is None:
+            statuses[name] = 'invalid'
+        elif type(stamp) not in (int, float) or not fresh(stamp, DOP_MAX_AGE_S, now):
+            statuses[name] = 'stale'
+        elif not fix_current:
+            statuses[name] = 'stale' if gps.get('fix') or gps.get('data_validity') == 'stale' else 'invalid'
+        if statuses[name] != 'valid':
+            result[name] = None
+    result['dop_status'] = statuses
+    return result
+
+
 class MixedGpsParser:
     def __init__(self):
         self.buffer=bytearray()
         self.state={'fix':False,'latitude':None,'longitude':None,'heading_deg':None,'speed_mps':0,
-                    'hdop':99.99,'pdop':None,'vdop':None,'hacc_m':None,'rtk_state':'NO_RTK',
+                    'hacc_m':None,'rtk_state':'NO_RTK',
                     'satellites':0,'cno_dbhz':None,'fix_type':0,'last_valid_monotonic':0,
                     'last_update_monotonic':0,'utc_time':None,'utc_status':'no_data',
                     'receiver_correction_age_s':None,'receiver_correction_age_status':'unsupported',
@@ -16,6 +59,35 @@ class MixedGpsParser:
                     'heading_source':'unsupported','ubx_count':0,'nmea_count':0,'error_count':0}
         self.snrs=[]
         self.last_pvt=0.0
+        self.dop_samples = {source: {} for source in ('gsa', 'gga', 'pvt')}
+
+    def _record_dop(self, source, now, **raw_values):
+        for name, raw in raw_values.items():
+            value = dop_value(raw)
+            status = 'valid' if value is not None else 'no_data' if raw in (None, '') else 'invalid'
+            self.dop_samples[source][name] = value, status, now
+
+    def dop_snapshot(self, now):
+        values = {}
+        statuses = {}
+        stamps = {}
+        for name, sources in DOP_SOURCES.items():
+            selected = (None, 'no_data', None)
+            for source in sources:
+                sample = self.dop_samples[source].get(name)
+                if sample is None:
+                    continue
+                _, status, stamp = sample
+                if status == 'valid':
+                    if fresh(stamp, DOP_MAX_AGE_S, now):
+                        selected = sample
+                        break
+                    status = 'stale'
+                if selected[2] is None or stamp >= selected[2]:
+                    selected = (None, status, stamp)
+            values[name], statuses[name], stamps[name] = selected
+        return dict(values, dop_status=statuses, dop_monotonic=stamps)
+
     @staticmethod
     def nmea_coord(raw, hemi):
         n=2 if hemi in ('N','S') else 3
@@ -61,7 +133,8 @@ class MixedGpsParser:
         for c in payload:v^=ord(c)
         if v!=int(checksum[:2],16): raise ValueError('NMEA checksum')
         cells=payload.split(','); kind=cells[0][-3:]
-        a=self.state; a['nmea_count']+=1; a['last_update_monotonic']=time.monotonic()
+        now=time.monotonic()
+        a=self.state; a['nmea_count']+=1; a['last_update_monotonic']=now
         if kind=='GGA' and len(cells)>9:
             # NMEA GGA field 13 is receiver-reported age of differential data.
             # Blank means unavailable; never replace it with NTRIP receive age.
@@ -80,7 +153,7 @@ class MixedGpsParser:
             use_nmea_solution=(time.monotonic()-self.last_pvt)>1.5
             if use_nmea_solution:a['fix']=fix>0
             a['satellites']=int(cells[7] or 0)
-            if cells[8]: a['hdop']=float(cells[8])
+            self._record_dop('gga', now, hdop=cells[8] if 1<=fix<=5 else None)
             if use_nmea_solution and fix and cells[2] and cells[4]:
                 a['latitude']=self.nmea_coord(cells[2],cells[3]); a['longitude']=self.nmea_coord(cells[4],cells[5]); self._valid()
             q={0:'NO_RTK',1:'NO_RTK',2:'DGPS',4:'RTK_FIXED',5:'RTK_FLOAT'}
@@ -102,10 +175,10 @@ class MixedGpsParser:
                 if cells[8]:a['heading_deg']=float(cells[8])%360
                 if cells[8]:a['heading_source']='GNSS_COG_NMEA'
                 self._valid()
-        elif kind=='GSA' and len(cells)>=17:
-            if cells[15]:a['pdop']=float(cells[15])
-            if cells[16]:a['hdop']=float(cells[16])
-            if len(cells)>17 and cells[17]:a['vdop']=float(cells[17])
+        elif kind=='GSA' and len(cells)>=18 and cells[2] in ('2','3'):
+            # A no-fix GSA for one constellation can arrive alongside a valid
+            # combined solution. It cannot refresh or replace real DOP samples.
+            self._record_dop('gsa', now, pdop=cells[15], hdop=cells[16], vdop=cells[17])
         elif kind=='GSV' and len(cells)>7:
             for j in range(7,len(cells),4):
                 if cells[j].isdigit():self.snrs.append(int(cells[j]))
@@ -124,8 +197,9 @@ class MixedGpsParser:
         speed=struct.unpack_from('<i',p,60)[0]*0.001
         head=struct.unpack_from('<i',p,64)[0]*1e-5
         pdop=struct.unpack_from('<H',p,76)[0]*0.01
+        self._record_dop('pvt', self.last_pvt, pdop=pdop if 2<=fix<=4 and flags&1 else None)
         carr=(flags>>6)&3
-        a.update(fix_type=fix,satellites=sats,hacc_m=hacc,pdop=pdop,speed_mps=max(0,speed),last_update_monotonic=time.monotonic())
+        a.update(fix_type=fix,satellites=sats,hacc_m=hacc,speed_mps=max(0,speed),last_update_monotonic=time.monotonic())
         try:
             year=struct.unpack_from('<H',p,4)[0];month=p[6];day=p[7];hour=p[8];minute=p[9];second=p[10]
             if (p[11]&3)==3 and 1980<=year<=2200:

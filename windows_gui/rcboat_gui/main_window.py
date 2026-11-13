@@ -1897,6 +1897,14 @@ class MainWindow(QMainWindow):
             return f"{value:.{digits}f}{suffix}"
         return f"{value}{suffix}"
 
+    @staticmethod
+    def _format_dop(gps: dict, field: str) -> str:
+        value = gps.get(field)
+        if value is not None:
+            return MainWindow._fmt(value, 2)
+        status = (gps.get("dop_status") or {}).get(field)
+        return {"invalid": "무효", "stale": "갱신 지연"}.get(status, "미수신")
+
     def _update_ssh_card(self, backend):
         self._ssh_online = bool(backend.get("ssh_connected"))
         if not self._ssh_online:
@@ -2043,7 +2051,7 @@ class MainWindow(QMainWindow):
         self.value_labels["lat"].set_value(self._fmt(gps.get("lat")))
         self.value_labels["lon"].set_value(self._fmt(gps.get("lon")))
         self.value_labels["altitude"].set_value(self._fmt(gps.get("altitude_m"), 2, " m"))
-        self.value_labels["hdop"].set_value(self._fmt(gps.get("hdop"), 2))
+        self.value_labels["hdop"].set_value(self._format_dop(gps, "hdop"))
         self.value_labels["last_fix_age"].set_value(self._fmt(gps.get("last_fix_age_s"), 1, " s"))
         self.value_labels["satellites"].set_value(self._fmt(gps.get("satellites"), 0))
         self.value_labels["speed"].set_value(self._fmt(gps.get("speed_mps"), 2, " m/s"))
@@ -2164,7 +2172,7 @@ class MainWindow(QMainWindow):
             else "BAD"
         )
         self.gps_metric_cards["hdop"].set_value(
-            self._fmt(hdop, 2), hdop_level
+            self._format_dop(gps, "hdop"), hdop_level
         )
 
         pdop = gps.get("pdop")
@@ -2175,7 +2183,7 @@ class MainWindow(QMainWindow):
             else "BAD"
         )
         self.gps_metric_cards["pdop"].set_value(
-            self._fmt(pdop, 2), pdop_level
+            self._format_dop(gps, "pdop"), pdop_level
         )
 
         vdop = gps.get("vdop")
@@ -2185,7 +2193,7 @@ class MainWindow(QMainWindow):
             else "WARNING"
         )
         self.gps_metric_cards["vdop"].set_value(
-            self._fmt(vdop, 2), vdop_level
+            self._format_dop(gps, "vdop"), vdop_level
         )
 
         cno = gps.get("cno_avg_dbhz")

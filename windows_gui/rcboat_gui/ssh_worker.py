@@ -347,7 +347,7 @@ class SSHWorker(QThread):
         }
         logger_state = str(ground.get("state") or ("recording" if ground.get("active") else "idle"))
         return {
-            "type": "telemetry", "software_version": response.get("version", "2.4.18"),
+            "type": "telemetry", "software_version": response.get("version", "2.4.19"),
             "backend": {"name": str(response.get("backend") or "ROS Noetic"),
                         "ready": bool(response.get("gateway_online", True)), "node_count": len(nodes),
                         "master_online": response.get("master_online"),
@@ -388,6 +388,7 @@ class SSHWorker(QThread):
                     "lat": gps.get("latitude"), "lon": gps.get("longitude"),
                     "altitude_m": gps.get("altitude_m"), "satellites": gps.get("satellites"),
                     "hdop": gps.get("hdop"), "pdop": gps.get("pdop"), "vdop": gps.get("vdop"),
+                    "dop_status": gps.get("dop_status") or {},
                     "cno_avg_dbhz": gps.get("cno_dbhz"), "hacc_m": gps.get("hacc_m"),
                     "speed_mps": gps.get("speed_mps"), "course_deg": gps.get("heading_deg"),
                     "utc_time": gps.get("measurement_time_utc") or gps.get("utc_time"),

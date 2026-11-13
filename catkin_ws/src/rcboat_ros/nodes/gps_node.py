@@ -5,7 +5,7 @@ import time
 import datetime as dt
 import rospy
 from std_msgs.msg import String, UInt8MultiArray
-from rcboat_ros.gps_mix import MixedGpsParser
+from rcboat_ros.gps_mix import MixedGpsParser,refresh_dop_status
 from rcboat_ros.common import pack,gps_is_healthy,cno_quality
 from rcboat_ros.geo import latlon_to_utm
 from rcboat_ros.corrections import refresh_receiver_status
@@ -32,7 +32,7 @@ def main():
                 parser.feed(data)
             except Exception as exc:
                 rospy.logerr('GPS read fault %s',exc)
-                pub.publish(pack(software_version="2.4.18",fix=False,healthy=False,data_validity='invalid',
+                pub.publish(pack(software_version="2.4.19",fix=False,healthy=False,data_validity='invalid',
                                  transport_connected=False,error=str(exc)))
                 raise  # roslaunch respawns GPS only; manual RC control stays alive.
             now=time.monotonic()
@@ -43,7 +43,8 @@ def main():
                 last_poll=now
             if now-last_publish>=.25:
                 result=refresh_receiver_status(parser.state,now)
-                result["software_version"]="2.4.18"
+                result.update(parser.dop_snapshot(now))
+                result["software_version"]="2.4.19"
                 result['transport_connected']=True
                 update=float(result.get('last_update_monotonic') or 0)
                 result['gps_data_age_s']=round(now-update,3) if update and now>=update else None
@@ -68,6 +69,7 @@ def main():
                 # HDOP, hAcc, C/N0, speed and course quality are diagnostic only.
                 if not result['healthy']:result['fix']=False
                 result['data_validity']='valid' if result['healthy'] else ('stale' if receiver_fix else 'invalid')
+                result=refresh_dop_status(result,now)
                 result['utm_easting_m']=None;result['utm_northing_m']=None;result['utm_zone']=None
                 result['utm_status']='no_data'
                 if result.get('latitude') is not None and result.get('longitude') is not None:

@@ -10,7 +10,8 @@ import urllib.parse
 import rospy
 from std_msgs.msg import String,UInt8MultiArray
 from rcboat_ros.corrections import Rtcm3Stream,HttpChunkedStream,reception_status
-from rcboat_ros.common import pack
+from rcboat_ros.common import gps_is_healthy,pack
+from rcboat_ros.gps_mix import dop_value
 from rcboat_ros.srv import Execute,ExecuteResponse
 import json
 import pathlib
@@ -102,12 +103,16 @@ class Ntrip:
         self.gps=unpack(msg)
     def _nmea_gga(self):
         a=self.gps
-        if not a.get('healthy'):return ''
+        if not a.get('healthy') or not gps_is_healthy(a):return ''
         lat=float(a['latitude']);lon=float(a['longitude'])
         def ddmm(value):
             v=abs(value);d=int(v);return d*100+(v-d)*60
         utc=time.gmtime()
-        core='GPGGA,%02d%02d%02d,%.6f,%s,%.6f,%s,1,%02d,%.1f,0,M,0,M,,' % (utc.tm_hour,utc.tm_min,utc.tm_sec,ddmm(lat),'N' if lat>=0 else 'S',ddmm(lon),'E' if lon>=0 else 'W',int(a.get('satellites',0)),float(a.get('hdop',1)))
+        hdop = dop_value(a.get('hdop'))
+        hdop_field = '' if hdop is None else f'{hdop:.2f}'
+        core='GPGGA,%02d%02d%02d,%.6f,%s,%.6f,%s,1,%02d,%s,0,M,0,M,,' % (
+            utc.tm_hour,utc.tm_min,utc.tm_sec,ddmm(lat),'N' if lat>=0 else 'S',
+            ddmm(lon),'E' if lon>=0 else 'W',int(a.get('satellites',0)),hdop_field)
         xor=0
         for c in core:xor^=ord(c)
         return '$%s*%02X\r\n'%(core,xor)
@@ -115,7 +120,7 @@ class Ntrip:
         with self.status_lock:
             now=time.monotonic()
             age,validity=reception_status(self.last_correction,now)
-            self.status.publish(pack(software_version="2.4.18",enabled=self.enabled,connected=self.connected,
+            self.status.publish(pack(software_version="2.4.19",enabled=self.enabled,connected=self.connected,
                 host=self.host,port=self.port,mountpoint=self.mount,username=self.user,tls=self.tls,
                 bytes_received=self.received,rtcm_bytes_received=self.rtcm_bytes,
                 rtcm_frames_received=self.rtcm_frames,rtcm_crc_errors=self.rtcm_crc_errors,
@@ -139,7 +144,7 @@ class Ntrip:
                 if self.tls:sock=ssl.create_default_context().wrap_socket(sock,server_hostname=self.host)
                 sock.settimeout(7)
                 token=base64.b64encode((self.user+':'+self.password).encode()).decode()
-                req=('GET /%s HTTP/1.1\r\nHost: %s\r\nUser-Agent: NTRIP RCBoatROS/2.4.18\r\nNtrip-Version: Ntrip/2.0\r\nAuthorization: Basic %s\r\nConnection: close\r\n\r\n'%(self.mount,self.host,token)).encode()
+                req=('GET /%s HTTP/1.1\r\nHost: %s\r\nUser-Agent: NTRIP RCBoatROS/2.4.19\r\nNtrip-Version: Ntrip/2.0\r\nAuthorization: Basic %s\r\nConnection: close\r\n\r\n'%(self.mount,self.host,token)).encode()
                 sock.sendall(req)
                 header=b''
                 while b'\r\n\r\n' not in header and len(header)<8192:

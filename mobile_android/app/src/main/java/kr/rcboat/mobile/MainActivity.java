@@ -111,17 +111,17 @@ public class MainActivity extends Activity {
     private void notice(String text){emit("message",data("text",text));}
     private void pollStatus(){
         GatewayClient g=gateway;int gen=generation;
-        if(!connected || !foreground || g==null)return;
+        if(!connected || !foreground || g==null || g!=gateway)return;
         try{
             long start=SystemClock.elapsedRealtime();
-            JSONObject status=g.request("status",null,1500,6*1024*1024);
-            if(gen!=generation)return;
+            JSONObject status=g.requestStatus(1500,6*1024*1024);
+            if(gen!=generation || g!=gateway || !connected || !foreground)return;
             latest=status;backendVersion=status.optString("version");lastStatus=SystemClock.elapsedRealtime();rosHealth.success(lastStatus,lastStatus-start);
             JSONObject tele=status.optJSONObject("telemetry");JSONObject safe=tele==null?null:tele.optJSONObject("safety");mode=safe==null?"":safe.optString("mode");
             JSONObject vision=tele==null?null:tele.optJSONObject("vision");if(vision!=null)previewPort=vision.optInt("preview_port",8766);
             JSONObject ntrip=tele==null?null:tele.optJSONObject("ntrip");if(ntrip!=null&&!ntrip.optString("host").isEmpty()&&!ntrip.optString("mountpoint").isEmpty())cacheProfile(ntrip);
             status.put("mobile",healthSnapshot());emit("status",status);
-        }catch(Exception e){if(gen==generation){rosHealth.failure(SystemClock.elapsedRealtime(),e instanceof ConnectException||e instanceof NoRouteToHostException);emit("link_health",healthSnapshot());}}
+        }catch(Exception e){if(gen==generation && g==gateway && connected && foreground){rosHealth.failure(SystemClock.elapsedRealtime(),e instanceof ConnectException||e instanceof NoRouteToHostException);emit("link_health",healthSnapshot());}}
     }
     private JSONObject healthSnapshot(){
         long now=SystemClock.elapsedRealtime();JSONObject value=new JSONObject();

@@ -1,6 +1,7 @@
 import importlib.util
 import json
 from pathlib import Path
+import struct
 import sys
 import tempfile
 import types
@@ -10,7 +11,8 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'catkin_ws/src/rcboat_ros/src'))
 from rcboat_ros.corrections import crc24q,Rtcm3Stream,HttpChunkedStream,reception_status,refresh_transport_status,refresh_receiver_status
-from rcboat_ros.gps_mix import MixedGpsParser
+from rcboat_ros.common import pack
+from rcboat_ros.gps_mix import MixedGpsParser,refresh_dop_status
 
 
 def frame(payload=b'\x43\x20\x01\xd3\x00\x04'):
@@ -18,11 +20,32 @@ def frame(payload=b'\x43\x20\x01\xd3\x00\x04'):
     return data+crc24q(data).to_bytes(3,'big')
 
 
-def gga(age):
-    payload='GPGGA,005111.00,3504.5,N,12905.0,E,1,09,1.0,0,M,0,M,%s,'%age
+def nmea(payload):
     checksum=0
     for char in payload:checksum^=ord(char)
     return ('$'+payload+'*%02X\r\n'%checksum).encode()
+
+
+def gga(age, hdop='1.0'):
+    return nmea(f'GPGGA,005111.00,3504.5,N,12905.0,E,1,09,{hdop},0,M,0,M,{age},')
+
+
+def gsa(fix_type, pdop='', hdop='', vdop=''):
+    return nmea(','.join(['GNGSA','A',fix_type,*(['']*12),pdop,hdop,vdop,'1']))
+
+
+def nav_pvt(pdop, fix_type=3, flags=1):
+    payload=bytearray(92)
+    payload[20]=fix_type
+    payload[21]=flags
+    struct.pack_into('<ii',payload,24,1290000000,350000000)
+    struct.pack_into('<H',payload,76,pdop)
+    body=b'\x01\x07\x5c\x00'+payload
+    a=b=0
+    for byte in body:
+        a=(a+byte)&255
+        b=(b+a)&255
+    return b'\xb5\x62'+body+bytes((a,b))
 
 
 class CorrectionTests(unittest.TestCase):
@@ -99,6 +122,61 @@ class CorrectionTests(unittest.TestCase):
             self.assertEqual(parser.state['receiver_correction_age_status'],'invalid')
 
 
+class DopTests(unittest.TestCase):
+    def test_startup_and_invalid_dop_do_not_fabricate_numeric_telemetry(self):
+        parser=MixedGpsParser()
+        with patch('rcboat_ros.gps_mix.time.monotonic',return_value=100):
+            self.assertEqual(set(parser.dop_snapshot(100)['dop_status'].values()),{'no_data'})
+            parser.feed(gsa('1','1.20','0.80','0.90'))
+            self.assertEqual(set(parser.dop_snapshot(100)['dop_status'].values()),{'no_data'})
+            parser.feed(gsa('3','nan','0','inf'))
+            snapshot=parser.dop_snapshot(100)
+            self.assertEqual(set(snapshot['dop_status'].values()),{'invalid'})
+            self.assertEqual([snapshot[k] for k in ('hdop','pdop','vdop')],[None,None,None])
+            self.assertTrue(pack(**snapshot))
+
+    def test_valid_low_dop_source_priority_and_per_field_aging(self):
+        parser=MixedGpsParser()
+        with patch('rcboat_ros.gps_mix.time.monotonic',return_value=100):
+            parser.feed(gsa('3','1.20','0.80','0.90'))
+            parser.feed(nav_pvt(135))
+        self.assertEqual(parser.dop_snapshot(100)['hdop'],0.8)
+        with patch('rcboat_ros.gps_mix.time.monotonic',return_value=101.5):
+            parser.feed(gga('',hdop='1.2'))
+            parser.feed(gsa('1','50','50','50'))
+        snapshot=parser.dop_snapshot(101.5)
+        self.assertAlmostEqual(snapshot['pdop'],1.35)
+        self.assertEqual((snapshot['hdop'],snapshot['vdop']),(1.2,0.9))
+        snapshot=parser.dop_snapshot(102.5)
+        self.assertEqual((snapshot['hdop'],snapshot['pdop'],snapshot['vdop']),(1.2,None,None))
+        self.assertEqual(snapshot['dop_status'],dict(hdop='valid',pdop='stale',vdop='stale'))
+
+    def test_zero_pvt_pdop_uses_valid_gsa_and_no_fix_hides_readings(self):
+        parser=MixedGpsParser()
+        with patch('rcboat_ros.gps_mix.time.monotonic',return_value=100):
+            parser.feed(nav_pvt(0))
+            self.assertEqual(parser.dop_snapshot(100)['dop_status']['pdop'],'invalid')
+            parser.feed(gsa('3','1.20','0.80','0.90'))
+        snapshot=dict(parser.state,**parser.dop_snapshot(100))
+        self.assertEqual(refresh_dop_status(snapshot,100)['pdop'],1.2)
+        invalid=refresh_dop_status(dict(snapshot,fix=False,data_validity='invalid'),100)
+        self.assertEqual(set(invalid['dop_status'].values()),{'invalid'})
+        self.assertEqual([invalid[k] for k in ('hdop','pdop','vdop')],[None,None,None])
+        self.assertEqual(set(refresh_dop_status(snapshot,103)['dop_status'].values()),{'stale'})
+        self.assertEqual(set(snapshot['dop_status'].values()),{'valid'})
+
+
+    def test_gateway_rejects_missing_or_malformed_dop_timing(self):
+        gps=dict(fix=True,latitude=35,longitude=129,last_valid_monotonic=100,
+                 hdop=.8,pdop=0,vdop=float('inf'),
+                 dop_status=dict(hdop='valid',pdop='valid',vdop='valid'))
+        for stamp in (None,[],{'hdop':True},{'hdop':'100'},{'hdop':float('nan')}):
+            with self.subTest(stamp=stamp):
+                result=refresh_dop_status(dict(gps,dop_monotonic=stamp),101)
+                self.assertEqual(result['dop_status'],dict(hdop='stale',pdop='invalid',vdop='invalid'))
+                self.assertEqual([result[k] for k in ('hdop','pdop','vdop')],[None,None,None])
+
+
 class PersistedProfileTests(unittest.TestCase):
     def test_local_profile_public_fields_and_empty_password_retention(self):
         class Publisher:
@@ -125,6 +203,15 @@ class PersistedProfileTests(unittest.TestCase):
             self.assertTrue(answer.success);self.assertEqual(n.password,'fixture-secret')
             self.assertEqual(m.load_local_env(path)['RCBOAT_NTRIP_PASSWORD'],'fixture-secret')
             self.assertNotIn('fixture-secret',''.join(n.events.messages))
+            n.gps=dict(healthy=True,fix=True,latitude=35.1,longitude=129.1,
+                       last_valid_monotonic=100,satellites=9,hdop=None)
+            with patch.object(m.time,'monotonic',return_value=101):
+                self.assertEqual(n._nmea_gga().split(',')[8],'')
+                n.gps['hdop']=.82
+                self.assertEqual(n._nmea_gga().split(',')[8],'0.82')
+            with patch.object(m.time,'monotonic',return_value=103):
+                self.assertEqual(n._nmea_gga(),'')
+
 
 class DeploymentTests(unittest.TestCase):
     @classmethod

@@ -20,9 +20,10 @@ from rcboat_ros.common import pack, unpack, fresh
 from rcboat_ros.control_config import validate_cruise
 from rcboat_ros.gps_settings import load_hdop,save_hdop,validate_hdop
 from rcboat_ros.corrections import refresh_transport_status,refresh_receiver_status
+from rcboat_ros.gps_mix import refresh_dop_status
 
 
-VERSION = "2.4.18"
+VERSION = "2.4.19"
 SOCKET = os.path.expanduser("~/rcboat_ros_data/gui_bridge.sock")
 TOPICS = {
     "gps": "/rcboat/gps/status", "ntrip": "/rcboat/ntrip/status", "route": "/rcboat/route/state",
@@ -259,7 +260,9 @@ class Bridge:
             nav['fresh']=fresh(nav.get('monotonic',0),1.0,time.monotonic())
             telemetry['navigation']=nav
             telemetry['ntrip']=refresh_transport_status(self.cache.get('ntrip',{}),time.monotonic())
-            telemetry['gps']=refresh_receiver_status(self.cache.get('gps',{}),time.monotonic())
+            now=time.monotonic()
+            gps=refresh_receiver_status(self.cache.get('gps',{}),now)
+            telemetry['gps']=refresh_dop_status(gps,now)
             telemetry["gps_logging"] = {"active": self.gps_log_file is not None, "file_path": self.gps_log_path,
                                         "samples": self.gps_log_samples}
             return {"success": True, "version": VERSION, "backend": "ROS Noetic", "master_online": master_online,
@@ -306,15 +309,32 @@ class Bridge:
 
     def client(self, connection):
         with connection:
+            # A client can disappear during a Wi-Fi handoff. Bound socket I/O
+            # and release idle connections without a worker traceback.
+            connection.settimeout(5)
             try:
-                data = b""
-                while len(data) < 2_000_000 and b"\n" not in data:
-                    chunk = connection.recv(65536)
-                    if not chunk: break
-                    data += chunk
-                response = self.dispatch(json.loads(data.decode("utf-8").strip()))
-            except Exception as exc: response = {"success": False, "error": str(exc)}
-            connection.sendall((json.dumps(response, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8"))
+                data = bytearray()
+                while len(data) < 2_000_000:
+                    chunk = connection.recv(min(65536, 2_000_000 - len(data)))
+                    if not chunk:
+                        break
+                    data.extend(chunk)
+                    if b"\n" in chunk:
+                        break
+            except OSError:
+                return
+            if not data:
+                return
+            try:
+                if b"\n" not in data:
+                    raise ValueError("incomplete or oversized gateway request")
+                response = self.dispatch(json.loads(data))
+            except Exception as exc:
+                response = {"success": False, "error": str(exc)}
+            try:
+                connection.sendall((json.dumps(response, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8"))
+            except OSError:
+                return
 
     def serve(self, server):
         server.settimeout(.5)

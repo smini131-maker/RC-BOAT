@@ -1,7 +1,7 @@
 """Optional vision-node lifecycle, preview and camera fallback; fake ROS/device only."""
 import json,sys,tempfile,types,urllib.request,urllib.error,unittest,base64,hashlib,io,zipfile,http.client
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, Mock, patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'catkin_ws/src/rcboat_ros/src'))
 from rcboat_ros.balloon_tracking import validate_config
 import test_ground_continuity_v2111 as harness
@@ -187,6 +187,30 @@ class VisionGatewayTests(unittest.TestCase):
             changed=dict(route=dict(route,routes=[dict(id='two')],selected_route_id='two'))
             self.assertNotEqual(bridge.compact_route_status(changed,revision),revision)
             self.assertEqual(changed['route']['routes'],[dict(id='two')])
+
+    def test_gateway_client_cleans_up_lost_and_incomplete_connections(self):
+        with tempfile.TemporaryDirectory() as directory:
+            module=harness.load_node('gui_bridge_node',Path(directory))
+            bridge=module.Bridge.__new__(module.Bridge)
+            bridge.dispatch=Mock(return_value={'success':True})
+            for error in (ConnectionResetError, TimeoutError):
+                with self.subTest(error=error):
+                    connection=MagicMock()
+                    connection.recv.side_effect=error
+                    bridge.client(connection)
+                    connection.settimeout.assert_called_once_with(5)
+                    connection.sendall.assert_not_called()
+                    bridge.dispatch.assert_not_called()
+            connection=MagicMock()
+            connection.recv.side_effect=[b'{"action":"status"}',b'']
+            bridge.client(connection)
+            self.assertFalse(json.loads(connection.sendall.call_args.args[0])['success'])
+            bridge.dispatch.assert_not_called()
+            connection=MagicMock()
+            connection.recv.side_effect=[b'{"action":',b'"status"}\n']
+            connection.sendall.side_effect=BrokenPipeError
+            bridge.client(connection)
+            bridge.dispatch.assert_called_once_with({'action':'status'})
 
     def test_service_routing_and_complete_line_snapshot_hash(self):
         with tempfile.TemporaryDirectory() as directory:

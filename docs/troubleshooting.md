@@ -25,6 +25,12 @@ bash deployment/jetson/check_backend.sh
 
 일반 운항과 Ground Test의 연결 단절·GPS 유예 정책은 [운항·시험](operation.md)을 참고합니다. GPS 유예는 수신 장애 자체를 해결하는 기능이 아닙니다.
 
+## GNSS 수신 상태 확인
+
+HDOP는 수평, PDOP는 3차원 위치에 대한 위성 배치의 영향입니다. 숫자가 낮을수록 위성 배치가 유리합니다. 실내나 건물 옆에서는 신호가 가려지거나 반사돼 DOP가 낮은 순간에도 위치 오차가 클 수 있습니다. [GPS 정확도에 영향을 주는 요인](https://www.gps.gov/gps-accuracy)
+
+개방된 야외에서 보트를 정지한 채 수신기를 켜고, FIX와 RTK 상태가 안정되는 동안 HDOP·PDOP, 평균 C/N0, hAcc와 GPS 데이터 지연을 함께 확인합니다. RTCM 누적량이 증가해도 RTK 상태가 DGPS나 FLOAT일 수 있습니다. v2.4.19부터 유효한 DOP만 숫자로 표시하고, 값이 없거나 잘못됐거나 갱신이 늦으면 카드에 해당 상태를 표시합니다.
+
 ## Windows GUI가 종료되거나 연결 해제가 멈춤
 
 앱 로그는 파일 탐색기에서 `%LOCALAPPDATA%\RCBoatControl\logs`로 열 수 있습니다.

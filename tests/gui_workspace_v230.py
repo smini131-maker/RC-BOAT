@@ -84,6 +84,15 @@ assert '#ff6474' in w.value_labels['last_fix_age'].value_label.styleSheet()
 update_dashboard_quality(w,dict(gps={}))
 assert '#7f93ac' in w.value_labels['hdop'].value_label.styleSheet()
 assert all(card.hint_label.text() for key,card in w.value_labels.items() if key!='failsafe')
+dop = dict(hdop=1.23, dop_status={'hdop': 'valid', 'pdop': 'stale', 'vdop': 'invalid'})
+w.update_telemetry(SSHWorker._normalize(dict(success=True, telemetry={'gps': dop})))
+assert w.value_labels['hdop'].value_label.text() == '1.23'
+assert w.gps_metric_cards['hdop'].value_label.text() == '1.23'
+assert w.gps_metric_cards['pdop'].value_label.text() == '갱신 지연'
+assert w.gps_metric_cards['vdop'].value_label.text() == '무효'
+w.update_telemetry(SSHWorker._normalize(dict(success=True, telemetry={'gps': {'dop_status': {'hdop': 'no_data'}}})))
+assert w.value_labels['hdop'].value_label.text() == '미수신'
+assert '#7f93ac' in w.value_labels['hdop'].value_label.styleSheet()
 # Jetson's persisted profile supplies the public fields; disconnects do not clear it.
 state=SSHWorker._normalize(dict(success=True,version='2.3.1',gateway_online=True,master_online=True,telemetry={
     'ntrip':dict(host='caster.example.invalid',port=2101,mountpoint='SAVED',username='fixture-user',credentials_saved=True,enabled=True),
@@ -279,7 +288,7 @@ with ThreadingHTTPServer(('127.0.0.1',0),PreviewHandler) as server:
         server.shutdown();thread.join(timeout=2)
 
 w.rc_graph.append(None,None);assert w.rc_graph.series[0][-1] is None
-locked=SSHWorker._normalize(dict(success=True,version='2.4.18',gateway_online=True,master_online=True,telemetry={
+locked=SSHWorker._normalize(dict(success=True,version='2.4.19',gateway_online=True,master_online=True,telemetry={
     'safety':dict(mode='MANUAL',estop=True,actuator_locked=True,estop_reason='MAINTENANCE_CHECK',estop_time_utc='2026-11-10T10:00:00Z'),
     'vision':dict(enabled=True,model_ready=True,camera_online=True,target={'acquired':True,'predicted':False})}))
 w.update_telemetry(locked);app.processEvents()
@@ -291,7 +300,7 @@ assert '재시도' in w.cards['backend'].value_label.text()
 assert w._last_estop and '마지막 확인' in w.estop_banner_text.text()
 w.update_telemetry(locked)
 assert w.cards['ros_master'].value_label.text()=='online'
-master_down=SSHWorker._normalize(dict(success=True,version='2.4.18',gateway_online=True,master_online=False))
+master_down=SSHWorker._normalize(dict(success=True,version='2.4.19',gateway_online=True,master_online=False))
 w.update_telemetry(master_down)
 assert w.cards['ros_master'].value_label.text()=='offline'
 w.update_telemetry(locked)
