@@ -11,7 +11,8 @@ from PySide6.QtWidgets import QApplication,QAbstractSlider
 from rcboat_gui.main_window import MainWindow
 from rcboat_gui.ssh_worker import SSHWorker
 from rcboat_gui.mock_worker import MockWorker
-from rcboat_ros.control_config import RC_DEFAULTS
+from rcboat_gui.ui_shell import CRUISE_SLIDER_VALUES
+from rcboat_ros.control_config import CRUISE_MAX,RC_DEFAULTS,THROTTLE_FORWARD_MAX
 import test_ground_continuity_v2111 as harness
 
 app=QApplication([])
@@ -21,20 +22,21 @@ sent=[]
 window.command=lambda command,**args: (sent.append(dict(command=command,**args)) or str(len(sent)))
 assert window._confirmed_cruise_pwm is None
 assert '%' not in window.auto_speed_status.text()
-assert window.auto_speed_spin.maximum()==window.auto_speed_slider.maximum()==7397
-assert window.remote_throttle.maximum()==7397
-# Non-grid maximum must survive both editors and the end of the slider.
-window.auto_speed_spin.setValue(7397)
-assert window.auto_speed_slider.value()==7397
-window.auto_speed_slider.setValue(7390)
+assert window.auto_speed_spin.maximum()==CRUISE_MAX
+assert CRUISE_SLIDER_VALUES[window.auto_speed_slider.maximum()]==CRUISE_MAX
+assert window.remote_throttle.maximum()==THROTTLE_FORWARD_MAX
+# Keep the legacy value in the number editor and make the maximum a slider step.
+window.auto_speed_spin.setValue(THROTTLE_FORWARD_MAX)
+assert window.auto_speed_spin.value()==THROTTLE_FORWARD_MAX
+window.auto_speed_slider.setValue(CRUISE_SLIDER_VALUES.index(7840))
 window.auto_speed_slider.triggerAction(QAbstractSlider.SliderSingleStepAdd)
-assert window.auto_speed_spin.value()==7397
+assert window.auto_speed_spin.value()==CRUISE_MAX
 window._set_auto_speed_editor(6650,dirty=False)
 window.auto_speed_slider.triggerAction(QAbstractSlider.SliderSingleStepAdd)
 assert window.auto_speed_spin.value()==6660 and not sent
 window.auto_speed_spin.setValue(6670)
-assert window.auto_speed_slider.value()==6670 and not sent
-window.auto_speed_slider.setValue(6683)
+assert CRUISE_SLIDER_VALUES[window.auto_speed_slider.value()]==6670 and not sent
+window.auto_speed_spin.setValue(6683)
 assert window.auto_speed_spin.value()==6680
 window.apply_auto_speed()
 assert sent==[dict(command='SET_AUTO_CRUISE_PWM',value=6680)]
@@ -73,7 +75,7 @@ with tempfile.TemporaryDirectory() as folder:
     assert window._auto_speed_dirty and window._confirmed_cruise_pwm==6680
     window.apply_auto_speed();window._cruise_ack_timeout('3')
     assert window._pending_cruise_request is None and window._auto_speed_dirty
-    for value in (6470,7398,7800,6651,True,'6650'):
+    for value in (6470,7398,7843,6651,True,'6650'):
         worker._handle_request(dict(command='SET_AUTO_CRUISE_PWM',value=value,request_id='bad'))
         assert not acks[-1]['ok']
     bridge.gps_settings_path=Path(folder)/'gps_settings.json'
@@ -101,22 +103,20 @@ with tempfile.TemporaryDirectory() as folder:
     app.processEvents()
     assert mock.auto_cruise_pwm==6690 and mock.throttle==6450
     mock.estop=False
-    mock.send_command('SET_AUTO_CRUISE_PWM',value=7397)
+    mock.send_command('SET_AUTO_CRUISE_PWM',value=CRUISE_MAX)
     mock.send_command('SET_MODE',mode='NAVIGATION')
     app.processEvents()
-    assert mock.auto_cruise_pwm==7397 and mock.throttle==6650
-    payload=bridge.dispatch(dict(action='set_auto_cruise_pwm',arguments={'value':7397}))
-    assert payload['success'] and params['/rcboat/cruise_pwm']==7397
-    # Real worker -> gateway -> navigation ACK for the exceptional end value.
-    worker._handle_request(dict(command='SET_AUTO_CRUISE_PWM',value=7397,request_id='ceiling'))
-    assert acks[-1]['ok'] and acks[-1]['value']==7397
-    window._set_auto_speed_editor(7397,dirty=True)
-    window.apply_auto_speed()
-    worker._handle_request(dict(sent[-1],request_id=window._pending_cruise_request))
-    window.on_ack(acks[-1])
-    assert window._confirmed_cruise_pwm==window.auto_speed_spin.value()==7397
-    assert '7397' in window.auto_speed_status.text()
-    for value in (7398,7400):
+    assert mock.auto_cruise_pwm==CRUISE_MAX and mock.throttle==6650
+    # Real worker -> gateway -> navigation ACK for legacy and new exceptional values.
+    for pwm in (THROTTLE_FORWARD_MAX, CRUISE_MAX):
+        window._set_auto_speed_editor(pwm,dirty=True)
+        window.apply_auto_speed()
+        worker._handle_request(dict(sent[-1],request_id=window._pending_cruise_request))
+        assert acks[-1]['ok'] and acks[-1]['value']==params['/rcboat/cruise_pwm']==pwm
+        window.on_ack(acks[-1])
+        assert window._confirmed_cruise_pwm==window.auto_speed_spin.value()==pwm
+        assert str(pwm) in window.auto_speed_status.text()
+    for value in (7398,7841,7843):
         worker._handle_request(dict(command='SET_AUTO_CRUISE_PWM',value=value,request_id='overflow'))
         assert not acks[-1]['ok']
     assert SSHWorker._translate(dict(command='REMOTE_CONTROL',steering_pwm=6000,throttle_pwm=7397))['arguments']['throttle_pwm']==7397
