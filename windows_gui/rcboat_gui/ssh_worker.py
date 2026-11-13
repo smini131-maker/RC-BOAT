@@ -347,7 +347,7 @@ class SSHWorker(QThread):
         }
         logger_state = str(ground.get("state") or ("recording" if ground.get("active") else "idle"))
         return {
-            "type": "telemetry", "software_version": response.get("version", "2.4.20"),
+            "type": "telemetry", "software_version": response.get("version", "2.4.21"),
             "backend": {"name": str(response.get("backend") or "ROS Noetic"),
                         "ready": bool(response.get("gateway_online", True)), "node_count": len(nodes),
                         "master_online": response.get("master_online"),

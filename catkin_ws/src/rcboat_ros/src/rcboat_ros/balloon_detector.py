@@ -109,14 +109,32 @@ def near_red_visual_support(frame, previous_box, config, cv2):
     if scale < 1.:
         region = cv2.resize(region, (max(1, round(box_width * scale)),
                                      max(1, round(box_height * scale))), interpolation=cv2.INTER_AREA)
-    mask = target_colour_mask(cv2.cvtColor(region, cv2.COLOR_BGR2HSV), config, cv2)
-    if cv2.countNonZero(mask) < .5 * mask.size:
-        return False
-    # Require overlap around the center of the last box, where an advancing
-    # target should still be visible even after its contour leaves the image.
+    # A close balloon can shift toward magenta under the camera's automatic
+    # exposure and white balance. Only broaden colour after neural acquisition.
+    hsv = cv2.cvtColor(region, cv2.COLOR_BGR2HSV)
+    warm = cv2.inRange(hsv, (0, 50, 35), (16, 255, 255))
+    cool = cv2.inRange(hsv, (160, 50, 35), (179, 255, 255))
+    mask = cv2.bitwise_or(warm, cool)
     rows, columns = mask.shape
-    core = mask[rows//4:rows-rows//4, columns//4:columns-columns//4]
-    return cv2.countNonZero(core) >= .65 * core.size
+    if cv2.countNonZero(mask) < .30 * mask.size:
+        return False
+    _, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    label = 1 + int(np.argmax(stats[1:, 4]))
+    _, _, patch_width, patch_height, patch_area = stats[label]
+    if (patch_width < .35 * columns or patch_height < .35 * rows
+            or min(patch_width, patch_height) < .27 * max(patch_width, patch_height)):
+        return False
+    core = labels[rows//4:rows-rows//4, columns//4:columns-columns//4]
+    coverage = patch_area / mask.size
+    core_coverage = np.count_nonzero(core == label) / core.size
+    if coverage >= .30 and core_coverage >= .65:
+        return True
+    # A shifted patch must still have substantial overlap with the old box
+    # and its core. A patch only at the old box edge cannot sustain motion.
+    center_x, center_y = centroids[label]
+    return (coverage >= .40 and core_coverage >= .30
+            and abs(center_x - (columns - 1) / 2) <= .32 * columns
+            and abs(center_y - (rows - 1) / 2) <= .32 * rows)
 
 
 class TensorRTBackend:

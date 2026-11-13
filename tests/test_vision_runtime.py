@@ -70,20 +70,19 @@ class VisionNodeTests(unittest.TestCase):
         frame = np.full((1080, 1920, 3), (15, 20, 170), dtype=np.uint8)
         for stamp in (100., 100.1, 100.2):
             vision.track_frame([box], frame.shape, stamp, stamp, vision.config)
-        self.assertFalse(vision.near_support(frame, [], 99.9, 100.3, vision.config))
-        self.assertFalse(vision.near_support(frame, [box], 100.3, 100.3, vision.config))
-        self.assertFalse(vision.near_support(frame, [], 100.3, 102., vision.config))
+        self.assertFalse(vision.near_support(frame, 99.9, 100.3, vision.config))
+        self.assertFalse(vision.near_support(frame, 100.3, 102., vision.config))
         vision.live_source = False
-        self.assertFalse(vision.near_support(frame, [], 100.3, 100.3, vision.config))
+        self.assertFalse(vision.near_support(frame, 100.3, 100.3, vision.config))
         vision.live_source = True
-        support = vision.near_support(frame, [], 100.3, 100.3, vision.config)
+        support = vision.near_support(frame, 100.3, 100.3, vision.config)
         self.assertTrue(support)
         target, desired = vision.track_frame([], frame.shape, 100.3, 100.3, vision.config,
                                              near_visual_support=support)
         self.assertEqual(target['phase'], 'NEAR_APPROACH')
         self.assertEqual(desired['desired_throttle_pwm'], 6650)
         frame[:] = 0
-        support = vision.near_support(frame, [], 100.4, 100.4, vision.config)
+        support = vision.near_support(frame, 100.4, 100.4, vision.config)
         self.assertFalse(support)
         target, desired = vision.track_frame([], frame.shape, 100.4, 100.4, vision.config,
                                              near_visual_support=support)
@@ -91,7 +90,35 @@ class VisionNodeTests(unittest.TestCase):
         self.assertEqual(desired['desired_throttle_pwm'], 6450)
         vision.on_safety(types.SimpleNamespace(data=json.dumps(dict(mode='MANUAL'))))
         frame[:] = (15, 20, 170)
-        self.assertFalse(vision.near_support(frame, [], 100.5, 100.5, vision.config))
+        self.assertFalse(vision.near_support(frame, 100.5, 100.5, vision.config))
+
+    @unittest.skipUnless(cv2 is not None, 'OpenCV and NumPy required')
+    def test_unrelated_confirmed_detection_does_not_suppress_near_colour_support(self):
+        vision = self.v
+        vision.enabled = True
+        vision.live_source = True
+        vision.tracking_session = 99.
+        vision.tracking_reset_at = 100.
+        vision.frame = np.full((1080, 1920, 3), (15, 20, 170), dtype=np.uint8)
+        vision.frame_at = 100.3
+        original = near_box()
+        for stamp in (100., 100.1, 100.2):
+            vision.track_frame([original], vision.frame.shape, stamp, stamp, vision.config)
+
+        unrelated = dict(confidence=.99, pink_confirmed=True, bbox=[1810, 530, 1880, 600])
+        detector = Mock(cv2=cv2, config=dict(vision.config, target_colour='red'),
+                        backend_name='fixture', last_view={})
+        detector.detect.return_value = [unrelated]
+        with patch('rcboat_ros.balloon_detector.BalloonDetector', return_value=detector), \
+             patch.object(self.m.rospy, 'is_shutdown', side_effect=[False, True], create=True), \
+             patch.object(self.m.time, 'monotonic', return_value=100.3), \
+             patch.object(self.m.time, 'sleep'):
+            vision.run()
+
+        self.assertEqual(vision.detail['detections'], [unrelated])
+        self.assertEqual(vision.detail['target']['bbox'], original['bbox'])
+        self.assertEqual(vision.detail['reason'], 'NEAR_APPROACH')
+        self.assertEqual(vision.desired['desired_throttle_pwm'], 6650)
 
     def test_disabled_model_missing_and_camera_stale_cannot_drive(self):
         self.v.desired=dict(valid=True,monotonic=self.now,desired_steering_pwm=4900,desired_throttle_pwm=7397)

@@ -328,6 +328,26 @@ class NativeCropTests(unittest.TestCase):
         frame[:] = (50, 8, 150)  # Crimson around the other end of the HSV hue range.
         self.assertTrue(near_red_visual_support(frame, box, config, cv2))
 
+    def test_close_red_support_handles_camera_hue_shift_and_partial_overlap(self):
+        from rcboat_ros.balloon_detector import near_red_visual_support
+        from rcboat_ros.long_range import target_colour_mask
+
+        config = dict(validate_config({}), target_colour='red')
+        frame = np.zeros((1080, 1920, 3), np.uint8)
+        box = [200., 40., 1400., 1040.]
+        hsv = np.uint8([[[167, 125, 142]]])
+        crimson = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)[0, 0]
+        # This hue was measured when the red balloon filled the live preview.
+        self.assertEqual(int(target_colour_mask(hsv, config, cv2)[0, 0]), 0)
+        frame[:] = crimson
+        self.assertTrue(near_red_visual_support(frame, box, config, cv2))
+        frame[:] = 0
+        frame[:, 910:] = crimson
+        self.assertTrue(near_red_visual_support(frame, box, config, cv2))
+        frame[:] = 0
+        frame[240:840, 460:1140] = crimson  # Connected patch, 34% of the old box.
+        self.assertTrue(near_red_visual_support(frame, box, config, cv2))
+
     def test_close_red_support_rejects_missing_target_and_unrelated_red(self):
         from rcboat_ros.balloon_detector import near_red_visual_support
 
@@ -336,6 +356,13 @@ class NativeCropTests(unittest.TestCase):
         frame = np.zeros((1080, 1920, 3), np.uint8)
         self.assertFalse(near_red_visual_support(frame, box, config, cv2))
         frame[500:580, 900:1020] = (10, 10, 180)
+        self.assertFalse(near_red_visual_support(frame, box, config, cv2))
+        frame[:] = 0
+        frame[:, 1310:] = (10, 10, 180)  # Mostly outside the last observed box.
+        self.assertFalse(near_red_visual_support(frame, box, config, cv2))
+        frame[:] = 0
+        for x in range(400, 1510, 100):
+            frame[:, x:x+45] = (10, 10, 180)
         self.assertFalse(near_red_visual_support(frame, box, config, cv2))
         # Red occupies most of the old box, but little of its central portion.
         frame[:] = (10, 10, 180)

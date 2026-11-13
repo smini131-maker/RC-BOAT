@@ -1,6 +1,6 @@
-# v2.4.20 카메라 · 붉은 풍선 추적
+# v2.4.21 카메라 · 붉은 풍선 추적
 
-v2.4.20의 풍선 추적 대상은 붉은색 계열입니다. 1080p 촬영과 YOLOv8n 320×320 입력을 사용합니다. Jetson에 새 ONNX와 manifest를 함께 전송하면 기존 설치 스크립트가 장치용 TensorRT 엔진을 준비합니다.
+v2.4.21의 풍선 추적 대상은 붉은색 계열입니다. 1080p 촬영과 YOLOv8n 320×320 입력을 사용합니다. Jetson에 새 ONNX와 manifest를 함께 전송하면 기존 설치 스크립트가 장치용 TensorRT 엔진을 준비합니다.
 
 ## v2.4.11 판단 FPS 실측
 
@@ -33,7 +33,7 @@ Jetson Nano의 TensorRT 8.0.1.6에서 약 1.5m 거리에 지름 20cm 미만 풍�
 
 신경망으로 확보한 풍선이 화면 중앙에서 높이 80% 이상 또는 면적 40% 이상을 두 프레임 연속 채우면 근접으로 봅니다. 이후 신경망 검출이 잠시 사라져도 마지막 풍선 영역에 충분한 붉은색이 새 프레임마다 확인되면 직전 좌우 방향으로 접근을 이어갑니다. `근접 접근 · 색상 확인`의 출력 상한은 설정한 순항 PWM과 `6650` 중 낮은 값입니다.
 
-붉은색은 이미 확보한 근접 풍선을 이어서 추적하는 근거입니다. 새 프레임에서 이 근거가 사라지면 `근접 표적 대기 · 중립`으로 바뀌고 BALLOON 모드에서 중립으로 대기합니다. 연속성 유효 시간은 마지막 근접 관측부터 기본 1.5초입니다. 시간이 지나면 새 신경망 검출을 확인한 뒤 다시 접근합니다. 영상으로 실제 파열 여부를 판정하는 기능은 없습니다. 수동으로 전환하려면 관제 앱이나 RC 조종기를 사용합니다.
+붉은색은 이미 확보한 근접 풍선을 이어서 추적하는 근거입니다. 카메라의 노출·화이트밸런스 변화로 붉은색이 주황색이나 분홍색에 가까워지는 경우도 마지막 표적 영역에서 확인합니다. 최초 감지에는 기존 YOLO 모델과 색상 기준을 적용합니다. 새 프레임에서 근접 근거가 사라지면 `근접 표적 대기 · 중립`으로 바뀌고 BALLOON 모드에서 중립으로 대기합니다. 연속성 유효 시간은 마지막 근접 관측부터 기본 1.5초입니다. 시간이 지나면 새 신경망 검출을 확인한 뒤 다시 접근합니다. 영상으로 실제 파열 여부를 판정하는 기능은 없습니다. 수동으로 전환하려면 관제 앱이나 RC 조종기를 사용합니다.
 
 목표 도착·확정 SSH 단절·추진/RC/카메라 이상은 수동 전환 사유입니다. E-STOP 잠금은 명시적인 비상정지 요청에서만 설정하며 자동으로 해제하지 않습니다. 상태와 이벤트에 `estop_reason`, `estop_origin`, `estop_time_utc`를 저장하고 GUI에는 한국 시각으로 표시합니다. 해제 후에도 수동 중립 재허용이 필요하며 추적·항로는 자동 재시작하지 않습니다.
 
@@ -73,7 +73,7 @@ v2.4.1의 가중치와 감지 알고리즘은 v2.4.0과 같습니다. 모바일 
 2. **Windows PowerShell**에서 다음 순서로 전송합니다. IP는 접속할 때 입력합니다.
 
 ```powershell
-Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_Project\RCBoatControl_v2.4.20"
+Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_Project\RCBoatControl_v2.4.21"
 $jetsonIp = Read-Host "Jetson 현재 IP"
 if (-not (Test-NetConnection $jetsonIp -Port 22 -InformationLevel Quiet)) { throw "SSH 연결 불가" }
 $env:RCBOAT_NO_PAUSE = "1"
@@ -95,7 +95,7 @@ bash deployment/jetson/install_vision_dependencies.sh
 bash deployment/jetson/install_jetson_ros.sh
 ```
 
-완료 기준은 `RUNNING GATEWAY VERIFIED: v2.4.20`입니다. 설치 스크립트가 ROS를 시작하므로 추가로 `roslaunch`를 중복 실행하지 않습니다. 기존 항로·로그·NTRIP 자격정보는 유지합니다. 옛 카메라 설정에는 1080p/원거리 모드를 한 번 적용하고 원본 `~/.rcboat/vision.json.before_v2.4.0_*`을 보존합니다. 이후 사용자가 설정한 해상도나 원거리 끄기는 덮어쓰지 않습니다.
+완료 기준은 `RUNNING GATEWAY VERIFIED: v2.4.21`입니다. 설치 스크립트가 ROS를 시작하므로 추가로 `roslaunch`를 중복 실행하지 않습니다. 기존 항로·로그·NTRIP 자격정보는 유지합니다. 옛 카메라 설정에는 1080p/원거리 모드를 한 번 적용하고 원본 `~/.rcboat/vision.json.before_v2.4.0_*`을 보존합니다. 이후 사용자가 설정한 해상도나 원거리 끄기는 덮어쓰지 않습니다.
 
 4. GUI를 열기 전, 실제 카메라/처리 시간을 검사합니다. 아래는 기존 IMX219 CSI/sensor 0 예시이며 실제 연결 방식이 다르면 `--camera-type usb`를 사용합니다. GUI의 카메라는 꺼둡니다.
 
@@ -111,7 +111,7 @@ bash deployment/jetson/install_jetson_ros.sh
 ~/.rcboat/vision-venv/bin/python3 deployment/jetson/build_vision_engine.py models/balloon_yolov8n.onnx
 ```
 
-6. PC EXE 또는 모바일 APK v2.4.20 한 개를 제어 연결합니다. 풍선 화면 → 카메라 설정 → CSI/센서 0(장치에 맞게 변경) → 1920×1080 → 작은 풍선 원거리 감지 체크 → 저장 → 카메라 켜기입니다. 실제 감지 상자와 작은 대상 확대 창이 표시됩니다. 전체 영상 통신량은 기존 640×360 이하 JPEG를 유지합니다.
+6. PC EXE 또는 모바일 APK v2.4.21 한 개를 제어 연결합니다. 풍선 화면 → 카메라 설정 → CSI/센서 0(장치에 맞게 변경) → 1920×1080 → 작은 풍선 원거리 감지 체크 → 저장 → 카메라 켜기입니다. 실제 감지 상자와 작은 대상 확대 창이 표시됩니다. 전체 영상 통신량은 기존 640×360 이하 JPEG를 유지합니다.
 
 ## 거리별 감지 확인 후 추적 시작
 
@@ -174,7 +174,7 @@ USB V4L2와 Jetson Argus CSI를 지원하며 자동은 USB → CSI 순서입니�
 
 ```powershell
 # 새 폴더의 빌드된 앱
-.\dist\RCBoatControl_ROS_v2.4.20.exe
+.\dist\RCBoatControl_ROS_v2.4.21.exe
 # 다시 빌드할 때
 .\BUILD_ROS_GUI.cmd
 ```

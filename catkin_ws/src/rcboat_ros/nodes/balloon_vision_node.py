@@ -13,7 +13,7 @@ from rcboat_ros.common import pack,unpack,fresh
 from rcboat_ros.control_config import validate_cruise
 from rcboat_ros.balloon_tracking import validate_config,TargetTracker,TrackingController
 
-VERSION='2.4.20'
+VERSION='2.4.21'
 PREVIEW_STREAM_BUDGET = 144 * 1024
 PREVIEW_STREAM_HEADER = struct.Struct('!II')
 def public_config(c):
@@ -68,10 +68,9 @@ class Vision:
         self.preview_at = 0.
         self.desired_pub.publish(pack())
 
-    def near_support(self, frame, detections, stamp, now, config):
+    def near_support(self, frame, stamp, now, config):
         if (self.tracking_session is None or not self.live_source or self.detector is None
-                or stamp < self.tracking_reset_at or not fresh(stamp, config['max_frame_age_s'], now)
-                or any(item.get('pink_confirmed') for item in detections)):
+                or stamp < self.tracking_reset_at or not fresh(stamp, config['max_frame_age_s'], now)):
             return False
         box = self.tracker.near_reference_box(now, config)
         if box is None:
@@ -300,7 +299,7 @@ class Vision:
                 with self.lock:
                     if not self.enabled or revision!=self.revision or stamp<self.tracking_reset_at:continue
                     track_start=time.monotonic()
-                    near_visual_support=self.near_support(frame,detections,stamp,track_start,c)
+                    near_visual_support=self.near_support(frame,stamp,track_start,c)
                     target,desired=self.track_frame(detections,frame.shape,stamp,time.monotonic(),c,near_visual_support)
                     if self.detector is None:desired['valid']=False
                     self.desired=desired
