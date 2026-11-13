@@ -10,7 +10,7 @@ from std_msgs.msg import String
 from rcboat_ros.msg import ControlCommand
 from rcboat_ros.common import SAFE_STEERING,SAFE_THROTTLE,pack,PCA_OWNER_LOCK
 from rcboat_ros.direct_pca import DirectLinuxPCA9685
-from rcboat_ros.control_config import NavigationThrottleRamp,load_output,validate_cruise,output_in_range
+from rcboat_ros.control_config import NavigationThrottleRamp,load_output,validate_cruise,output_in_range,navigation_output_in_range
 
 class Actuator:
     def __init__(self):
@@ -63,12 +63,15 @@ class Actuator:
             elif msg.mode=='NAVIGATION' and msg.source=='NAVIGATION_GPS_GRACE':
                 try:
                     grace_pwm=validate_cruise(rospy.get_param('/rcboat/navigation_gps_grace_pwm',6650))
-                    if msg.steering_pwm==SAFE_STEERING and msg.throttle_pwm==grace_pwm:
+                    if (msg.steering_pwm==SAFE_STEERING and msg.throttle_pwm==grace_pwm
+                            and output_in_range(msg.steering_pwm,msg.throttle_pwm,self.output_calibration)):
                         s=SAFE_STEERING;t=grace_pwm;state=msg.source
                 except ValueError:state='CRUISE_REJECTED'
-            elif msg.source in ('AUTO','MANUAL','REMOTE','NAVIGATION','BALLOON'):
-                if (output_in_range(msg.steering_pwm,msg.throttle_pwm,self.output_calibration) and
-                        (msg.source!='NAVIGATION' or msg.throttle_pwm>=SAFE_THROTTLE)):
+            elif msg.mode==msg.source=='NAVIGATION':
+                if navigation_output_in_range(msg.steering_pwm,msg.throttle_pwm,self.output_calibration):
+                    s=msg.steering_pwm;t=msg.throttle_pwm;state=msg.source
+            elif msg.source in ('AUTO','MANUAL','REMOTE','BALLOON'):
+                if output_in_range(msg.steering_pwm,msg.throttle_pwm,self.output_calibration):
                     s=msg.steering_pwm;t=msg.throttle_pwm;state=msg.source
         if msg and msg.mode in ('AUTO','NAVIGATION','GROUND_TEST','BALLOON') and state in ('AUTO','NAVIGATION','NAVIGATION_GPS_GRACE','GROUND_TEST_NAVIGATION','BALLOON'):
             try:

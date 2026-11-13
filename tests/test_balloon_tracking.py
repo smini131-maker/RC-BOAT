@@ -3,7 +3,7 @@ import math,json,unittest,sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'catkin_ws/src/rcboat_ros/src'))
 from rcboat_ros.balloon_tracking import (validate_config,TargetTracker,TrackingController,BearingEstimator,safe_balloon_output)
-from rcboat_ros.control_config import NAV_RAMP_RATE
+from rcboat_ros.control_config import CRUISE_MAX,NAV_RAMP_RATE,THROTTLE_FORWARD_MAX
 import test_failsafe_v218 as base
 
 def detection(error=0,close=False,pink=True):
@@ -50,6 +50,14 @@ class TrackerTests(unittest.TestCase):
         self.assertLessEqual(value,reduced+math.ceil(NAV_RAMP_RATE*.25)+1)
         self.assertEqual(controller.command(target,107,107,self.c,6480,100)['desired_throttle_pwm'],6480)
         self.assertEqual(controller.command(target,108,108,self.c,7397,108)['desired_throttle_pwm'],6650)
+    def test_increased_gps_cruise_target_keeps_balloon_ceiling(self):
+        controller=TrackingController();target=self.acquire()
+        target['center_x_normalized']=0
+        self.assertEqual(controller.command(target,100,100,self.c,CRUISE_MAX,100)['desired_throttle_pwm'],6650)
+        output=controller.command(target,112,112,self.c,CRUISE_MAX,100)
+        self.assertEqual(output['target_pwm'],THROTTLE_FORWARD_MAX)
+        self.assertEqual(output['desired_throttle_pwm'],THROTTLE_FORWARD_MAX)
+
     def test_stale_camera_never_becomes_motion_prediction(self):
         target=self.acquire();out=TrackingController().command(target,100,103,self.c)
         self.assertFalse(out['valid']);self.assertEqual(out['desired_throttle_pwm'],6450)

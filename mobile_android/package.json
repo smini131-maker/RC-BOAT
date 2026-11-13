@@ -1,1 +1,1 @@
-{"name":"rcboat-mobile-ui-tests","version":"2.4.21","private":true,"scripts":{"test":"node tests/ui.cjs"},"devDependencies":{"playwright":"1.62.1"}}
+{"name":"rcboat-mobile-ui-tests","version":"2.4.22","private":true,"scripts":{"test":"node tests/ui.cjs"},"devDependencies":{"playwright":"1.62.1"}}

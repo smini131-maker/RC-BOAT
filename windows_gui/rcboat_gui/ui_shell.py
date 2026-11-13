@@ -1,4 +1,5 @@
 """Compact map-first shell; existing feature pages and their slots are retained."""
+from bisect import bisect_left, bisect_right
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from pathlib import Path
@@ -8,7 +9,19 @@ from PySide6.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QGridLayout,QForm
     QScrollArea,QSplitter,QSizePolicy)
 from .widgets import StatusCard,RoutePlot,TelemetryGraph
 from .balloon_panel import BalloonPanel
-from rcboat_ros.control_config import CRUISE_MIN,CRUISE_MAX
+from rcboat_ros.control_config import CRUISE_DEFAULT, CRUISE_MIN, CRUISE_MAX, CRUISE_STEP, THROTTLE_FORWARD_MAX
+
+CRUISE_SLIDER_VALUES = tuple(range(CRUISE_MIN, CRUISE_MAX, CRUISE_STEP)) + (CRUISE_MAX,)
+
+
+class CruiseSpinBox(QSpinBox):
+    def stepBy(self, steps):
+        if steps == 0:
+            return
+        values = CRUISE_SLIDER_VALUES
+        value = self.value()
+        index = bisect_right(values, value) + steps - 1 if steps > 0 else bisect_left(values, value) + steps
+        self.setValue(values[max(0, min(len(values) - 1, index))])
 
 STYLE='''
 QMainWindow {background:#0b1220;} QWidget {color:#e5edf7; font-family:'Malgun Gothic','Segoe UI'; font-size:9pt;}
@@ -105,8 +118,8 @@ def build_shell(w):
     w.estop_button=QPushButton('비상 정지');w.estop_button.setObjectName('danger');w.estop_button.clicked.connect(lambda:w.command('EMERGENCY_STOP'))
     w.clear_estop_button=QPushButton('비상정지 해제');w.clear_estop_button.setObjectName('safe');w.clear_estop_button.clicked.connect(w.clear_estop)
     controls.addWidget(w.clear_estop_button,0,5);controls.addWidget(w.estop_button,0,6)
-    w.auto_speed_slider=QSlider(Qt.Horizontal);w.auto_speed_slider.setRange(CRUISE_MIN,CRUISE_MAX);w.auto_speed_slider.setSingleStep(10);w.auto_speed_slider.setPageStep(50);w.auto_speed_slider.setValue(6650)
-    w.auto_speed_spin=QSpinBox();w.auto_speed_spin.setRange(CRUISE_MIN,CRUISE_MAX);w.auto_speed_spin.setSingleStep(10);w.auto_speed_spin.setValue(6650);w.auto_speed_spin.setSuffix(' PWM');w.auto_speed_spin.setKeyboardTracking(False)
+    w.auto_speed_slider=QSlider(Qt.Horizontal);w.auto_speed_slider.setRange(0,len(CRUISE_SLIDER_VALUES)-1);w.auto_speed_slider.setSingleStep(1);w.auto_speed_slider.setPageStep(5);w.auto_speed_slider.setValue(CRUISE_SLIDER_VALUES.index(CRUISE_DEFAULT))
+    w.auto_speed_spin=CruiseSpinBox();w.auto_speed_spin.setRange(CRUISE_MIN,CRUISE_MAX);w.auto_speed_spin.setValue(CRUISE_DEFAULT);w.auto_speed_spin.setSuffix(' PWM');w.auto_speed_spin.setKeyboardTracking(False)
     w.auto_speed_spin.lineEdit().textEdited.connect(lambda _text:w._mark_cruise_dirty())
     w.auto_speed_slider.valueChanged.connect(w._auto_speed_from_slider);w.auto_speed_spin.valueChanged.connect(w._auto_speed_from_spin)
     w.auto_speed_status=QLabel('적용 목표: 확인 전');w.auto_speed_status.setWordWrap(True)
@@ -217,7 +230,8 @@ def update_dashboard_quality(w,state):
     try:ref=float(settings.get('navigation_max_hdop',3.0))
     except (ValueError,TypeError):ref=3.0
     if not __import__('math').isfinite(ref):ref=3.0
-    hints={'speed':'m/s','course':'0–360°','pca_throttle':'정지 6450 | 최대 7397','pca_steering':'4900–7300 | 중앙 6000',
+    throttle_limit = CRUISE_MAX if state.get('mode') == 'NAVIGATION' else THROTTLE_FORWARD_MAX
+    hints={'speed':'m/s','course':'0–360°','pca_throttle':f'정지 6450 | 항법 {CRUISE_MAX} · 기타 {THROTTLE_FORWARD_MAX}','pca_steering':'4900–7300 | 중앙 6000',
         'ramp_throttle':'6650 → 목표','failsafe':'','lat':'WGS84','lon':'WGS84','altitude':'m',
         'rc_steering':'1004 / 1620 / 1985 µs','rc_throttle':'1118 / 1499 / 1881 µs',
         'hdop':f'정상 ≤2 | 참고 ≤{ref:g}','last_fix_age':'정상 ≤2 s','satellites':'정상 ≥8 | 주의 6–7'}
@@ -230,7 +244,7 @@ def update_dashboard_quality(w,state):
     criteria={'hdop':(gps.get('hdop'),lambda n:n<=2,lambda n:n<=ref),
         'satellites':(gps.get('satellites'),lambda n:n>=8,lambda n:n>=6),
         'last_fix_age':(gps.get('last_fix_age_s'),lambda n:n<=2,lambda n:False),
-        'pca_throttle':(pca.get('throttle_pwm'),lambda n:5800<=n<=7397,lambda n:False),
+        'pca_throttle':(pca.get('throttle_pwm'),lambda n:5800<=n<=throttle_limit,lambda n:False),
         'pca_steering':(pca.get('steering_pwm'),lambda n:4900<=n<=7300,lambda n:False),
         'rc_steering':(rc.get('steering_us'),lambda n:970<=n<=2011,lambda n:False),
         'rc_throttle':(rc.get('throttle_us'),lambda n:1090<=n<=1908,lambda n:False)}

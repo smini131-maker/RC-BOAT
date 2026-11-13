@@ -1,4 +1,4 @@
-version: '2.4.21'
+version: '2.4.22'
 gui_gateway_bind: '0.0.0.0'
 gui_gateway_port: 8765
 ground_test_log_root: '~/rcboat_ros_data/logs/ground_tests'
@@ -42,7 +42,8 @@ rc_input_calibration:
     valid_max_us: 1908.0
 cruise_pwm: 6650
 # NAVIGATION upward ramp is fixed in control_config.py: 120 PWM/s.
-# Cruise target accepts 6480..7390 in steps of 10, plus 7397; reductions bypass the ramp.
+# Cruise target accepts 6480..7840 in steps of 10, plus 7397 and 7842.
+# 7842 is reserved for GPS NAVIGATION. Other modes retain the 7397 forward cap.
 nav_invert_steering: true
 pca_bus: 1
 pca_address: 64

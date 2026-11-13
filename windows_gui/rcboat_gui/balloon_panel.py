@@ -9,6 +9,7 @@ from PySide6.QtNetwork import QNetworkAccessManager,QNetworkProxy,QNetworkReques
 from PySide6.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QFormLayout,QLabel,QLineEdit,
     QComboBox,QPushButton,QSpinBox,QCheckBox,QFileDialog,QSizePolicy,QScrollArea)
 from rcboat_ros.balloon_tracking import DEFAULTS
+from rcboat_ros.control_config import THROTTLE_FORWARD_MAX
 
 logger = logging.getLogger('rcboat.preview')
 TAILSCALE_IPV4 = ipaddress.ip_network('100.64.0.0/10')
@@ -151,7 +152,7 @@ class BalloonPanel(QWidget):
         self.drawer_animation.valueChanged.connect(lambda value:self.camera_drawer.setFixedWidth(int(value)))
         self.drawer_animation.finished.connect(lambda:self.camera_drawer.hide() if not self.settings_toggle.isChecked() else None)
         self.settings_toggle.toggled.connect(self.toggle_camera_settings)
-        self.shared_speed=QLabel('목표 PWM — · 최종 출력 —');layout.addWidget(self.shared_speed)
+        self.shared_speed=QLabel('추적 목표 PWM — · 최종 출력 —');layout.addWidget(self.shared_speed)
         self.editors=(self.camera,self.source,self.sensor,self.resolution,self.long_range)
         self.camera.currentIndexChanged.connect(self.edited);self.source.textEdited.connect(self.edited);self.sensor.valueChanged.connect(self.edited)
         self.resolution.currentIndexChanged.connect(self.edited);self.long_range.toggled.connect(self.edited)
@@ -303,7 +304,10 @@ class BalloonPanel(QWidget):
             if view.get('requested_resolution_met') is False:text+=' 해상도 확인 필요'
             elif t.get('source_span_px') is not None:text+=' · '+fmt(t['source_span_px'],' px')
             self.metrics.setText(self.metrics.text()+text)
-        self.shared_speed.setText('목표 PWM '+str(state.get('auto_cruise_pwm') or v.get('shared_cruise_pwm') or '—')+' · 최종 출력 '+str((state.get('pca') or {}).get('throttle_pwm','—')))
+        cruise = state.get('auto_cruise_pwm') or v.get('shared_cruise_pwm')
+        target_pwm = min(cruise, THROTTLE_FORWARD_MAX) if isinstance(cruise, int) else '—'
+        output_pwm = (state.get('pca') or {}).get('throttle_pwm')
+        self.shared_speed.setText(f'추적 목표 PWM {target_pwm} · 최종 출력 {output_pwm if output_pwm is not None else "—"}')
         if self.mock:self.image.setPixmap(QPixmap());self.image.setText('SIMULATION · 모의 감지 상태\n실제 카메라 영상 아님')
         elif not self.camera_enabled:self.image.setPixmap(QPixmap());self.image.setText('카메라 꺼짐')
 

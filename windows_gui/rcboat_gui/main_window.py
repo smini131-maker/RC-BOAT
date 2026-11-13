@@ -50,7 +50,7 @@ from .widgets import MetricCard, RoutePlot, StatusCard, TelemetryGraph
 from rcboat_ros.control_config import CRUISE_MIN,CRUISE_MAX,CRUISE_DEFAULT,CRUISE_STEP,validate_cruise,validate_rc,THROTTLE_FORWARD_MAX
 
 
-from .ui_shell import STYLE
+from .ui_shell import CRUISE_SLIDER_VALUES, STYLE
 
 
 class MainWindow(QMainWindow):
@@ -1062,10 +1062,14 @@ class MainWindow(QMainWindow):
             self._request_mode(mode)
 
     def _set_auto_speed_editor(self, value: int, *, dirty: bool) -> None:
-        value = max(CRUISE_MIN,min(CRUISE_MAX,CRUISE_MIN + ((value-CRUISE_MIN+5)//CRUISE_STEP)*CRUISE_STEP))
+        slider_index = (len(CRUISE_SLIDER_VALUES) - 1 if value == CRUISE_MAX else
+                        max(0, (value - CRUISE_MIN + CRUISE_STEP // 2) // CRUISE_STEP))
+        slider_index = min(slider_index, len(CRUISE_SLIDER_VALUES) - 1)
+        if value != THROTTLE_FORWARD_MAX:
+            value = CRUISE_SLIDER_VALUES[slider_index]
         self._syncing_auto_speed = True
         try:
-            self.auto_speed_slider.setValue(value)
+            self.auto_speed_slider.setValue(slider_index)
             self.auto_speed_spin.setValue(value)
         finally:
             self._syncing_auto_speed = False
@@ -1096,7 +1100,7 @@ class MainWindow(QMainWindow):
     def _auto_speed_from_slider(self, value: int) -> None:
         if self._syncing_auto_speed:
             return
-        self._set_auto_speed_editor(value, dirty=True)
+        self._set_auto_speed_editor(CRUISE_SLIDER_VALUES[value], dirty=True)
 
     def _auto_speed_from_spin(self, value: int) -> None:
         if self._syncing_auto_speed:

@@ -9,6 +9,7 @@ from unittest.mock import MagicMock,patch
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'catkin_ws/src/rcboat_ros/src'))
 from rcboat_ros.direct_pca import DirectLinuxPCA9685
+from rcboat_ros.control_config import CRUISE_MAX
 
 
 def load(name,path):
@@ -35,6 +36,19 @@ class BootTests(unittest.TestCase):
             off=round(6450*4095/65535)
             self.assertEqual(call.args[2],[0,0,off&255,off>>8])
             pca.close()
+
+    def test_navigation_max_is_490_ticks_at_60_hz(self):
+        bus=MagicMock()
+        bus.read_byte_data.return_value=0
+        module=types.ModuleType('smbus2')
+        module.SMBus=lambda _bus:bus
+        with patch.dict(sys.modules,{'smbus2':module}):
+            pca=DirectLinuxPCA9685(frequency=60)
+            bus.write_byte_data.assert_any_call(0x40,0xfe,101)
+            pca.set_duty_cycle(6,CRUISE_MAX)
+            bus.write_i2c_block_data.assert_called_once_with(0x40,0x06+4*6,[0,0,234,1])
+            pca.close()
+        self.assertAlmostEqual(490 * (101 + 1) / 25, 1999.2)
 
     def test_safe_pwm_does_not_open_i2c_when_actuator_owns_it(self):
         helper=load('safe_pwm',Path('deployment/jetson/set_safe_pwm.py'))

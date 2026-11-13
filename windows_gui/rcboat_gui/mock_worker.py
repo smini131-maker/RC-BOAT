@@ -7,7 +7,7 @@ from copy import deepcopy
 from typing import Any
 
 from PySide6.QtCore import QThread, QTimer, Signal
-from rcboat_ros.control_config import validate_cruise,RC_DEFAULTS,OUTPUT_DEFAULTS,NavigationThrottleRamp,output_in_range
+from rcboat_ros.control_config import validate_cruise,RC_DEFAULTS,OUTPUT_DEFAULTS,NavigationThrottleRamp,output_in_range,THROTTLE_FORWARD_MAX
 from rcboat_ros.gps_settings import validate_hdop
 
 
@@ -298,7 +298,7 @@ class MockWorker(QThread):
                 self.ground_test_actuation_enabled = bool(kwargs.get("actuation_enabled", False))
                 self.mode = "GROUND_TEST"
                 self.operation_state = "GROUND_TEST"
-                self.steering, self.throttle = 6000, self.auto_cruise_pwm if self.ground_test_actuation_enabled else 6450
+                self.steering, self.throttle = 6000, min(self.auto_cruise_pwm, THROTTLE_FORWARD_MAX) if self.ground_test_actuation_enabled else 6450
             elif command == "GROUND_TEST_STOP":
                 self.ground_test_active = False
                 self.ground_test_actuation_enabled = False
@@ -393,7 +393,7 @@ class MockWorker(QThread):
             if self.ground_test_active:
                 self.ground_test_samples += 1
                 if self.ground_test_actuation_enabled and self.mode == "GROUND_TEST":
-                    self.steering, self.throttle = 6000 + int(math.sin(t) * 500), self.auto_cruise_pwm
+                    self.steering, self.throttle = 6000 + int(math.sin(t) * 500), min(self.auto_cruise_pwm, THROTTLE_FORWARD_MAX)
             if self.vision_enabled:
                 now=time.monotonic();cx=320+180*math.sin(t/3);bh=180+70*math.sin(t/6)
                 detections=[] if 14<t%24<20 else [dict(class_id=0,label='red_balloon',target_colour='red',confidence=.91,pink_fraction=.7,pink_confirmed=True,bbox=[cx-85,240-bh/2,cx+85,240+bh/2])]
@@ -426,7 +426,7 @@ class MockWorker(QThread):
             self.telemetry.emit(
                 {
                     "type": "telemetry",
-                    "backend": {"name": "SIM", "version":"2.4.21", "ready": True, "node_count": 10,
+                    "backend": {"name": "SIM", "version":"2.4.22", "ready": True, "node_count": 10,
                                 "master_online": True, "gateway_online": True,
                                 "ssh_connected": False,
                                 "logger_state": "recording" if self.ground_test_active else "idle"},

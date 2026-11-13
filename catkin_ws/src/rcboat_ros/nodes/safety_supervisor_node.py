@@ -11,7 +11,7 @@ from rcboat_ros.msg import ControlCommand
 from rcboat_ros.srv import Execute,ExecuteResponse
 from rcboat_ros.common import unpack,pack,clamp,lerp,fresh,SAFE_STEERING,SAFE_THROTTLE,gps_is_healthy,finite_coordinate
 from rcboat_ros.failsafe import ProgressMonitor
-from rcboat_ros.control_config import load_rc,load_output,rc_valid,neutral,normalized,map_axis,validate_cruise,output_in_range
+from rcboat_ros.control_config import load_rc,load_output,rc_valid,neutral,normalized,map_axis,validate_cruise,output_in_range,navigation_output_in_range
 
 MODES={'AUTO_SAFE','AUTO','MANUAL','REMOTE','NAVIGATION','GROUND_TEST','BALLOON'}
 
@@ -36,6 +36,8 @@ class Supervisor:
         if not math.isfinite(self.navigation_gps_grace_s) or not 0<=self.navigation_gps_grace_s<=30:
             raise ValueError('navigation_gps_grace_s must be between 0 and 30 seconds')
         self.navigation_gps_grace_pwm=validate_cruise(rospy.get_param('/rcboat/navigation_gps_grace_pwm',6650))
+        if self.navigation_gps_grace_pwm>self.output_calibration['throttle_forward_max']:
+            raise ValueError('navigation_gps_grace_pwm exceeds the existing grace ceiling')
         self.gps_grace_mode=None
         self.ground_gps_gap_since=None;self.ground_gps_recovery_stamp=None
         self.ground_gps_grace_remaining_s=0.0
@@ -191,7 +193,7 @@ class Supervisor:
         if not fresh(float(self.nav.get('route_monotonic') or 0),1.0,now):return 'ROUTE_TIMEOUT'
         if self.nav.get('route_complete'):return 'TARGET_ARRIVED'
         if not allow_gps_gap and not self.nav.get('valid'):return 'NAVIGATION_INVALID'
-        if self.nav.get('valid') and not output_in_range(self.nav.get('desired_steering_pwm'),
+        if self.nav.get('valid') and not navigation_output_in_range(self.nav.get('desired_steering_pwm'),
                 self.nav.get('desired_throttle_pwm'),self.output_calibration):return 'NAVIGATION_PWM_OUT_OF_RANGE'
         return ''
 
@@ -343,14 +345,15 @@ class Supervisor:
             if (self.ground_test_actuation_enabled and self.gps.get('healthy') and
                     self.nav.get('valid') and fresh(float(self.nav.get('monotonic',0)),.75,now)):
                 s=self.nav['desired_steering_pwm']
-                t=self.nav['desired_throttle_pwm']
+                t=min(self.nav['desired_throttle_pwm'],self.output_calibration['throttle_forward_max'])
                 return 'GROUND_TEST_NAVIGATION',s,t,False
             return 'GROUND_TEST',s,SAFE_THROTTLE,True
         if self.mode=='BALLOON' and self.armed:
             pair=safe_balloon_output(self.vision,self.vision_desired,now,self.mode_since)
             if pair is not None:return 'BALLOON',pair[0],pair[1],False
         if self.mode=='AUTO':
-            return 'AUTO',s,int(rospy.get_param('/rcboat/cruise_pwm',6650)),False
+            t=min(int(rospy.get_param('/rcboat/cruise_pwm',6650)),self.output_calibration['throttle_forward_max'])
+            return 'AUTO',s,t,False
         if self.mode=='MANUAL' and not self.manual_rearm_pending:
             if rc_valid(self.rc,self.rc_calibration,now):
                 us_s=float(self.rc['steering_us']);us_t=float(self.rc['throttle_us'])
@@ -380,7 +383,7 @@ class Supervisor:
                 if self.mode=='NAVIGATION':
                     msg.navigation_session_monotonic=self.mode_since
                 self.cmd.publish(msg)
-                self.state.publish(pack(software_version="2.4.21",mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
+                self.state.publish(pack(software_version="2.4.22",mode=self.mode,armed=self.armed,estop=self.estop,actuator_locked=lock,
                                         estop_reason=self.estop_reason,estop_time_utc=self.estop_time_utc,estop_origin=self.estop_origin,
                                         mode_since_monotonic=self.mode_since,
                                         ground_test_actuation_enabled=self.ground_test_actuation_enabled,

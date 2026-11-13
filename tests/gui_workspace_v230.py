@@ -84,6 +84,23 @@ assert '#ff6474' in w.value_labels['last_fix_age'].value_label.styleSheet()
 update_dashboard_quality(w,dict(gps={}))
 assert '#7f93ac' in w.value_labels['hdop'].value_label.styleSheet()
 assert all(card.hint_label.text() for key,card in w.value_labels.items() if key!='failsafe')
+w.auto_speed_slider.setValue(w.auto_speed_slider.maximum())
+assert w.auto_speed_spin.value() == 7842
+w.auto_speed_spin.stepDown()
+assert w.auto_speed_spin.value() == 7840
+w.auto_speed_spin.stepUp()
+assert w.auto_speed_spin.value() == 7842
+with patch.object(w,'command',return_value=None) as command:
+    w.apply_auto_speed()
+    command.assert_called_once_with('SET_AUTO_CRUISE_PWM', value=7842)
+w.auto_speed_spin.setValue(7397)
+assert w.auto_speed_spin.value() == 7397
+w._set_auto_speed_editor(7397, dirty=False)
+assert w.auto_speed_spin.value() == 7397
+for mode, color in [('NAVIGATION', '#38d996'), ('GROUND_TEST', '#ff6474'), ('REMOTE', '#ff6474')]:
+    update_dashboard_quality(w,dict(mode=mode,pca={'throttle_pwm':7842}))
+    assert color in w.value_labels['pca_throttle'].value_label.styleSheet()
+w.reset_auto_speed()
 dop = dict(hdop=1.23, dop_status={'hdop': 'valid', 'pdop': 'stale', 'vdop': 'invalid'})
 w.update_telemetry(SSHWorker._normalize(dict(success=True, telemetry={'gps': dop})))
 assert w.value_labels['hdop'].value_label.text() == '1.23'
@@ -293,7 +310,7 @@ with ThreadingHTTPServer(('127.0.0.1',0),PreviewHandler) as server:
         server.shutdown();thread.join(timeout=2)
 
 w.rc_graph.append(None,None);assert w.rc_graph.series[0][-1] is None
-locked=SSHWorker._normalize(dict(success=True,version='2.4.21',gateway_online=True,master_online=True,telemetry={
+locked=SSHWorker._normalize(dict(success=True,version='2.4.22',gateway_online=True,master_online=True,telemetry={
     'safety':dict(mode='MANUAL',estop=True,actuator_locked=True,estop_reason='MAINTENANCE_CHECK',estop_time_utc='2026-11-10T10:00:00Z'),
     'vision':dict(enabled=True,model_ready=True,camera_online=True,target={'acquired':True,'predicted':False})}))
 w.update_telemetry(locked);app.processEvents()
@@ -305,7 +322,7 @@ assert '재시도' in w.cards['backend'].value_label.text()
 assert w._last_estop and '마지막 확인' in w.estop_banner_text.text()
 w.update_telemetry(locked)
 assert w.cards['ros_master'].value_label.text()=='online'
-master_down=SSHWorker._normalize(dict(success=True,version='2.4.21',gateway_online=True,master_online=False))
+master_down=SSHWorker._normalize(dict(success=True,version='2.4.22',gateway_online=True,master_online=False))
 w.update_telemetry(master_down)
 assert w.cards['ros_master'].value_label.text()=='offline'
 w.update_telemetry(locked)

@@ -47,7 +47,7 @@
 | `ground_stop` | 시험 마감; 이미 종료된 시험에 재요청 가능 |
 | `list_ground_tests` | 저장된 시험 목록 조회 |
 | `download_ground_test` | 선택한 시험 ZIP을 base64와 SHA-256으로 반환 |
-| `set_auto_cruise_pwm` | `value`: duty16 정수 6480~7390, 10 간격 또는 끝값 7397. 반환 `value`, `cruise_applied_monotonic`은 설정 적용 확인이며 출력 송신 확인과 다름 |
+| `set_auto_cruise_pwm` | `value`: duty16 정수 6480~7840을 10 간격으로 입력하거나 7397·7842를 지정합니다. 7397 초과 출력은 NAVIGATION에서만 허용됩니다. 반환 `value`, `cruise_applied_monotonic`은 설정 적용 확인이며 출력 송신 확인과 다름 |
 | `set_gps_settings` | `navigation_max_hdop`: 0.5~20 진단 참고값. 로컬 파일에 저장 후 `applied_monotonic`과 실제 값 반환 |
 
 `GROUND_TEST_STOP` 같은 GUI 명령은 worker에서 gateway action으로 변환합니다. GUI와 gateway 사이 전체 매핑은 [ssh_worker.py](../windows_gui/rcboat_gui/ssh_worker.py)에 있습니다. 상태 조회·시험 정지는 SSH 연결 없이 ROS gateway로 처리합니다.

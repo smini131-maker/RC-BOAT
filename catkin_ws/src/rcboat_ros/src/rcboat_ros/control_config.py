@@ -4,7 +4,9 @@ import math
 
 CRUISE_MIN = 6480
 THROTTLE_FORWARD_MAX = 7397
-CRUISE_MAX = THROTTLE_FORWARD_MAX
+# A nominal 2000 us pulse uses 490 PCA ticks at the production 60 Hz setting
+# (25 MHz clock, prescale 101). The duty16 representation of 490 ticks is 7842.
+CRUISE_MAX = 7842
 CRUISE_STEP = 10
 CRUISE_DEFAULT = 6650
 NAV_RAMP_RATE = 120.0  # PWM/s; 6650 -> 6900 in 2.083 s, not vessel speed.
@@ -52,8 +54,8 @@ def load_output(get_param):
             result['throttle_reverse_max'] < result['throttle_stop'] < result['throttle_forward_max']):
         raise ValueError('invalid PCA output calibration ordering')
     if result['throttle_forward_max'] != THROTTLE_FORWARD_MAX:
-        raise ValueError('throttle_forward_max must be 7397 for this release')
-    if not result['throttle_stop'] < CRUISE_MIN <= CRUISE_MAX <= result['throttle_forward_max']:
+        raise ValueError(f'throttle_forward_max must be {THROTTLE_FORWARD_MAX} for this release')
+    if not result['throttle_stop'] < CRUISE_MIN <= result['throttle_forward_max'] <= CRUISE_MAX:
         raise ValueError('cruise range outside PCA output calibration')
     return result
 
@@ -61,8 +63,11 @@ def load_output(get_param):
 def validate_cruise(value):
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError('cruise PWM must be an integer duty16 value')
-    if not CRUISE_MIN <= value <= CRUISE_MAX or (value != CRUISE_MAX and (value-CRUISE_MIN) % CRUISE_STEP):
-        raise ValueError('cruise PWM must be 6480..7390 in steps of 10, or exactly 7397')
+    endpoints = (THROTTLE_FORWARD_MAX, CRUISE_MAX)
+    if not CRUISE_MIN <= value <= CRUISE_MAX or (value not in endpoints and (value-CRUISE_MIN) % CRUISE_STEP):
+        last_step = CRUISE_MIN + (CRUISE_MAX - CRUISE_MIN) // CRUISE_STEP * CRUISE_STEP
+        raise ValueError(f'cruise PWM must be {CRUISE_MIN}..{last_step} in steps of {CRUISE_STEP}, '
+                         f'or exactly {THROTTLE_FORWARD_MAX} or {CRUISE_MAX}')
     return value
 
 
@@ -72,6 +77,14 @@ def output_in_range(steering, throttle, calibration=None):
     return (type(steering) is int and type(throttle) is int and
             limits['steering_low'] <= steering <= limits['steering_high'] and
             limits['throttle_reverse_max'] <= throttle <= min(limits['throttle_forward_max'],THROTTLE_FORWARD_MAX))
+
+
+def navigation_output_in_range(steering, throttle, calibration=None):
+    """Accept reduced or ramped forward PWM on the GPS navigation path."""
+    limits = OUTPUT_DEFAULTS if calibration is None else calibration
+    return (type(steering) is int and type(throttle) is int and
+            limits['steering_low'] <= steering <= limits['steering_high'] and
+            limits['throttle_stop'] <= throttle <= CRUISE_MAX)
 
 
 def rc_valid(data, config, now, stale_s=RC_STALE_S):

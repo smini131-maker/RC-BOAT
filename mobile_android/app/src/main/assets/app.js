@@ -1,5 +1,5 @@
 'use strict';
-const $=id=>document.getElementById(id), VERSION='2.4.21';
+const $=id=>document.getElementById(id), VERSION='2.4.22';
 const state={last:0,online:false,control:false,ssh:'disconnected',version:'',tele:{},ntripProfile:{},targetType:'multipath',routes:[],groups:[],targetDirty:false,pwmDirty:false,pwmPending:null,trackingStart:null,page:'sail',editor:null};
 let sequence=0,toastTimer,routeSignature='',testSignature='',configSynced=false,frameAt=0,map,routeLayer,traceLine,boatMarker,fitBounds,lastCoords='',mapFitted=false,mapFocusSignature='';
 const pending=new Map(),trace=[];
@@ -22,9 +22,20 @@ function command(action,args={}){
 async function run(action,args={},label='반영 완료'){try{const result=await command(action,args);message(label);return result;}catch(e){message(e.message);throw e;}}
 function bind(id,fn){$(id).addEventListener('click',()=>Promise.resolve().then(fn).catch(()=>{}));}
 function readyToMove(){return state.online&&Date.now()-state.last<2500&&state.control&&state.ssh==='connected'&&state.version===VERSION&&!state.tele.safety?.estop;}
-function validatePwm(v){return Number.isInteger(v)&&v>=6480&&v<=7397&&(v===7397||(v-6480)%10===0);}
-function indexPwm(i){return i===92?7397:6480+i*10;}
-function editPwm(v){$('pwmNumber').value=v;$('pwmRange').value=v===7397?92:Math.max(0,Math.min(91,Math.round((v-6480)/10)));state.pwmDirty=true;set('pwmStatus','편집 중 · 적용을 눌러 반영','warn');}
+const PWM_MIN=6480,PWM_MAX=7842,PWM_STEP=10,PWM_LEGACY=7397;
+const PWM_LAST_STEP=Math.floor((PWM_MAX-PWM_MIN)/PWM_STEP),PWM_MAX_INDEX=PWM_LAST_STEP+1;
+function validatePwm(v){return Number.isInteger(v)&&v>=PWM_MIN&&v<=PWM_MAX&&(v===PWM_MAX||v===PWM_LEGACY||(v-PWM_MIN)%PWM_STEP===0);}
+function indexPwm(i){return i===PWM_MAX_INDEX?PWM_MAX:PWM_MIN+i*PWM_STEP;}
+function pwmIndex(v){return v===PWM_MAX?PWM_MAX_INDEX:Math.max(0,Math.min(PWM_LAST_STEP,Math.round((v-PWM_MIN)/PWM_STEP)));}
+function markPwmDirty(){state.pwmDirty=true;set('pwmStatus','편집 중 · 적용을 눌러 반영','warn');}
+function editPwm(v){$('pwmNumber').value=v;$('pwmRange').value=pwmIndex(v);markPwmDirty();}
+function stepPwm(direction){
+ const v=$('pwmNumber').valueAsNumber;
+ if(!Number.isFinite(v)){editPwm(indexPwm(Number($('pwmRange').value)));return;}
+ const offset=(v-PWM_MIN)/PWM_STEP;
+ const i=direction>0?Math.floor(offset)+1:Math.ceil(offset)-1;
+ editPwm(indexPwm(Math.max(0,Math.min(PWM_MAX_INDEX,i))));
+}
 function syncPreview(){if(window.Boat)Boat.preview(state.online&&state.page==='camera'&&$('previewToggle').checked);}
 function page(name){state.page=name;document.querySelectorAll('.page').forEach(e=>e.classList.toggle('active',e.id===name));document.querySelectorAll('nav button').forEach(e=>e.classList.toggle('active',e.dataset.page===name));window.scrollTo(0,0);syncPreview();if(name==='sail'){renderRoutes();updateMap();setTimeout(()=>map&&map.invalidateSize(),50);}if(name==='routes')renderRoutes();if(name==='gps')renderGps();if(name!=='camera')clearFrame();if(name!=='more')remoteRelease();}
 document.querySelectorAll('nav button').forEach(b=>b.addEventListener('click',()=>page(b.dataset.page)));
@@ -42,9 +53,10 @@ function resetEmergency(){
  if(confirm('비상정지 잠금을 해제할까요? 해제 후에는 수동 모드에서 스로틀 중립을 확인합니다. 추적·항로 주행은 별도로 시작해야 합니다.'))return run('reset_estop',{},'해제 요청 수락 · Jetson 상태 확인 중');
 }
 bind('resetEstop',resetEmergency);bind('bannerResetEstop',resetEmergency);
-['pwmNumber','pwmRange'].forEach(id=>$(id).addEventListener('input',()=>editPwm(id==='pwmRange'?indexPwm(Number($(id).value)):Number($(id).value))));
-bind('pwmMinus',()=>{let v=Number($('pwmNumber').value);editPwm(Math.max(6480,v===7397?7390:v-10));});bind('pwmPlus',()=>{let v=Number($('pwmNumber').value);editPwm(Math.min(7397,v===7390?7397:v+10));});
-bind('applyPwm',async()=>{const value=Number($('pwmNumber').value);if(!validatePwm(value)){message('6480~7390은 10 간격, 최대값은 7397입니다');return;}$('applyPwm').disabled=true;try{const r=await run('set_auto_cruise_pwm',{value},'목표 PWM 전송 완료');state.pwmPending={value,stamp:(r.response||{}).cruise_applied_monotonic||0,at:Date.now()};set('pwmStatus','Jetson 적용 상태 재조회 중','warn');}finally{$('applyPwm').disabled=false;}});
+$('pwmNumber').addEventListener('input',()=>{const v=$('pwmNumber').valueAsNumber;if(Number.isFinite(v))$('pwmRange').value=pwmIndex(v);markPwmDirty();});
+$('pwmRange').addEventListener('input',()=>editPwm(indexPwm(Number($('pwmRange').value))));
+bind('pwmMinus',()=>stepPwm(-1));bind('pwmPlus',()=>stepPwm(1));
+bind('applyPwm',async()=>{const value=$('pwmNumber').valueAsNumber;if(!validatePwm(value)){message('6480~7840은 10 간격, 7397과 7842도 입력할 수 있습니다');return;}$('applyPwm').disabled=true;try{const r=await run('set_auto_cruise_pwm',{value},'목표 PWM 전송 완료');state.pwmPending={value,stamp:(r.response||{}).cruise_applied_monotonic||0,at:Date.now()};set('pwmStatus','Jetson 적용 상태 재조회 중','warn');}finally{$('applyPwm').disabled=false;}});
 function targetList(){return state.targetType==='multipath'?state.groups:state.routes;}
 function target(){return targetList().find(r=>r.id===$('missionTarget').value);}
 function updateTargets(force=false){const id=$('missionTarget').value,rows=targetList();$('missionTarget').replaceChildren();if(!rows.length){const o=elem('option','',!state.online?'Jetson 연결 후 항로 불러오기':!state.tele.route?'항로 불러오는 중':state.targetType==='multipath'?'저장된 대루트 없음 · 소루트 선택':'저장된 소루트 없음');o.value='';$('missionTarget').append(o);}for(const r of rows){const o=elem('option','',r.name||r.id);o.value=r.id;$('missionTarget').append(o);}const backendId=state.targetType==='multipath'?state.tele.route?.selected_multipath_id:state.tele.route?.selected_route_id;if(rows.some(r=>r.id===(force?backendId:id)))$('missionTarget').value=force?backendId:id;else if(rows.some(r=>r.id===backendId))$('missionTarget').value=backendId;set('groundTarget',target()?`${state.targetType==='multipath'?'대루트':'소루트'} · ${target().name}`:'선택 항로 없음');}
@@ -208,7 +220,7 @@ updateHealth({...s.mobile,ros:s.mobile?.ros||'online'});const publicNtrip=state.
 set('modePill',modeName(safe.mode),safe.estop?'bad':safe.armed?'good':'');set('speed',fmt(g.speed_mps,2)+' m/s');set('gpsQuick',g.data_validity||'no_data',g.healthy?'good':'bad');set('rtkQuick',g.rtk_state||'no_data',g.rtk_state==='RTK_FIXED'?'good':'warn');set('lockQuick',safe.actuator_locked?'잠금':'출력 허용',safe.actuator_locked?'warn':'good');set('rampPwm',fmt(nav.ramp_throttle_pwm,0));set('finalPwm',fmt(act.actual_throttle_pwm,0));set('failsafe',safetyReason(safe.failsafe_reason||safe.reason)||'안전 전환 사유 없음',safe.failsafe_reason||safe.reason?'warn':'');set('safetyText',safe.estop?'비상정지 잠금':`${safe.actuator_locked?'출력 잠금':'출력 허용'} · ${fmt(act.actual_steering_pwm,0)} / ${fmt(act.actual_throttle_pwm,0)}`,safe.estop?'bad':'');
 set('coords',g.latitude==null?'좌표 no_data':`${fmt(g.latitude,6)}, ${fmt(g.longitude,6)}`);const active=state.routes.find(r=>r.id===state.tele.route?.active_route_id);set('activeRoute',active?.name||'—');set('missionStatus',state.version!==VERSION?`Jetson v${state.version} · v${VERSION} 배포 필요`:!state.control?'조회 전용 · 제어하려면 SSH 연결 필요':`WP ${state.tele.route?.target_waypoint_index??'—'} · 항로 거리 ${fmt(state.tele.route?.distance_to_route_m,2,' m')}`,state.version!==VERSION?'bad':'');
 if(state.pwmPending){const p=state.pwmPending;if(nav.auto_cruise_pwm===p.value&&nav.cruise_applied_monotonic>=p.stamp){set('pwmStatus',`Jetson 적용 확인 · ${p.value} PWM`,'good');state.pwmPending=null;if(Number($('pwmNumber').value)===p.value)state.pwmDirty=false;}else if(Date.now()-p.at>12000){set('pwmStatus','적용 상태 확인 지연 · 다시 조회 후 적용하세요','warn');state.pwmPending=null;}}
-else if(!state.pwmDirty&&Number.isInteger(nav.auto_cruise_pwm)){$('pwmNumber').value=nav.auto_cruise_pwm;$('pwmRange').value=nav.auto_cruise_pwm===7397?92:(nav.auto_cruise_pwm-6480)/10;set('pwmStatus',`Jetson 적용값 · ${nav.auto_cruise_pwm} PWM`,'good');}
+else if(!state.pwmDirty&&validatePwm(nav.auto_cruise_pwm)){$('pwmNumber').value=nav.auto_cruise_pwm;$('pwmRange').value=pwmIndex(nav.auto_cruise_pwm);set('pwmStatus',`Jetson 적용값 · ${nav.auto_cruise_pwm} PWM`,'good');}
 set('recordCount',`${record.point_count||0} 지점`,record.active?'good':'');$('recordStart').disabled=!!record.active;$('recordStop').disabled=!record.active||(record.point_count||0)<2;$('recordCancel').disabled=!record.active;set('recordStatus',record.active?(record.gps_ready?`기록 중 · ${record.point_count||0} 지점 · ${record.point_count<2?'2개 이상 지점 필요':'저장 가능'}`:'기록 중 · 유효 GPS FIX 대기'):'기록 정지 · 저장한 항로는 아래에 표시됩니다');
 set('loggerState',ground.state||ground.status||(ground.active?'recording':'idle'),ground.error?'bad':ground.active?'good':'');set('groundStatus',`${ground.active?'기록 중':'정지'} · ${ground.samples??0} samples${ground.output_paused?' · 출력 일시정지':''}${ground.pause_reason?' · '+ground.pause_reason:''}${ground.error?' · '+ground.error:''}`);$('groundStart').disabled=!!ground.active||!readyToMove();$('groundResume').disabled=!ground.active||!readyToMove();
 renderBalloon(safe,vision,session);

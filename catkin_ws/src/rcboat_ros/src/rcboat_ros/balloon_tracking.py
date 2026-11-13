@@ -176,7 +176,7 @@ class TargetTracker:
 class TrackingController:
     def __init__(self):self.ramp=NavigationThrottleRamp();self.session=None
     def command(self,target,frame_time,now,config,cruise_pwm=6650,session=None):
-        cruise=validate_cruise(cruise_pwm)
+        cruise=min(validate_cruise(cruise_pwm),THROTTLE_FORWARD_MAX)
         out=dict(valid=False,desired_steering_pwm=SAFE_STEERING,desired_throttle_pwm=SAFE_THROTTLE,
             monotonic=frame_time,reason=target.get('phase','NO_TARGET'),phase=target.get('phase','NO_TARGET'),
             target_pwm=cruise,tracking_session=session,predicted=bool(target.get('predicted')))

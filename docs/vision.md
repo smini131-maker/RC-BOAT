@@ -1,6 +1,6 @@
-# v2.4.21 카메라 · 붉은 풍선 추적
+# v2.4.22 카메라 · 붉은 풍선 추적
 
-v2.4.21의 풍선 추적 대상은 붉은색 계열입니다. 1080p 촬영과 YOLOv8n 320×320 입력을 사용합니다. Jetson에 새 ONNX와 manifest를 함께 전송하면 기존 설치 스크립트가 장치용 TensorRT 엔진을 준비합니다.
+v2.4.22의 풍선 추적 대상은 붉은색 계열입니다. 1080p 촬영과 YOLOv8n 320×320 입력을 사용합니다. Jetson에 새 ONNX와 manifest를 함께 전송하면 기존 설치 스크립트가 장치용 TensorRT 엔진을 준비합니다.
 
 ## v2.4.11 판단 FPS 실측
 
@@ -73,7 +73,7 @@ v2.4.1의 가중치와 감지 알고리즘은 v2.4.0과 같습니다. 모바일 
 2. **Windows PowerShell**에서 다음 순서로 전송합니다. IP는 접속할 때 입력합니다.
 
 ```powershell
-Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_Project\RCBoatControl_v2.4.21"
+Set-Location -LiteralPath "C:\Users\smini\OneDrive\바탕 화면\RCBoatControl_Complete_2026-09-25_UPDATED\RCBoatControl_Project\RCBoatControl_v2.4.22"
 $jetsonIp = Read-Host "Jetson 현재 IP"
 if (-not (Test-NetConnection $jetsonIp -Port 22 -InformationLevel Quiet)) { throw "SSH 연결 불가" }
 $env:RCBOAT_NO_PAUSE = "1"
@@ -95,7 +95,7 @@ bash deployment/jetson/install_vision_dependencies.sh
 bash deployment/jetson/install_jetson_ros.sh
 ```
 
-완료 기준은 `RUNNING GATEWAY VERIFIED: v2.4.21`입니다. 설치 스크립트가 ROS를 시작하므로 추가로 `roslaunch`를 중복 실행하지 않습니다. 기존 항로·로그·NTRIP 자격정보는 유지합니다. 옛 카메라 설정에는 1080p/원거리 모드를 한 번 적용하고 원본 `~/.rcboat/vision.json.before_v2.4.0_*`을 보존합니다. 이후 사용자가 설정한 해상도나 원거리 끄기는 덮어쓰지 않습니다.
+완료 기준은 `RUNNING GATEWAY VERIFIED: v2.4.22`입니다. 설치 스크립트가 ROS를 시작하므로 추가로 `roslaunch`를 중복 실행하지 않습니다. 기존 항로·로그·NTRIP 자격정보는 유지합니다. 옛 카메라 설정에는 1080p/원거리 모드를 한 번 적용하고 원본 `~/.rcboat/vision.json.before_v2.4.0_*`을 보존합니다. 이후 사용자가 설정한 해상도나 원거리 끄기는 덮어쓰지 않습니다.
 
 4. GUI를 열기 전, 실제 카메라/처리 시간을 검사합니다. 아래는 기존 IMX219 CSI/sensor 0 예시이며 실제 연결 방식이 다르면 `--camera-type usb`를 사용합니다. GUI의 카메라는 꺼둡니다.
 
@@ -111,7 +111,7 @@ bash deployment/jetson/install_jetson_ros.sh
 ~/.rcboat/vision-venv/bin/python3 deployment/jetson/build_vision_engine.py models/balloon_yolov8n.onnx
 ```
 
-6. PC EXE 또는 모바일 APK v2.4.21 한 개를 제어 연결합니다. 풍선 화면 → 카메라 설정 → CSI/센서 0(장치에 맞게 변경) → 1920×1080 → 작은 풍선 원거리 감지 체크 → 저장 → 카메라 켜기입니다. 실제 감지 상자와 작은 대상 확대 창이 표시됩니다. 전체 영상 통신량은 기존 640×360 이하 JPEG를 유지합니다.
+6. PC EXE 또는 모바일 APK v2.4.22 한 개를 제어 연결합니다. 풍선 화면 → 카메라 설정 → CSI/센서 0(장치에 맞게 변경) → 1920×1080 → 작은 풍선 원거리 감지 체크 → 저장 → 카메라 켜기입니다. 실제 감지 상자와 작은 대상 확대 창이 표시됩니다. 전체 영상 통신량은 기존 640×360 이하 JPEG를 유지합니다.
 
 ## 거리별 감지 확인 후 추적 시작
 
@@ -156,7 +156,7 @@ YOLOv8n 단일 `balloon` 클래스로 풍선 모양을 검출한 뒤 HSV 붉은�
 
 풍선을 향해 공통 순항 목표 PWM으로 접근합니다. 근접 전에는 최신 영상이 들어와도 15초간 유효한 대상을 확인하지 못하면 기존 안전 수동 전환을 적용합니다. 근접 표적 대기 중에는 이 타이머를 적용하지 않습니다. 카메라 정지와 오래된 프레임에는 별도의 안전 조건을 적용합니다.
 
-속도는 상단 **GPS 항법 순항 PWM**과 공통입니다. 기본 6650, 범위 6480~7390(10 간격) 및 끝값 7397입니다. 출발 6650 이하에서 120 PWM/s로 상승하며 목표 감속은 즉시 반영합니다. 큰 방향 오차와 가려진 대상의 추적 유지 구간에서는 감속합니다. PWM은 실제 m/s와 비례하지 않습니다. 수동·원격·기존 P 항법·Multi-Path 계산은 그대로 유지합니다.
+풍선 추적은 상단 **GPS 항법 순항 PWM** 값을 사용하며, 추적 출력은 최대 7397 PWM입니다. 7842 PWM은 항로 주행에서만 사용합니다. 기본값은 6650입니다. 출발 6650 이하에서 120 PWM/s로 상승하며 목표 감속은 즉시 반영합니다. 큰 방향 오차와 가려진 대상의 추적 유지 구간에서는 감속합니다. PWM은 실제 m/s와 비례하지 않습니다. 수동·원격·기존 P 항법·Multi-Path 계산은 그대로 유지합니다.
 
 SSH 단순 응답 지연은 기존 확인 유예를 사용합니다. GPS 데이터 stale에는 기본 5초 유예를 적용하고 최신 영상 추적을 계속합니다. 카메라가 지연될 때는 마지막 추적 명령이 유효한 동안(기본 1.5초) 출력을 유지합니다. 이후에는 중립 출력으로 같은 추적을 대기합니다. 마지막 유효 프레임부터 5초 이내에 영상이 돌아오면 같은 대상으로 재개합니다. 카메라를 직접 끄거나 5초가 지나면 수동으로 전환합니다. 확정된 연결 단절, 무효 FIX·GPS I/O 오류, RC·출력 오류, E-STOP은 기존 안전 제어를 따릅니다.
 
@@ -174,7 +174,7 @@ USB V4L2와 Jetson Argus CSI를 지원하며 자동은 USB → CSI 순서입니�
 
 ```powershell
 # 새 폴더의 빌드된 앱
-.\dist\RCBoatControl_ROS_v2.4.21.exe
+.\dist\RCBoatControl_ROS_v2.4.22.exe
 # 다시 빌드할 때
 .\BUILD_ROS_GUI.cmd
 ```

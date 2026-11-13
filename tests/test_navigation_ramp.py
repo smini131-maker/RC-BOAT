@@ -8,18 +8,18 @@ from unittest.mock import patch
 
 import test_failsafe_v218 as base
 import test_ground_continuity_v2111 as harness
-from rcboat_ros.control_config import NavigationThrottleRamp,NAV_RAMP_RATE
+from rcboat_ros.control_config import CRUISE_MAX,NavigationThrottleRamp,NAV_RAMP_RATE
 
 
 class RampMathTests(unittest.TestCase):
-    def test_120_pwm_per_second_and_7397_ceiling(self):
+    def test_120_pwm_per_second_and_7842_ceiling(self):
         self.assertEqual(NAV_RAMP_RATE,120.0)
         ramp=NavigationThrottleRamp()
-        self.assertEqual(ramp.update(7397,100),6650)
-        self.assertEqual(ramp.update(7397,101),6770)
-        self.assertLess(ramp.update(7397,104.25),7397)
-        self.assertEqual(ramp.update(7397,100+(7397-6650)/NAV_RAMP_RATE),7397)
-        self.assertEqual(ramp.update(7397,110),7397)
+        self.assertEqual(ramp.update(CRUISE_MAX,100),6650)
+        self.assertEqual(ramp.update(CRUISE_MAX,101),6770)
+        self.assertLess(ramp.update(CRUISE_MAX,104.25),CRUISE_MAX)
+        self.assertEqual(ramp.update(CRUISE_MAX,100+(CRUISE_MAX-6650)/NAV_RAMP_RATE),CRUISE_MAX)
+        self.assertEqual(ramp.update(CRUISE_MAX,110),CRUISE_MAX)
 
     def test_6900_at_2_083_seconds_and_4hz_ticks(self):
         ramp=NavigationThrottleRamp()
@@ -34,13 +34,13 @@ class RampMathTests(unittest.TestCase):
         self.assertEqual(ramp.update(6900,100+250/120),6900)
 
     def test_targets_low_default_intermediate_and_maximum(self):
-        for target in (6480,6650,6750,7397):
+        for target in (6480,6650,6750,7397,7840,CRUISE_MAX):
             ramp=NavigationThrottleRamp()
             self.assertEqual(ramp.update(target,100),min(6650,target))
             duration=max(0,(target-6650)/NAV_RAMP_RATE)
             self.assertEqual(ramp.update(target,100+duration),target)
             self.assertEqual(ramp.update(target,110),target)
-        with self.assertRaises(ValueError):ramp.update(7398,111)
+        with self.assertRaises(ValueError):ramp.update(CRUISE_MAX+1,111)
 
     def test_raise_from_current_lower_immediately_and_no_turn_rebound(self):
         ramp=NavigationThrottleRamp();ramp.update(7000,100)

@@ -12,7 +12,7 @@ from unittest.mock import patch
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'catkin_ws/src/rcboat_ros/src'))
 from rcboat_ros.control_config import (RC_DEFAULTS,OUTPUT_DEFAULTS,validate_rc,validate_cruise,
-    load_output,map_axis,normalized,rc_valid,neutral)
+    load_output,map_axis,normalized,rc_valid,neutral,CRUISE_MIN,CRUISE_MAX,CRUISE_STEP,THROTTLE_FORWARD_MAX)
 import test_failsafe_v218 as base
 import test_ground_continuity_v2111 as harness
 
@@ -127,7 +127,7 @@ class ManualAndGestureTests(unittest.TestCase):
         self.assertFalse(self.s.manual_rearm_pending)
 
     def test_bad_cruise_parameter_fails_safe(self):
-        with patch.object(self.module.rospy,'get_param',side_effect=lambda k,d=None: 7800 if k.endswith('/cruise_pwm') else d):
+        with patch.object(self.module.rospy,'get_param',side_effect=lambda k,d=None: CRUISE_MAX+1 if k.endswith('/cruise_pwm') else d):
             self.assert_manual_stop('CRUISE_PWM_INVALID')
 
     def test_mapping_does_not_use_nav_inversion(self):
@@ -144,12 +144,24 @@ class ManualAndGestureTests(unittest.TestCase):
         for bad in (7398,7800,7397.1,True):
             self.assertFalse(self.request('set_remote_pwm',steering_pwm=6000,throttle_pwm=bad).success)
             self.assertEqual(self.s.remote['throttle_pwm'],7397)
-        for mode in ('NAVIGATION','GROUND_TEST'):
+        for mode,limit in (('NAVIGATION',CRUISE_MAX),('GROUND_TEST',THROTTLE_FORWARD_MAX)):
             self.s.mode=mode;self.s.armed=True;self.s.ground_test_actuation_enabled=True
-            self.refresh();self.s.nav['desired_throttle_pwm']=7397
-            self.assertEqual(self.s._command()[2:],(7397,False))
-            self.s.nav['desired_throttle_pwm']=7398
+            self.refresh();self.s.nav['desired_throttle_pwm']=CRUISE_MAX
+            self.assertEqual(self.s._command()[2:],(limit,False))
+            self.s.nav['desired_throttle_pwm']=CRUISE_MAX+1
             self.assert_manual_stop('NAVIGATION_PWM_OUT_OF_RANGE')
+
+    def test_straight_auto_keeps_previous_limit(self):
+        self.s.mode='AUTO'
+        self.refresh()
+        with patch.object(self.module.rospy,'get_param',side_effect=lambda k,d=None:CRUISE_MAX if k.endswith('/cruise_pwm') else d):
+            self.assertEqual(self.s._command(),('AUTO',6000,THROTTLE_FORWARD_MAX,False))
+
+    def test_navigation_gps_grace_cannot_use_increased_ceiling(self):
+        with patch.object(self.module.rospy,'get_param',
+                          side_effect=lambda key,default=None:CRUISE_MAX if key.endswith('/navigation_gps_grace_pwm') else default):
+            with self.assertRaises(ValueError):
+                self.module.Supervisor()
 
 
 class CruiseServiceTests(unittest.TestCase):
@@ -163,10 +175,10 @@ class CruiseServiceTests(unittest.TestCase):
         return self.nav.execute(types.SimpleNamespace(action='set_auto_cruise_pwm',arguments_json=json.dumps({'value':value})))
 
     def test_all_grid_values_and_rejections_without_partial_mutation(self):
-        for value in list(range(6480,7391,10))+[7397]:
+        for value in list(range(CRUISE_MIN,CRUISE_MAX+1,CRUISE_STEP))+[THROTTLE_FORWARD_MAX,CRUISE_MAX]:
             answer=self.request(value);self.assertTrue(answer.success)
             self.assertEqual(json.loads(answer.response_json)['value'],value)
-        for value in (True,None,'6650',6650.0,6470,7398,7800,6651,float('nan')):
+        for value in (True,None,'6650',6650.0,6470,7398,CRUISE_MAX+1,6651,float('nan')):
             before=dict(self.nav.config)
             with patch.object(self.module.rospy,'set_param') as mutate:
                 self.assertFalse(self.request(value).success,value)
@@ -184,7 +196,7 @@ class CruiseServiceTests(unittest.TestCase):
         bridge_module=harness.load_node('gui_bridge_node',Path(self.tmp.name))
         bridge=bridge_module.Bridge.__new__(bridge_module.Bridge);bridge.token=''
         with patch.object(bridge,'service') as call:
-            for value in (7398,7800,6470,6651,True,'6650'):
+            for value in (7398,CRUISE_MAX+1,6470,6651,True,'6650'):
                 result=bridge.dispatch({'action':'set_auto_cruise_pwm','arguments':{'value':value}})
                 self.assertFalse(result['success'])
             call.assert_not_called()
@@ -212,20 +224,31 @@ class CruiseServiceTests(unittest.TestCase):
             self.assertEqual(actuator.resolve(100.76)[:2],(6000,6450))
             actuator.last_message.throttle_pwm=7397
             self.assertEqual(actuator.resolve(100)[:2],(6100,7397))
-            for bad in (7398,7800):
-                actuator.last_message.throttle_pwm=bad
+            actuator.last_message.throttle_pwm=CRUISE_MAX
+            if mode=='NAVIGATION':
+                self.assertEqual(actuator.resolve(100),(6100,CRUISE_MAX,'NAVIGATION'))
+                actuator.last_message.mode='BALLOON'
                 self.assertEqual(actuator.resolve(100)[:2],(6000,6450))
+                actuator.last_message.mode='NAVIGATION'
+            else:
+                self.assertEqual(actuator.resolve(100)[:2],(6000,6450))
+            actuator.last_message.throttle_pwm=CRUISE_MAX+1
+            self.assertEqual(actuator.resolve(100)[:2],(6000,6450))
         actuator.last_message.mode='AUTO';actuator.last_message.source='AUTO'
         actuator.last_message.throttle_pwm=7398  # exceeds both cruise and physical bounds
         self.assertEqual(actuator.resolve(100)[:2],(6000,6450))
         actuator.last_message.throttle_pwm=6999  # in physical range, invalid cruise grid
         self.assertEqual(actuator.resolve(100),(6000,6450,'CRUISE_REJECTED'))
         actuator.last_message.throttle_pwm=6660
-        with patch.object(ros,'get_param',side_effect=lambda k,d=None:7800 if k.endswith('/cruise_pwm') else d):
+        with patch.object(ros,'get_param',side_effect=lambda k,d=None:CRUISE_MAX+1 if k.endswith('/cruise_pwm') else d):
             self.assertEqual(actuator.resolve(100),(6000,6450,'CRUISE_REJECTED'))
         actuator.last_message.mode='NAVIGATION';actuator.last_message.source='NAVIGATION_GPS_GRACE'
         actuator.last_message.steering_pwm=6000;actuator.last_message.throttle_pwm=6650
         self.assertEqual(actuator.resolve(100),(6000,6650,'NAVIGATION_GPS_GRACE'))
+        actuator.last_message.throttle_pwm=CRUISE_MAX
+        with patch.object(ros,'get_param',side_effect=lambda k,d=None:CRUISE_MAX if k.endswith('/navigation_gps_grace_pwm') else d):
+            self.assertEqual(actuator.resolve(100)[:2],(6000,6450))
+        actuator.last_message.throttle_pwm=6650
         actuator.last_message.actuator_locked=True
         self.assertEqual(actuator.resolve(100)[:2],(6000,6450))
         actuator.last_message.actuator_locked=False;actuator.last_message.steering_pwm=6100
